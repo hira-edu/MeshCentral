@@ -86,8 +86,7 @@
         "installText": "Installing the High Support remote management agent.",
         "fileName": "highsupport-agent",
         "foregroundColor": "#ffffff",
-        "backgroundColor": "#1b4058",
-        "image": "gear-icon.png"
+        "backgroundColor": "#1b4058"
       },
       "agentFileInfo": {
         "fileDescription": "High Support Remote Agent",
