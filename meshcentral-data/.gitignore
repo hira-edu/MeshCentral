@@ -1,5 +1,6 @@
 # runtime config & secrets
 config.json
+!plugins/phase1config/config.json
 config.json.*
 *.key
 *.crt

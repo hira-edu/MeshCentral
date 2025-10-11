@@ -1,0 +1,17 @@
+{
+  "name": "Phase 1 Config UI",
+  "shortName": "phase1config",
+  "version": "0.2.0",
+  "author": "High Support Automation",
+  "description": "Interactive controls for core MeshCentral branding, ports, agent, and AMT settings.",
+  "hasAdminPanel": true,
+  "homepage": "https://high.support/",
+  "changelogUrl": "https://high.support/phase1config/changelog",
+  "configUrl": "https://high.support/phase1config/config.json",
+  "downloadUrl": "https://high.support/phase1config/phase1config.zip",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hiraedu/phase1config"
+  },
+  "meshCentralCompat": ">=1.1.0"
+}
