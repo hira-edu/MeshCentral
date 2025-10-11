@@ -67,8 +67,8 @@
       "headerRoot": "High Support Portal",
       "headerNode": "High Support Portal",
       "siteStyle": 2,
-      "titlePicture": "images/login-logobig.png",
-      "pwaLogo": "images/login-small.png",
+      "titlePicture": "",
+      "pwaLogo": "",
       "desktopMultiplex": true,
       "publicPushNotifications": true,
       "manageAllDeviceGroups": [
