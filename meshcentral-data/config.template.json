@@ -35,7 +35,7 @@
     "publicPushNotifications": true,
     "amtProvisioningServer": {
       "port": 9971,
-      "deviceGroup": "mesh/admin/WERE5eVr20SIrHnR9XiCd4Ul9v38xqLSzdxYUrDfuCF@RzuJkz6jCPWrBS1EtZPh",
+      "deviceGroup": "mesh//WERE5eVr20SIrHnR9XiCd4Ul9v38xqLSzdxYUrDfuCF@RzuJkz6jCPWrBS1EtZPh",
       "newMebxPassword": "wTTDN+lzW2(8X0Cb",
       "trustedFqdn": "high.support",
       "ip": "72.60.233.29"
@@ -55,7 +55,7 @@
     "allowHighQualityDesktop": true
   },
   "domains": {
-    "admin": {
+    "": {
       "title": "High Support Remote",
       "title2": "Support Services",
       "minify": true,
