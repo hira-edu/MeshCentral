@@ -1332,7 +1332,6 @@
             <div class="footer1">{{{footer}}}</div>
             <div class="footer2">
                 <a id="verifyEmailId2" style="display:none" href=# onclick="account_showVerifyEmail()">Verify Email</a>
-                &nbsp;<a id="termsLinkFooter" href=terms>Terms &amp; Privacy</a>
             </div>
         </div>
         <div id=dialog class="noselect" style="display:none">
@@ -1655,7 +1654,7 @@
             delete urlargs.gotougrp;
 
             // Fix links if a loginKey is used
-            if (urlargs.key) { Q('termsLinkFooter').href += '?key=' + urlargs.key; }
+            if (urlargs.key && Q('termsLinkFooter')) { Q('termsLinkFooter').href += '?key=' + urlargs.key; }
 
             // Check if we are in debug mode
             args = parseUriArgs();
