@@ -72,10 +72,10 @@
       "desktopMultiplex": true,
       "publicPushNotifications": true,
       "manageAllDeviceGroups": [
-        "user/admin/admin"
+        "admin"
       ],
       "manageCrossDomain": [
-        "user/admin/admin"
+        "admin"
       ],
       "agentSelfGuestSharing": true,
       "agentCustomization": {
