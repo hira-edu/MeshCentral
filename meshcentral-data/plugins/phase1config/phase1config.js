@@ -29,15 +29,27 @@ module.exports.phase1config = function (parent) {
     return JSON.parse(raw);
   }
 
+  function resolveDomain(domains, preferredKey) {
+    domains = domains || {};
+    if (preferredKey && domains[preferredKey]) { return { key: preferredKey, domain: domains[preferredKey] }; }
+    if (domains['admin']) { return { key: 'admin', domain: domains['admin'] }; }
+    if (Object.prototype.hasOwnProperty.call(domains, '')) { return { key: '', domain: domains[''] }; }
+    const keys = Object.keys(domains);
+    if (keys.length > 0) { return { key: keys[0], domain: domains[keys[0]] }; }
+    domains['admin'] = {};
+    return { key: 'admin', domain: domains['admin'] };
+  }
+
   function buildSnapshot(cfg) {
     const settings = cfg.settings || {};
     const domains = cfg.domains || {};
-    const adminDomain = domains['admin'] || {};
+    const { key: domainKey, domain: adminDomain } = resolveDomain(domains);
     const agentCustomization = adminDomain.agentCustomization || {};
     const agentFileInfo = adminDomain.agentFileInfo || {};
     const agentTag = adminDomain.agentTag || {};
 
     return {
+      domainKey,
       settings: {
         title: settings.title || '',
         title2: settings.title2 || '',
@@ -217,9 +229,9 @@ module.exports.phase1config = function (parent) {
 
     if (!cfg.settings) { cfg.settings = {}; }
     if (!cfg.domains) { cfg.domains = {}; }
-    if (!cfg.domains['admin']) { cfg.domains['admin'] = {}; }
-
-    const domainAdmin = cfg.domains['admin'];
+    const domainResolution = resolveDomain(cfg.domains, (payload && payload.domainKey) || null);
+    const domainKey = domainResolution.key;
+    const domainAdmin = cfg.domains[domainKey] || (cfg.domains[domainKey] = {});
 
     const uploadedFiles = await persistUploads(Object.assign({}, (payload.branding && payload.branding.files) || {}, (payload.agent && payload.agent.files) || {}));
 

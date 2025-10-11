@@ -191,6 +191,7 @@
   function hydrate(payload) {
     if (!payload || !payload.snapshot) { return; }
     const snap = payload.snapshot;
+    state.domainKey = snap.domainKey || state.domainKey || '';
     const dom = snap.domain || {};
     const custom = dom.agentCustomization || {};
     const info = dom.agentFileInfo || {};
@@ -343,6 +344,7 @@
     if (state.files.agentIcon) { agentFiles.agentIcon = state.files.agentIcon; }
 
     return {
+      domainKey: state.domainKey,
       branding: {
         title: q('phase1-brandingTitle').value,
         title2: q('phase1-brandingSubtitle').value,
