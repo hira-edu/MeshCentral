@@ -1,0 +1,132 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Ylianst/MeshCentral/master/meshcentral-config-schema.json",
+  "__comment1__": "This is a simple configuration file, all values and sections that start with underscore (_) are ignored. Edit a section and remove the _ in front of the name. Refer to the user's guide for details.",
+  "__comment2__": "See node_modules/meshcentral/sample-config-advanced.json for a more advanced example.",
+  "settings": {
+    "WANonly": true,
+    "port": 443,
+    "aliasPort": 443,
+    "redirPort": 80,
+    "redirAliasPort": 80,
+    "sessionKey": "gEQr0togfM4uecT3IGopSJXbnmqWvZhee0gSKmKF7R4",
+    "cert": "high.support",
+    "title": "High Support",
+    "title2": "Remote Portal",
+    "welcome": "High Support Remote Access",
+    "consentMessages": {
+      "title": "High Support",
+      "desktop": "{0} requesting remote desktop access. Grant access?",
+      "terminal": "{0} requesting remote terminal access. Grant access?",
+      "files": "{0} requesting remote files access. Grant access?"
+    },
+    "notificationMessages": {
+      "title": "High Support"
+    },
+    "agentPort": 4445,
+    "agentAliasPort": 4445,
+    "agentPortBind": "0.0.0.0",
+    "agentAliasDNS": "agents.high.support",
+    "agentPortTls": true,
+    "agentSignLock": true,
+    "relayPort": 4446,
+    "relayAliasPort": 4446,
+    "amtScanner": true,
+    "desktopMultiplex": true,
+    "publicPushNotifications": true,
+    "amtProvisioningServer": {
+      "port": 9971,
+      "deviceGroup": "mesh/admin/WERE5eVr20SIrHnR9XiCd4Ul9v38xqLSzdxYUrDfuCF@RzuJkz6jCPWrBS1EtZPh",
+      "newMebxPassword": "wTTDN+lzW2(8X0Cb",
+      "trustedFqdn": "high.support",
+      "ip": "72.60.233.29"
+    },
+    "relayPortBind": "0.0.0.0",
+    "mongoDb": "mongodb://127.0.0.1:27017/meshcentral",
+    "plugins": {
+      "enabled": true,
+      "list": [
+        "phase1config"
+      ]
+    },
+    "agentsInRam": true,
+    "lockAgentDownload": true,
+    "rootCertCommonName": "MeshCentralRoot-Auto",
+    "agentUpdateSystem": 2,
+    "allowHighQualityDesktop": true
+  },
+  "domains": {
+    "admin": {
+      "title": "High Support Remote",
+      "title2": "Support Services",
+      "minify": true,
+      "newAccounts": true,
+      "userNameIsEmail": false,
+      "welcomeText": "<b>Welcome to High Support</b><br />Secure access for staff and partners.",
+      "loginDisclaimer": "Authorized use only. Activity is monitored. Need help? Email admin@high.support.",
+      "footer": "<a href=\"https://high.support\" target=\"_blank\">Support</a> | <a href=\"mailto:admin@high.support\">admin@high.support</a>",
+      "headerRoot": "High Support Portal",
+      "headerNode": "High Support Portal",
+      "siteStyle": 2,
+      "titlePicture": "images/login-logobig.png",
+      "pwaLogo": "images/login-small.png",
+      "desktopMultiplex": true,
+      "publicPushNotifications": true,
+      "manageAllDeviceGroups": [
+        "user/admin/admin"
+      ],
+      "manageCrossDomain": [
+        "user/admin/admin"
+      ],
+      "agentSelfGuestSharing": true,
+      "agentCustomization": {
+        "displayName": "High Support Agent",
+        "description": "High Support remote management agent",
+        "companyName": "HighSupport",
+        "serviceName": "highsupport",
+        "installText": "Installing the High Support remote management agent.",
+        "fileName": "highsupport-agent",
+        "foregroundColor": "#ffffff",
+        "backgroundColor": "#1b4058",
+        "image": "gear-icon.png"
+      },
+      "agentFileInfo": {
+        "fileDescription": "High Support Remote Agent",
+        "fileVersion": "1.0.0.0",
+        "internalName": "highsupport-agent",
+        "legalCopyright": "© 2025 High Support",
+        "originalFilename": "HighSupportAgent.exe",
+        "productName": "High Support Remote Agent",
+        "productVersion": "v1.0.0",
+        "icon": "service.ico"
+      },
+      "agentConfig": [
+        "webSocketMaskOverride=1",
+        "coreDumpEnabled=1"
+      ],
+      "agentInviteCodes": true,
+      "agentNoProxy": false,
+      "agentTag": {
+        "ServerName": 1,
+        "ServerDesc": 2,
+        "ServerTags": 3
+      },
+      "agentAllowedIP": [
+        "72.60.233.0/24",
+        "10.8.0.0/24"
+      ],
+      "agentBlockedIP": [
+        "0.0.0.0/8",
+        "127.0.0.0/8",
+        "::1/128"
+      ],
+      "agentKey": "HighSupportEdgeEnrollment2025!",
+      "lockAgentDownload": true
+    }
+  },
+  "letsencrypt": {
+    "email": "hirab13024@gmail.com",
+    "names": "high.support,agents.high.support,relay.high.support",
+    "production": true,
+    "skipChallengeVerification": false
+  }
+}

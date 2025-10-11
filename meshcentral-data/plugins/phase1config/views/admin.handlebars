@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Phase 1 Configuration</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/styles/style.css" />
+  <style>
+    body { font-family: Arial, sans-serif; background: #081823; color: #f5f5f5; margin: 0; padding: 0; }
+    .wrapper { max-width: 1150px; margin: 32px auto 60px; background: rgba(11, 33, 52, 0.9); padding: 28px 36px; border-radius: 14px; box-shadow: 0 24px 48px rgba(0,0,0,0.5); }
+    h1 { font-size: 30px; margin-bottom: 12px; }
+    h2 { font-size: 21px; margin-top: 34px; margin-bottom: 14px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 6px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+    .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+    label { font-weight: 600; font-size: 14px; }
+    input[type="text"], input[type="number"], textarea, select { padding: 9px 11px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.18); background: rgba(5,17,26,0.92); color: #f5f5f5; font-size: 14px; }
+    textarea { min-height: 90px; resize: vertical; }
+    input[type="file"] { color: #f5f5f5; }
+    .checkbox-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .checkbox-row input { width: 18px; height: 18px; }
+    .actions { display: flex; gap: 12px; margin-top: 28px; flex-wrap: wrap; }
+    button { cursor: pointer; border: none; border-radius: 6px; padding: 11px 18px; font-size: 14px; font-weight: 600; transition: transform .15s ease, box-shadow .15s ease; }
+    button.primary { background: #1ab394; color: #04131f; box-shadow: 0 14px 30px rgba(26,179,148,0.28); }
+    button.secondary { background: rgba(255,255,255,0.14); color: #f5f5f5; }
+    button:hover { transform: translateY(-1px); box-shadow: 0 18px 36px rgba(0,0,0,0.35); }
+    .status { margin-top: 20px; padding: 12px; border-radius: 6px; background: rgba(0,0,0,0.38); font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace; font-size: 13px; max-height: 240px; overflow-y: auto; white-space: pre-wrap; border: 1px solid rgba(255,255,255,0.1); }
+    .file-note, .inline-info { font-size: 12px; opacity: 0.7; }
+    .section-note { font-size: 13px; opacity: 0.75; margin-bottom: 12px; }
+    .dual { display: flex; gap: 12px; flex-wrap: wrap; }
+    .dual .field { flex: 1 1 240px; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <h1>Phase 1 Configuration</h1>
+    <p class="inline-info">Adjust core MeshCentral settings with validation, automatic backups, and safe restarts. Uploads for <strong>branding</strong> and <strong>agent assets</strong> are stored locally.</p>
+
+    <h2>Branding</h2>
+    <div class="grid">
+      <div class="field">
+        <label for="phase1-brandingTitle">Site Title (settings.title)</label>
+        <input id="phase1-brandingTitle" type="text" />
+      </div>
+      <div class="field">
+        <label for="phase1-brandingSubtitle">Site Subtitle (settings.title2)</label>
+        <input id="phase1-brandingSubtitle" type="text" />
+      </div>
+      <div class="field">
+        <label for="phase1-brandingWelcome">Welcome Message</label>
+        <textarea id="phase1-brandingWelcome"></textarea>
+      </div>
+      <div class="field">
+        <label for="phase1-domainTitle">Portal Title (domains.admin.title)</label>
+        <input id="phase1-domainTitle" type="text" />
+      </div>
+      <div class="field">
+        <label for="phase1-domainSubtitle">Portal Subtitle (domains.admin.title2)</label>
+        <input id="phase1-domainSubtitle" type="text" />
+      </div>
+      <div class="field">
+        <label for="phase1-siteStyle">Site Style Variant</label>
+        <select id="phase1-siteStyle">
+          <option value="0">Classic</option>
+          <option value="1">Modern (compact)</option>
+          <option value="2">Modern (wide)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="phase1-titlePicturePath">Title Picture</label>
+        <input id="phase1-titlePicturePath" type="text" placeholder="images/login-logobig.png" />
+        <input id="phase1-titlePictureFile" type="file" accept="image/png,image/jpeg,image/webp" />
+        <span class="file-note">450×66 PNG recommended. Upload overrides path.</span>
+      </div>
+      <div class="field">
+        <label for="phase1-pwaLogoPath">PWA Logo</label>
+        <input id="phase1-pwaLogoPath" type="text" placeholder="images/login-small.png" />
+        <input id="phase1-pwaLogoFile" type="file" accept="image/png,image/svg+xml" />
+        <span class="file-note">Square 512×512 PNG suggested for PWA icon.</span>
+      </div>
+    </div>
+
+    <h2>Ports &amp; Network</h2>
+    <div class="grid">
+      <div class="field"><label for="phase1-portMain">HTTPS Port</label><input id="phase1-portMain" type="number" min="1" max="65535" /></div>
+      <div class="field"><label for="phase1-portAlias">HTTPS Alias Port</label><input id="phase1-portAlias" type="number" min="1" max="65535" /></div>
+      <div class="field"><label for="phase1-portRedir">HTTP Redirect Port</label><input id="phase1-portRedir" type="number" min="1" max="65535" /></div>
+      <div class="field"><label for="phase1-portRedirAlias">HTTP Redirect Alias Port</label><input id="phase1-portRedirAlias" type="number" min="1" max="65535" /></div>
+      <div class="field"><label for="phase1-agentPort">Agent Port (0 disables)</label><input id="phase1-agentPort" type="number" min="0" max="65535" /></div>
+      <div class="field"><label for="phase1-agentPortBind">Agent Bind Address</label><input id="phase1-agentPortBind" type="text" placeholder="0.0.0.0" /></div>
+      <div class="field"><label for="phase1-agentAliasPort">Agent Alias Port</label><input id="phase1-agentAliasPort" type="number" min="0" max="65535" /></div>
+      <div class="field"><label for="phase1-agentAliasDNS">Agent DNS Name</label><input id="phase1-agentAliasDNS" type="text" placeholder="agents.example.com" /></div>
+      <div class="field"><label for="phase1-relayPort">Relay Port (0 disables)</label><input id="phase1-relayPort" type="number" min="0" max="65535" /></div>
+      <div class="field"><label for="phase1-relayPortBind">Relay Bind Address</label><input id="phase1-relayPortBind" type="text" placeholder="0.0.0.0" /></div>
+    </div>
+    <div class="checkbox-row"><input id="phase1-agentPortTls" type="checkbox" /> <label for="phase1-agentPortTls">TLS on agent-only port</label></div>
+
+    <h2>Agent Branding &amp; Appearance</h2>
+    <p class="section-note">Applies to <code>domains.admin.agentCustomization</code>. Agents must be redeployed for branding/icon changes to appear.</p>
+    <div class="grid">
+      <div class="field"><label for="phase1-agentDisplayName">Display Name</label><input id="phase1-agentDisplayName" type="text" /></div>
+      <div class="field"><label for="phase1-agentDescription">Description</label><input id="phase1-agentDescription" type="text" /></div>
+      <div class="field"><label for="phase1-agentCompany">Company Name</label><input id="phase1-agentCompany" type="text" /></div>
+      <div class="field"><label for="phase1-agentService">Service Name</label><input id="phase1-agentService" type="text" /></div>
+      <div class="field"><label for="phase1-agentFileName">Agent File Name</label><input id="phase1-agentFileName" type="text" /></div>
+      <div class="field"><label for="phase1-agentInstallText">Install Text</label><textarea id="phase1-agentInstallText"></textarea></div>
+      <div class="field"><label for="phase1-agentForeground">Foreground Color</label><input id="phase1-agentForeground" type="text" placeholder="#ffffff" /></div>
+      <div class="field"><label for="phase1-agentBackground">Background Color</label><input id="phase1-agentBackground" type="text" placeholder="#1b4058" /></div>
+      <div class="field"><label for="phase1-agentImagePath">Agent Image</label><input id="phase1-agentImagePath" type="text" placeholder="agent-logo.png" /><input id="phase1-agentImageFile" type="file" accept="image/png" /><span class="file-note">Square PNG 64–200&nbsp;px. Stored in meshcentral-data.</span></div>
+    </div>
+
+    <h2>Windows Agent Metadata</h2>
+    <div class="grid">
+      <div class="field"><label for="phase1-agentIconPath">Icon (.ico)</label><input id="phase1-agentIconPath" type="text" placeholder="agent-icon.ico" /><input id="phase1-agentIconFile" type="file" accept="image/x-icon" /></div>
+      <div class="field"><label for="phase1-fileDescription">File Description</label><input id="phase1-fileDescription" type="text" /></div>
+      <div class="field"><label for="phase1-fileVersion">File Version</label><input id="phase1-fileVersion" type="text" placeholder="1.0.0.0" /></div>
+      <div class="field"><label for="phase1-internalName">Internal Name</label><input id="phase1-internalName" type="text" /></div>
+      <div class="field"><label for="phase1-productName">Product Name</label><input id="phase1-productName" type="text" /></div>
+      <div class="field"><label for="phase1-productVersion">Product Version</label><input id="phase1-productVersion" type="text" /></div>
+      <div class="field"><label for="phase1-originalFilename">Original Filename</label><input id="phase1-originalFilename" type="text" /></div>
+      <div class="field"><label for="phase1-legalCopyright">Legal Copyright</label><input id="phase1-legalCopyright" type="text" /></div>
+    </div>
+
+    <h2>Agent Behaviour &amp; Access</h2>
+    <div class="checkbox-row"><input id="phase1-agentSignLock" type="checkbox" /> <label for="phase1-agentSignLock">Lock signed agents to this server</label></div>
+    <div class="checkbox-row"><input id="phase1-allowHighQualityDesktop" type="checkbox" /> <label for="phase1-allowHighQualityDesktop">Allow high quality desktop</label></div>
+    <div class="checkbox-row"><input id="phase1-agentsInRam" type="checkbox" /> <label for="phase1-agentsInRam">Cache agent binaries in RAM</label></div>
+    <div class="checkbox-row"><input id="phase1-agentInviteCodes" type="checkbox" /> <label for="phase1-agentInviteCodes">Require invite codes for new agents</label></div>
+    <div class="checkbox-row"><input id="phase1-agentNoProxy" type="checkbox" /> <label for="phase1-agentNoProxy">Disable proxy for new agents</label></div>
+    <div class="checkbox-row"><input id="phase1-lockAgentDownload" type="checkbox" /> <label for="phase1-lockAgentDownload">Require login for agent downloads</label></div>
+    <div class="grid">
+      <div class="field"><label for="phase1-agentUpdateSystem">Agent Update System</label><select id="phase1-agentUpdateSystem"><option value="1">Native updater</option><option value="2">meshcore.js updater</option></select></div>
+      <div class="field"><label for="phase1-rootCertCommonName">Root Certificate CN</label><input id="phase1-rootCertCommonName" type="text" placeholder="MeshCentralRoot-XXXXXX" /></div>
+    </div>
+    <div class="grid">
+      <div class="field"><label for="phase1-agentConfig">agentConfig (key=value per line)</label><textarea id="phase1-agentConfig" placeholder="example=Value"></textarea></div>
+      <div class="field"><label for="phase1-manageAllDeviceGroups">manageAllDeviceGroups</label><textarea id="phase1-manageAllDeviceGroups" placeholder="user/admin/admin"></textarea></div>
+      <div class="field"><label for="phase1-manageCrossDomain">manageCrossDomain</label><textarea id="phase1-manageCrossDomain" placeholder="user/admin/admin"></textarea></div>
+    </div>
+    <div class="grid">
+      <div class="field"><label for="phase1-agentKey">Agent Enrollment Key</label><input id="phase1-agentKey" type="text" placeholder="leave blank to disable" /></div>
+      <div class="field"><label for="phase1-agentAllowedIp">Allowed Agent IPs</label><textarea id="phase1-agentAllowedIp" placeholder="192.168.1.10&#10;10.0.0.0/24"></textarea><span class="file-note">One CIDR or host per line. Leave blank to allow all.</span></div>
+      <div class="field"><label for="phase1-agentBlockedIp">Blocked Agent IPs</label><textarea id="phase1-agentBlockedIp" placeholder="0.0.0.0/8&#10;127.0.0.0/8"></textarea><span class="file-note">Evaluated before the allow list.</span></div>
+    </div>
+    <div class="dual">
+      <div class="field"><label for="phase1-tagServerName">agentTag.ServerName</label><select id="phase1-tagServerName"><option value="-1">Leave unchanged</option><option value="0">Ignore</option><option value="1">Set</option></select></div>
+      <div class="field"><label for="phase1-tagServerDesc">agentTag.ServerDesc</label><select id="phase1-tagServerDesc"><option value="-1">Leave unchanged</option><option value="0">Ignore</option><option value="1">Set</option><option value="2">Set if empty</option></select></div>
+      <div class="field"><label for="phase1-tagServerTags">agentTag.ServerTags</label><select id="phase1-tagServerTags"><option value="-1">Leave unchanged</option><option value="0">Ignore</option><option value="1">Set</option><option value="2">Set if empty</option><option value="3">Append</option></select></div>
+    </div>
+
+    <h2>Intel&reg; AMT</h2>
+    <div class="checkbox-row"><input id="phase1-amtScanner" type="checkbox" /> <label for="phase1-amtScanner">Enable AMT scanner</label></div>
+    <div class="checkbox-row"><input id="phase1-amtProvisioning" type="checkbox" /> <label for="phase1-amtProvisioning">Enable provisioning server</label></div>
+    <div class="grid">
+      <div class="field"><label for="phase1-amtDeviceGroup">Provisioned Device Group</label><input id="phase1-amtDeviceGroup" type="text" list="phase1-amtDeviceGroupList" /></div>
+      <div class="field"><label for="phase1-amtPort">Provisioning Port</label><input id="phase1-amtPort" type="number" min="1" max="65535" /></div>
+      <div class="field"><label for="phase1-amtFqdn">Trusted FQDN</label><input id="phase1-amtFqdn" type="text" /></div>
+      <div class="field"><label for="phase1-amtIp">Server IP</label><input id="phase1-amtIp" type="text" /></div>
+      <div class="field"><label for="phase1-amtPassword">New MEBX Password</label><input id="phase1-amtPassword" type="text" /></div>
+    </div>
+    <datalist id="phase1-amtDeviceGroupList"></datalist>
+
+    <div class="actions">
+      <button id="phase1-saveBtn" class="primary">Save &amp; Restart MeshCentral</button>
+      <button id="phase1-reloadBtn" class="secondary" type="button">Reload Current Values</button>
+    </div>
+    <div id="phase1-status" class="status"></div>
+  </div>
+
+  <script>
+    window.phase1configData = {{#if datajson}}{{{datajson}}}{{else}}{}{{/if}};
+  </script>
+  <script>
+    (function () {
+      const state = { files: {} };
+      const data = window.phase1configData || {};
+      const el = id => document.getElementById(id);
+      const statusBox = el('phase1-status');
+
+      function log(message, type) {
+        if (!statusBox) { return; }
+        const ts = new Date().toLocaleTimeString();
+        statusBox.textContent = '[' + ts + '] ' + message + (statusBox.textContent ? '\n' + statusBox.textContent : '');
+        statusBox.style.border = type === 'error' ? '1px solid #ff6b6b' : '1px solid rgba(255,255,255,0.2)';
+      }
+
+      function setValue(id, value) {
+        const node = el(id);
+        if (!node) { return; }
+        node.value = (value === undefined || value === null) ? '' : value;
+      }
+
+      function setCheckbox(id, value) {
+        const node = el(id);
+        if (!node) { return; }
+        node.checked = !!value;
+      }
+
+      function setSelectValue(id, value, fallback) {
+        const node = el(id);
+        if (!node) { return; }
+        const val = (value === undefined || value === null) ? fallback : String(value);
+        if ([...node.options].some(opt => opt.value === val)) {
+          node.value = val;
+        } else if (fallback !== undefined) {
+          node.value = fallback;
+        }
+      }
+
+      function normalizeArray(value) {
+        if (!value) { return []; }
+        if (Array.isArray(value)) { return value; }
+        if (typeof value === 'string') {
+          return value.split(/\r?\n|,/).map(v => v.trim()).filter(Boolean);
+        }
+        return [];
+      }
+
+      function hydrate(payload) {
+        if (!payload || !payload.snapshot) { return; }
+        const snap = payload.snapshot;
+        const dom = snap.domain || {};
+        const custom = dom.agentCustomization || {};
+        const info = dom.agentFileInfo || {};
+        const tag = dom.agentTag || {};
+
+        setValue('phase1-brandingTitle', snap.settings.title);
+        setValue('phase1-brandingSubtitle', snap.settings.title2);
+        setValue('phase1-brandingWelcome', snap.settings.welcome);
+        setValue('phase1-domainTitle', dom.title);
+        setValue('phase1-domainSubtitle', dom.title2);
+        setSelectValue('phase1-siteStyle', dom.siteStyle, '0');
+        setValue('phase1-titlePicturePath', dom.titlePicture);
+        setValue('phase1-pwaLogoPath', dom.pwaLogo);
+
+        setValue('phase1-portMain', snap.settings.port);
+        setValue('phase1-portAlias', snap.settings.aliasPort);
+        setValue('phase1-portRedir', snap.settings.redirPort);
+        setValue('phase1-portRedirAlias', snap.settings.redirAliasPort);
+        setValue('phase1-agentPort', snap.settings.agentPort);
+        setValue('phase1-agentPortBind', snap.settings.agentPortBind);
+        setValue('phase1-agentAliasPort', snap.settings.agentAliasPort);
+        setValue('phase1-agentAliasDNS', snap.settings.agentAliasDNS);
+        setValue('phase1-relayPort', snap.settings.relayPort);
+        setValue('phase1-relayPortBind', snap.settings.relayPortBind);
+        setCheckbox('phase1-agentPortTls', snap.settings.agentPortTls);
+
+        setCheckbox('phase1-agentSignLock', snap.settings.agentSignLock);
+        setCheckbox('phase1-allowHighQualityDesktop', snap.settings.allowHighQualityDesktop);
+        setCheckbox('phase1-agentsInRam', snap.settings.agentsInRam);
+        setSelectValue('phase1-agentUpdateSystem', snap.settings.agentUpdateSystem, '1');
+        setCheckbox('phase1-agentInviteCodes', dom.agentInviteCodes);
+        setCheckbox('phase1-agentNoProxy', dom.agentNoProxy);
+        setCheckbox('phase1-lockAgentDownload', dom.lockAgentDownload || snap.settings.lockAgentDownload);
+        setValue('phase1-rootCertCommonName', snap.settings.rootCertCommonName);
+
+        setValue('phase1-agentDisplayName', custom.displayName);
+        setValue('phase1-agentDescription', custom.description);
+        setValue('phase1-agentCompany', custom.companyName);
+        setValue('phase1-agentService', custom.serviceName);
+        setValue('phase1-agentFileName', custom.fileName);
+        setValue('phase1-agentInstallText', custom.installText);
+        setValue('phase1-agentForeground', custom.foregroundColor);
+        setValue('phase1-agentBackground', custom.backgroundColor);
+        setValue('phase1-agentImagePath', custom.image);
+
+        setValue('phase1-agentIconPath', info.icon);
+        setValue('phase1-fileDescription', info.fileDescription);
+        setValue('phase1-fileVersion', info.fileVersion);
+        setValue('phase1-internalName', info.internalName);
+        setValue('phase1-productName', info.productName);
+        setValue('phase1-productVersion', info.productVersion);
+        setValue('phase1-originalFilename', info.originalFilename);
+        setValue('phase1-legalCopyright', info.legalCopyright);
+
+        setValue('phase1-agentConfig', (dom.agentConfig || []).join('\n'));
+        setValue('phase1-manageAllDeviceGroups', (dom.manageAllDeviceGroups || []).join('\n'));
+        setValue('phase1-manageCrossDomain', (dom.manageCrossDomain || []).join('\n'));
+        setValue('phase1-agentKey', Array.isArray(dom.agentKey) ? dom.agentKey.join(', ') : (dom.agentKey || ''));
+        setValue('phase1-agentAllowedIp', normalizeArray(dom.agentAllowedIP).join('\n'));
+        setValue('phase1-agentBlockedIp', normalizeArray(dom.agentBlockedIP).join('\n'));
+        setSelectValue('phase1-tagServerName', tag.ServerName !== undefined ? tag.ServerName : '-1', '-1');
+        setSelectValue('phase1-tagServerDesc', tag.ServerDesc !== undefined ? tag.ServerDesc : '-1', '-1');
+        setSelectValue('phase1-tagServerTags', tag.ServerTags !== undefined ? tag.ServerTags : '-1', '-1');
+
+        setCheckbox('phase1-amtScanner', snap.settings.amtScanner);
+        setCheckbox('phase1-amtProvisioning', !!snap.settings.amtProvisioningServer);
+        setValue('phase1-amtDeviceGroup', snap.amt.deviceGroup);
+        setValue('phase1-amtPort', snap.amt.port);
+        setValue('phase1-amtFqdn', snap.amt.trustedFqdn);
+        setValue('phase1-amtIp', snap.amt.ip);
+        setValue('phase1-amtPassword', snap.amt.mebxPassword);
+
+        const list = el('phase1-amtDeviceGroupList');
+        if (list && Array.isArray(payload.amtGroups)) {
+          list.innerHTML = '';
+          payload.amtGroups.forEach(g => {
+            const opt = document.createElement('option');
+            opt.value = g.id;
+            opt.label = g.name + (g.domain ? ' (domain: ' + g.domain + ')' : '');
+            list.appendChild(opt);
+          });
+        }
+      }
+
+      function watchFileInput(inputId, key, pathFieldId) {
+        const input = el(inputId);
+        if (!input) { return; }
+        input.addEventListener('change', () => {
+          const file = input.files && input.files[0];
+          if (!file) { delete state.files[key]; return; }
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64 = reader.result.split(',')[1];
+            state.files[key] = { name: file.name, data: base64 };
+            if (pathFieldId) {
+              const field = el(pathFieldId);
+              if (field && !field.value) { field.value = file.name; }
+            }
+            log('Queued ' + file.name + ' (' + key + ') for upload.');
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+
+      function collectAgentTag() {
+        const fields = [
+          { id: 'phase1-tagServerName', key: 'ServerName' },
+          { id: 'phase1-tagServerDesc', key: 'ServerDesc' },
+          { id: 'phase1-tagServerTags', key: 'ServerTags' }
+        ];
+        const out = {};
+        fields.forEach(({ id, key }) => {
+          const node = el(id);
+          if (!node) { return; }
+          const value = parseInt(node.value, 10);
+          if (!isNaN(value) && value >= 0) { out[key] = value; }
+        });
+        return out;
+      }
+
+      function textareaValue(id) {
+        const node = el(id);
+        return node ? node.value : '';
+      }
+
+      function listFromTextarea(id) {
+        const raw = textareaValue(id);
+        if (!raw) { return []; }
+        return raw.split(/\r?\n/).map(part => part.trim()).filter(Boolean);
+      }
+
+      function collectPayload() {
+        const brandingFiles = {};
+        if (state.files.titlePicture) { brandingFiles.titlePicture = state.files.titlePicture; }
+        if (state.files.pwaLogo) { brandingFiles.pwaLogo = state.files.pwaLogo; }
+
+        const agentFiles = {};
+        if (state.files.agentImage) { agentFiles.agentImage = state.files.agentImage; }
+        if (state.files.agentIcon) { agentFiles.agentIcon = state.files.agentIcon; }
+
+        return {
+          branding: {
+            title: el('phase1-brandingTitle').value,
+            title2: el('phase1-brandingSubtitle').value,
+            welcome: el('phase1-brandingWelcome').value,
+            headerTitle: el('phase1-domainTitle').value,
+            headerSubtitle: el('phase1-domainSubtitle').value,
+            siteStyle: el('phase1-siteStyle').value,
+            titlePicture: el('phase1-titlePicturePath').value,
+            pwaLogo: el('phase1-pwaLogoPath').value,
+            files: brandingFiles
+          },
+          ports: {
+            port: el('phase1-portMain').value,
+            aliasPort: el('phase1-portAlias').value,
+            redirPort: el('phase1-portRedir').value,
+            redirAliasPort: el('phase1-portRedirAlias').value,
+            agentPort: el('phase1-agentPort').value,
+            agentPortBind: el('phase1-agentPortBind').value,
+            agentAliasPort: el('phase1-agentAliasPort').value,
+            agentAliasDNS: el('phase1-agentAliasDNS').value,
+            relayPort: el('phase1-relayPort').value,
+            relayPortBind: el('phase1-relayPortBind').value
+          },
+          agent: {
+            agentSignLock: el('phase1-agentSignLock').checked,
+            agentUpdateSystem: el('phase1-agentUpdateSystem').value,
+            allowHighQualityDesktop: el('phase1-allowHighQualityDesktop').checked,
+            agentsInRam: el('phase1-agentsInRam').checked,
+            agentPortTls: el('phase1-agentPortTls').checked,
+            agentInviteCodes: el('phase1-agentInviteCodes').checked,
+            agentNoProxy: el('phase1-agentNoProxy').checked,
+            lockAgentDownload: el('phase1-lockAgentDownload').checked,
+            rootCertCommonName: el('phase1-rootCertCommonName').value,
+            agentCustomization: {
+              displayName: el('phase1-agentDisplayName').value,
+              description: el('phase1-agentDescription').value,
+              companyName: el('phase1-agentCompany').value,
+              serviceName: el('phase1-agentService').value,
+              fileName: el('phase1-agentFileName').value,
+              installText: el('phase1-agentInstallText').value,
+              foregroundColor: el('phase1-agentForeground').value,
+              backgroundColor: el('phase1-agentBackground').value,
+              image: el('phase1-agentImagePath').value
+            },
+            agentFileInfo: {
+              icon: el('phase1-agentIconPath').value,
+              fileDescription: el('phase1-fileDescription').value,
+              fileVersion: el('phase1-fileVersion').value,
+              internalName: el('phase1-internalName').value,
+              productName: el('phase1-productName').value,
+              productVersion: el('phase1-productVersion').value,
+              originalFilename: el('phase1-originalFilename').value,
+              legalCopyright: el('phase1-legalCopyright').value
+            },
+            agentConfig: textareaValue('phase1-agentConfig'),
+            agentKey: el('phase1-agentKey').value,
+            agentAllowedIP: listFromTextarea('phase1-agentAllowedIp'),
+            agentBlockedIP: listFromTextarea('phase1-agentBlockedIp'),
+            agentTag: collectAgentTag(),
+            files: agentFiles
+          },
+          amt: {
+            amtScanner: el('phase1-amtScanner').checked,
+            provisioningEnabled: el('phase1-amtProvisioning').checked,
+            deviceGroup: el('phase1-amtDeviceGroup').value,
+            port: el('phase1-amtPort').value,
+            trustedFqdn: el('phase1-amtFqdn').value,
+            ip: el('phase1-amtIp').value,
+            mebxPassword: el('phase1-amtPassword').value,
+            manageAllDeviceGroups: textareaValue('phase1-manageAllDeviceGroups'),
+            manageCrossDomain: textareaValue('phase1-manageCrossDomain')
+          }
+        };
+      }
+
+      function reloadSnapshot() {
+        log('Refreshing values from current configuration...');
+        const body = new URLSearchParams();
+        body.set('action', 'snapshot');
+        fetch('pluginadmin.ashx?pin=phase1config', { method: 'POST', body })
+          .then(res => {
+            if (!res.ok) { throw new Error('HTTP ' + res.status); }
+            return res.json();
+          })
+          .then(json => {
+            if (json && json.ok === false) {
+              throw new Error(json.error || 'Snapshot failed');
+            }
+            hydrate(json);
+            state.files = {};
+            log('Values reloaded.');
+          })
+          .catch(err => {
+            log('Refresh failed: ' + err.message, 'error');
+          });
+      }
+
+      function save() {
+        log('Validating and applying changes...');
+        const payload = collectPayload();
+        const body = new URLSearchParams();
+        body.set('action', 'save');
+        body.set('payload', JSON.stringify(payload));
+        fetch('pluginadmin.ashx?pin=phase1config', { method: 'POST', body })
+          .then(res => {
+            if (!res.ok) {
+              return res.text().then(text => { throw new Error(text || ('HTTP ' + res.status)); });
+            }
+            return res.json();
+          })
+          .then(json => {
+            if (!json || json.ok === false) {
+              throw new Error((json && json.error) || 'Save failed');
+            }
+            state.files = {};
+            const backup = (json.result && json.result.backup) ? json.result.backup : 'n/a';
+            log('Configuration saved. MeshCentral restart triggered (backup: ' + backup + ').');
+          })
+          .catch(err => {
+            log('Save failed: ' + err.message, 'error');
+          });
+      }
+
+      function attachHandlers() {
+        watchFileInput('phase1-titlePictureFile', 'titlePicture', 'phase1-titlePicturePath');
+        watchFileInput('phase1-pwaLogoFile', 'pwaLogo', 'phase1-pwaLogoPath');
+        watchFileInput('phase1-agentImageFile', 'agentImage', 'phase1-agentImagePath');
+        watchFileInput('phase1-agentIconFile', 'agentIcon', 'phase1-agentIconPath');
+
+        const saveBtn = el('phase1-saveBtn');
+        if (saveBtn) {
+          saveBtn.addEventListener('click', event => {
+            event.preventDefault();
+            save();
+          });
+        }
+
+        const reloadBtn = el('phase1-reloadBtn');
+        if (reloadBtn) {
+          reloadBtn.addEventListener('click', event => {
+            event.preventDefault();
+            reloadSnapshot();
+          });
+        }
+      }
+
+      attachHandlers();
+      if (data && Object.keys(data).length) {
+        hydrate(data);
+        log('Loaded current configuration snapshot.');
+      } else {
+        reloadSnapshot();
+      }
+
+    })();
+  </script>
+
+</body>
+</html>

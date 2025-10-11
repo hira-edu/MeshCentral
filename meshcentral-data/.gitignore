@@ -1,0 +1,17 @@
+# runtime config & secrets
+config.json
+config.json.*
+*.key
+*.crt
+*.cer
+*.pem
+*.pfx
+*.csr
+*.db
+*.sqlite*
+*.bak
+*.gz
+letsencrypt-certs/
+signedagents/
+mesherrors.txt
+serverstate.txt

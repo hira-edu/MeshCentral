@@ -1,0 +1,28 @@
+/* High Support branding overrides */
+body.arg_hide.login {
+  background: linear-gradient(135deg, #103550, #0a2237);
+  color: #e8f6ff;
+}
+#loginpanel {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.45);
+  background: rgba(10, 34, 55, 0.92);
+}
+#loginButton {
+  background: linear-gradient(90deg, #00c8b4, #009ac8);
+  color: #0a2237;
+  font-weight: 600;
+}
+#loginButton:hover {
+  filter: brightness(1.1);
+}
+.navbar-brand, #topbarleft {
+  color: #00c8b4 !important;
+}
+#backgroundImage {
+  opacity: 0.25;
+}
+#footerlinks a {
+  color: #7fdff5;
+}
