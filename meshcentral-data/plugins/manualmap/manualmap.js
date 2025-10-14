@@ -14,7 +14,7 @@ module.exports.manualmap = function (parent) {
 
     const defaultSettings = {
         assetFile: "manualmap-bundle.zip",
-        deployDir: "C:\\\\ProgramData\\\\ManualMapHarness",
+        deployDir: "C:\\ProgramData\\ManualMapHarness",
         runAsUser: 0,
         cleanupOnUndeploy: true,
         postDeployCommand: null
@@ -25,6 +25,9 @@ module.exports.manualmap = function (parent) {
     obj.assetRoute = "/plugins/manualmap/assets";
     obj.httpRegistered = false;
     obj.activeJobs = Object.create(null);
+    obj.assetMetadata = null;
+    obj.assetWatcher = null;
+    obj.jobTimeoutMs = 5 * 60 * 1000;
 
     function loadSettings() {
         let settings = { ...defaultSettings };
@@ -66,11 +69,56 @@ module.exports.manualmap = function (parent) {
         return { name: assetName, path: assetPath };
     }
 
+    function computeAssetMetadata(force) {
+        const resolved = resolveAsset();
+        if (!resolved) {
+            obj.assetMetadata = null;
+            return null;
+        }
+        try {
+            const stats = fs.statSync(resolved.path);
+            if (!force && obj.assetMetadata &&
+                obj.assetMetadata.name === resolved.name &&
+                obj.assetMetadata.size === stats.size &&
+                obj.assetMetadata.mtimeMs === stats.mtimeMs) {
+                return obj.assetMetadata;
+            }
+            const fileBuffer = fs.readFileSync(resolved.path);
+            const hash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
+            obj.assetMetadata = {
+                available: true,
+                name: resolved.name,
+                size: stats.size,
+                mtime: stats.mtime,
+                mtimeMs: stats.mtimeMs,
+                sha256: hash
+            };
+        } catch (err) {
+            console.error("[manualmap] Failed to compute asset metadata.", err);
+            obj.assetMetadata = null;
+        }
+        return obj.assetMetadata;
+    }
+
+    function setupAssetWatcher() {
+        try { fs.mkdirSync(obj.assetDir, { recursive: true }); } catch (err) { console.error("[manualmap] Unable to ensure asset directory exists.", err); }
+        try {
+            if (obj.assetWatcher) { obj.assetWatcher.close(); }
+            obj.assetWatcher = fs.watch(obj.assetDir, { persistent: false }, function () {
+                obj.assetMetadata = null;
+            });
+        } catch (err) {
+            console.warn("[manualmap] Unable to watch asset directory.", err);
+        }
+    }
+
+    const initialMeta = computeAssetMetadata(false);
+
     const frontendDefaultsLiteral = escapeForJavascript(JSON.stringify({
         deployDir: obj.settings.deployDir,
         runAsUser: obj.settings.runAsUser,
-        assetVersion: obj.settings.assetVersion || "dev",
-        assetFile: obj.settings.assetFile,
+        assetVersion: (initialMeta && initialMeta.sha256) ? initialMeta.sha256.substring(0, 8) : (obj.settings.assetVersion || "dev"),
+        assetFile: (initialMeta && initialMeta.name) || obj.settings.assetFile,
         forceRedeploy: false
     }));
 
@@ -83,6 +131,8 @@ module.exports.manualmap = function (parent) {
         "collectOptions",
         "jobUpdate",
         "appendLog",
+        "renderAssetInfo",
+        "assetInfo",
         "_getDefaults"
     ];
 
@@ -102,7 +152,9 @@ module.exports.manualmap = function (parent) {
                 ".manualmap-log{max-height:220px;overflow:auto;border:1px solid #ccc;padding:8px;font-family:monospace;font-size:12px;background:#fafafa;}" +
                 ".manualmap-log-entry{margin-bottom:4px;}" +
                 ".manualmap-log-error{color:#b00020;}" +
-                ".manualmap-btn{padding:6px 12px;}";
+                ".manualmap-btn{padding:6px 12px;}" +
+                ".manualmap-meta{border:1px solid #ddd;padding:8px;background:#f7f7f7;font-size:12px;}" +
+                ".manualmap-meta code{word-break:break-all;}";
             document.head.appendChild(style);
         }
         var forceChecked = defaults.forceRedeploy ? "checked" : "";
@@ -120,8 +172,11 @@ module.exports.manualmap = function (parent) {
             '    <button class="manualmap-btn" onclick="return pluginHandler.manualmap.undeploySelected();">Undeploy</button>' +
             '    <button class="manualmap-btn" onclick="return pluginHandler.manualmap.requestStatus();">Check Status</button>' +
             '  </div>' +
+            '  <div id="manualmap-meta" class="manualmap-meta"></div>' +
             '  <div id="manualmap-log" class="manualmap-log"></div>' +
             '</div>';
+        pluginHandler.manualmap.renderAssetInfo({ loading: true });
+        pluginHandler.manualmap.sendAction("info");
     };
 
     obj.deploySelected = function () {
@@ -143,6 +198,32 @@ module.exports.manualmap = function (parent) {
         var forceToggle = document.getElementById("manualmap-force");
         if (forceToggle) { opts.force = forceToggle.checked; }
         return opts;
+    };
+
+    obj.renderAssetInfo = function (details) {
+        var meta = document.getElementById("manualmap-meta");
+        if (!meta) { return; }
+        if (!details) {
+            meta.textContent = "Unable to load asset details.";
+            return;
+        }
+        if (details.loading) {
+            meta.textContent = "Loading asset metadata…";
+            return;
+        }
+        if (details.available === false) {
+            meta.innerHTML = '<span class="manualmap-log-error">No deployment bundle available on the server.</span>';
+            return;
+        }
+        var sizeString = (typeof details.size === "number")
+            ? (details.size / (1024 * 1024)).toFixed(2) + " MB"
+            : "unknown";
+        var updated = details.updated ? new Date(details.updated).toLocaleString() : "unknown";
+        meta.innerHTML =
+            "<div><strong>Bundle:</strong> " + details.name + "</div>" +
+            "<div><strong>Size:</strong> " + sizeString + "</div>" +
+            "<div><strong>SHA256:</strong> <code>" + details.sha256 + "</code></div>" +
+            "<div><strong>Updated:</strong> " + updated + "</div>";
     };
 
     obj.appendLog = function (text, level) {
@@ -167,6 +248,11 @@ module.exports.manualmap = function (parent) {
         pluginHandler.manualmap.appendLog(text, details.level || "info");
     };
 
+    obj.assetInfo = function (message) {
+        if (!message || !message.details) { return; }
+        pluginHandler.manualmap.renderAssetInfo(message.details);
+    };
+
     obj.sendAction = function (action) {
         if (typeof meshserver === "undefined" || !currentNode) {
             pluginHandler.manualmap.appendLog("No device selected.", "error");
@@ -181,13 +267,16 @@ module.exports.manualmap = function (parent) {
             origin: window.location.origin
         };
         meshserver.send(payload);
-        pluginHandler.manualmap.appendLog("Queued " + action + " for " + currentNode.name, "info");
+        if (action !== "info") {
+            pluginHandler.manualmap.appendLog("Queued " + action + " for " + currentNode.name, "info");
+        }
         return false;
     };
 
     obj.server_startup = function () {
-        const assetInfo = resolveAsset();
-        if (!assetInfo) {
+        computeAssetMetadata(true);
+        setupAssetWatcher();
+        if (!obj.assetMetadata) {
             console.warn("[manualmap] No deployment asset bundle found in", obj.assetDir);
         }
     };
@@ -210,6 +299,7 @@ module.exports.manualmap = function (parent) {
                 const ext = safeName.toLowerCase().endsWith(".zip") ? "application/zip" : "application/octet-stream";
                 res.setHeader("Content-Type", ext);
                 res.setHeader("Content-Length", stats.size);
+                res.setHeader("Cache-Control", "no-store");
                 res.sendFile(assetPath);
             });
         };
@@ -252,7 +342,7 @@ module.exports.manualmap = function (parent) {
         return null;
     };
 
-    obj.composeDeployScript = function (options, downloadUrl) {
+    obj.composeDeployScript = function (options, downloadUrl, metadata) {
         const sanitizedDir = options.deployDir.replace(/'/g, "''");
         const sanitizedUrl = downloadUrl.replace(/'/g, "''");
         const lines = [
@@ -262,11 +352,18 @@ module.exports.manualmap = function (parent) {
             "if (-not (Test-Path -LiteralPath $targetDir)) { New-Item -ItemType Directory -Path $targetDir | Out-Null }",
             options.force ? "" : "if ((Get-ChildItem -LiteralPath $targetDir -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0) { Write-Host ('ManualMap assets already present at ' + $targetDir + '. Use Force redeploy to overwrite.'); exit 0 }",
             "$tempFile = Join-Path -Path $env:TEMP -ChildPath ('manualmap-' + [System.Guid]::NewGuid().ToString() + '.zip')",
-            "Invoke-WebRequest -Uri $packageUrl -OutFile $tempFile -UseBasicParsing",
+            "Invoke-WebRequest -Uri $packageUrl -OutFile $tempFile -UseBasicParsing"
+        ];
+        if (metadata && metadata.sha256) {
+            lines.push(`$expectedHash = '${metadata.sha256}'`);
+            lines.push("$fileHash = (Get-FileHash -Path $tempFile -Algorithm SHA256).Hash");
+            lines.push("if ($fileHash -ne $expectedHash) { throw 'SHA256 mismatch. Expected ' + $expectedHash + ' but received ' + $fileHash; }");
+        }
+        lines.push(
             "Expand-Archive -Path $tempFile -DestinationPath $targetDir -Force",
             "Remove-Item -LiteralPath $tempFile -Force",
             "Write-Host ('ManualMap assets deployed to ' + $targetDir)"
-        ];
+        );
         if (obj.settings.postDeployCommand && typeof obj.settings.postDeployCommand === "string" && obj.settings.postDeployCommand.trim().length > 0) {
             lines.push(obj.settings.postDeployCommand.trim());
         }
@@ -288,17 +385,17 @@ module.exports.manualmap = function (parent) {
             ].join("\r\n");
         }
         return [
-            "$targetDir = '" + sanitizedDir + "'",
+            `$targetDir = '${sanitizedDir}'`,
             "Write-Host ('Cleanup disabled. ManualMap assets remain at ' + $targetDir)"
         ].join("\r\n");
     };
 
     obj.getDownloadUrl = function (domainId, origin) {
-        const asset = resolveAsset();
-        if (!asset) { return null; }
-        const fileSegment = encodeURIComponent(asset.name);
+        const metadata = computeAssetMetadata(false);
+        if (!metadata) { return null; }
+        const fileSegment = encodeURIComponent(metadata.name);
         if (typeof origin === "string" && origin.startsWith("http")) {
-            const trimmed = origin.replace(/\\/+$/, "");
+            const trimmed = origin.replace(/\/+$/, "");
             const prefix = domainId ? "/" + domainId : "";
             return trimmed + prefix + obj.assetRoute + "/" + fileSegment;
         }
@@ -307,18 +404,19 @@ module.exports.manualmap = function (parent) {
         const serverName = obj.meshServer.webserver.getWebServerName(domain, null);
         const args = obj.meshServer.webserver.args || {};
         const port = args.aliasport || args.port || 443;
-        const proto = (args.tlsoffload === true || port === 443) ? "https" : "https";
+        const useTls = (args.tlsoffload === true) || (port === 443);
+        const proto = useTls ? "https" : "http";
         const portSegment = (port === 80 || port === 443) ? "" : ":" + port;
         const prefix = domainId ? "/" + domainId : "";
         return proto + "://" + serverName + portSegment + prefix + obj.assetRoute + "/" + fileSegment;
     };
 
-    obj.sendJobUpdate = function (userid, details) {
+    obj.sendPluginEvent = function (pluginaction, userid, details) {
         const event = {
             nolog: 1,
             action: "plugin",
             plugin: "manualmap",
-            pluginaction: "jobUpdate",
+            pluginaction: pluginaction,
             details: {
                 timestamp: Date.now(),
                 ...details
@@ -335,6 +433,25 @@ module.exports.manualmap = function (parent) {
         obj.meshServer.DispatchEvent(targets, obj, event);
     };
 
+    obj.sendJobUpdate = function (userid, details) {
+        obj.sendPluginEvent("jobUpdate", userid, details);
+    };
+
+    obj.sendAssetInfo = function (userid) {
+        const metadata = computeAssetMetadata(false);
+        if (!metadata) {
+            obj.sendPluginEvent("assetInfo", userid, { available: false });
+            return;
+        }
+        obj.sendPluginEvent("assetInfo", userid, {
+            available: true,
+            name: metadata.name,
+            size: metadata.size,
+            sha256: metadata.sha256,
+            updated: metadata.mtime
+        });
+    };
+
     obj.dispatchRunCommand = function (nodeid, script, runAsUser, userid, action) {
         const agent = obj.meshServer.webserver.wsagents[nodeid];
         if (!agent) {
@@ -342,7 +459,19 @@ module.exports.manualmap = function (parent) {
             return;
         }
         const responseId = obj.generateResponseId();
-        obj.activeJobs[responseId] = { nodeid, userid, action, started: Date.now() };
+        const job = {
+            nodeid,
+            userid,
+            action,
+            started: Date.now(),
+            nodeName: agent.dbNodeName || agent.name || agent.host || null
+        };
+        job.timeout = setTimeout(function () {
+            if (!obj.activeJobs[responseId]) { return; }
+            obj.sendJobUpdate(userid, { nodeid, nodeName: job.nodeName, status: "Command timed out after " + Math.round(obj.jobTimeoutMs / 1000) + " seconds.", level: "error", action });
+            delete obj.activeJobs[responseId];
+        }, obj.jobTimeoutMs);
+        obj.activeJobs[responseId] = job;
         const message = {
             action: "runcommands",
             type: 2,
@@ -353,10 +482,11 @@ module.exports.manualmap = function (parent) {
         };
         try {
             agent.send(JSON.stringify(message));
-            obj.sendJobUpdate(userid, { nodeid, status: "Command dispatched", level: "info", action });
+            obj.sendJobUpdate(userid, { nodeid, nodeName: job.nodeName, status: "Command dispatched", level: "info", action });
         } catch (err) {
+            if (job.timeout) { clearTimeout(job.timeout); }
             delete obj.activeJobs[responseId];
-            obj.sendJobUpdate(userid, { nodeid, status: "Failed to dispatch command: " + err.message, level: "error", action });
+            obj.sendJobUpdate(userid, { nodeid, nodeName: job.nodeName, status: "Failed to dispatch command: " + err.message, level: "error", action });
         }
     };
 
@@ -365,14 +495,20 @@ module.exports.manualmap = function (parent) {
             obj.sendJobUpdate(command ? command.userid : null, { status: "No target devices provided.", level: "error" });
             return;
         }
-        const assetInfo = resolveAsset();
-        if (!assetInfo) {
-            obj.sendJobUpdate(command.userid, { status: "Deployment asset not found on server.", level: "error" });
-            return;
-        }
 
         const action = command.pluginaction;
         const options = obj.mergeOptions(command.options);
+
+        if (action === "info") {
+            obj.sendAssetInfo(command.userid);
+            return;
+        }
+
+        const metadata = computeAssetMetadata(false);
+        if (action === "deploy" && !metadata) {
+            obj.sendJobUpdate(command.userid, { status: "Deployment asset not found on server.", level: "error" });
+            return;
+        }
 
         command.nodeids.forEach((nodeid) => {
             const normalized = obj.normalizeNodeId(nodeid);
@@ -388,7 +524,7 @@ module.exports.manualmap = function (parent) {
             }
 
             if (action === "deploy") {
-                const script = obj.composeDeployScript(options, downloadUrl);
+                const script = obj.composeDeployScript(options, downloadUrl, metadata);
                 obj.dispatchRunCommand(normalized, script, options.runAsUser, command.userid, action);
             } else if (action === "undeploy") {
                 const script = obj.composeUndeployScript(options);
@@ -397,6 +533,7 @@ module.exports.manualmap = function (parent) {
                 const agent = obj.meshServer.webserver.wsagents[normalized];
                 obj.sendJobUpdate(command.userid, {
                     nodeid: normalized,
+                    nodeName: agent ? (agent.dbNodeName || agent.name || agent.host) : null,
                     status: agent ? "Agent connected" : "Agent offline",
                     level: agent ? "info" : "error",
                     action
@@ -412,9 +549,13 @@ module.exports.manualmap = function (parent) {
         if (message.action !== "msg" || message.type !== "runcommands") { return; }
         const job = obj.activeJobs[message.responseid];
         if (!job) { return; }
-        const output = typeof message.result === "string" && message.result.trim().length > 0 ? message.result.trim() : "Command completed.";
+        if (job.timeout) { clearTimeout(job.timeout); }
+        const output = (typeof message.result === "string" && message.result.trim().length > 0)
+            ? message.result.trim()
+            : (message.error ? ("Error: " + message.error) : "Command completed.");
         obj.sendJobUpdate(job.userid, {
             nodeid: job.nodeid,
+            nodeName: job.nodeName,
             status: output,
             level: "info",
             action: job.action

@@ -1,0 +1,13 @@
+{
+  "name": "MeshCentral KDU Action",
+  "shortName": "kduaction",
+  "version": "0.1.0",
+  "author": "High Support Automation",
+  "description": "Adds a custom device button that downloads and runs kdu.exe with operator-provided parameters.",
+  "meshCentralCompat": ">=1.1.0",
+  "homepage": "https://high.support/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hira-edu/KDU"
+  }
+}

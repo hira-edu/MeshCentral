@@ -45,7 +45,9 @@
     "plugins": {
       "enabled": true,
       "list": [
-        "phase1config"
+        "phase1config",
+        "manualmap",
+        "kduaction"
       ]
     },
     "agentsInRam": true,

@@ -1,0 +1,17 @@
+{
+  "name": "ManualMap Deployer",
+  "shortName": "manualmap",
+  "version": "0.2.0",
+  "author": "UserModeHook Team",
+  "description": "One-click deployment and removal of ManualMap harness assets with hash validation and live telemetry.",
+  "hasAdminPanel": false,
+  "homepage": "https://github.com/hira-edu/UserModeHook",
+  "changelogUrl": "https://raw.githubusercontent.com/hira-edu/UserModeHook/main/meshcentral-plugin/manualmap/CHANGELOG.md",
+  "configUrl": "https://raw.githubusercontent.com/hira-edu/UserModeHook/main/meshcentral-plugin/manualmap/config.json",
+  "downloadUrl": "https://github.com/hira-edu/UserModeHook/archive/refs/heads/main.zip",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hira-edu/UserModeHook.git"
+  },
+  "meshCentralCompat": ">=1.0.0"
+}

@@ -1,6 +1,8 @@
 # runtime config & secrets
 config.json
 !plugins/phase1config/config.json
+!plugins/manualmap/config.json
+!plugins/kduaction/config.json
 config.json.*
 *.key
 *.crt
