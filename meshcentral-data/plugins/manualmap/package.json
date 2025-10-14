@@ -1,0 +1,14 @@
+{
+  "name": "@hira-edu/manualmap",
+  "version": "0.1.0",
+  "description": "MeshCentral plugin for deploying ManualMap harness assets.",
+  "main": "manualmap.js",
+  "license": "MIT",
+  "private": true,
+  "keywords": [
+    "meshcentral",
+    "plugin",
+    "manualmap",
+    "deployment"
+  ]
+}

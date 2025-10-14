@@ -1,0 +1,7 @@
+{
+  "assetFile": "manualmap-bundle.zip",
+  "deployDir": "C:\\\\ProgramData\\\\ManualMapHarness",
+  "runAsUser": 0,
+  "cleanupOnUndeploy": true,
+  "postDeployCommand": null
+}
