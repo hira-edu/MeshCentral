@@ -1,7 +1,9 @@
 node_modules/
 meshcentral-data/*
 !meshcentral-data/config.json.template
-.github/
+# Allow GitHub workflows to be committed
+!.github/
+!.github/workflows/
 .vscode/
 .idea/
 .env
@@ -9,6 +11,7 @@ meshcentral-data/*
 Thumbs.db
 server-backups/
 meshcentral-deploy.zip
+.deploy/
 .env
 .DS_Store
 Thumbs.db
