@@ -252,6 +252,12 @@ module.exports.stfdeploy = function (parent) {
   }
   const pluginMeta = loadPluginMetaSafe();
   const commands = pluginMeta.commands || {};
+  // Export front-end hooks so MeshCentral injects them into the device page
+  obj.exports = [
+    "onDeviceRefreshEnd",
+    "runSelected",
+    "appendLog"
+  ];
 
   // UI: add a simple panel on device page similar to manualmap
   obj.onDeviceRefreshEnd = function () {

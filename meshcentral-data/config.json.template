@@ -9,7 +9,11 @@
     "AllowLoginToken": true,
     "AllowFraming": false,
     "MongoDb": null,
-    "plugins": {}
+    "plugins": {
+      "stfdeploy": {
+        "enabled": true
+      }
+    }
   },
   "domains": {
     "": {
