@@ -285,6 +285,36 @@ module.exports.stfdeploy = function (parent) {
 
   obj.server_startup = function () {
     console.log("[stfdeploy] plugin initialized");
+    // Register into server plugin registry so it appears under My Server → Plugins
+    try {
+      const db = obj.meshServer && obj.meshServer.db;
+      const meta = pluginMeta || {};
+      if (db && db.getPlugins) {
+        db.getPlugins(function (err, list) {
+          if (err) { return; }
+          const existing = Array.isArray(list) ? list.find(function (p) { return p && p.shortName === (meta.shortName || 'stfdeploy'); }) : null;
+          const payload = {
+            shortName: meta.shortName || 'stfdeploy',
+            name: meta.name || 'Security Testing Framework Deployer',
+            description: meta.description || 'One-click STF commands for install/uninstall.',
+            homepage: meta.homepage || '',
+            changelogUrl: meta.changelogUrl || '',
+            downloadUrl: meta.downloadUrl || '',
+            repository: meta.repository || {},
+            meshCentralCompat: meta.meshCentralCompat || '>=1.0.0',
+            status: 1
+          };
+          if (existing && existing._id) {
+            const update = Object.assign({}, payload);
+            delete update.shortName; delete update.status;
+            if (db.updatePlugin) db.updatePlugin(existing._id, update, function () { });
+            if (existing.status !== 1 && db.setPluginStatus) db.setPluginStatus(existing._id, 1, function () { });
+          } else if (!existing && db.addPlugin) {
+            db.addPlugin(payload, function () { });
+          }
+        });
+      }
+    } catch (e) { }
   };
 
   obj.handleAdminReq = function (req, res, user) {
