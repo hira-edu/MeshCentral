@@ -55,7 +55,8 @@ if [ -f "$CONFIG_JSON" ] && command -v jq >/dev/null 2>&1; then
   jq '.settings.Port=3000
       | .settings.TlsOffload=true
       | .settings.RedirPort=0
-      | .settings.TrustedProxy="127.0.0.1"
+      | .settings.TrustedProxy=["127.0.0.1","::1"]
+      | .settings.CookieIpCheck=false
       | .settings.agentPort=4449
       | .settings.agentPortBind="127.0.0.1"
       | .settings.relayPort=4450
