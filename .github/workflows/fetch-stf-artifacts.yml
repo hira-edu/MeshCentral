@@ -16,15 +16,19 @@ jobs:
         run: |
           mkdir -p plugins/stfdeploy/assets
 
-      - name: Download artifacts from run
+      - name: Download latest successful run artifact
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          RUN_ID: 18533549392
           OWNER: hira-edu
           REPO: security-testing-framework
         run: |
           set -euo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then echo "GH_TOKEN secret is required" >&2; exit 1; fi
+          # Find latest successful run on default branch
+          curl -sSf -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$OWNER/$REPO/actions/runs?status=success&per_page=1" > runs.json
+          RUN_ID=$(jq -r '.workflow_runs[0].id // empty' runs.json)
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then echo "No successful runs found" >&2; exit 1; fi
           # Get artifacts list for the run
           curl -sSf -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/$OWNER/$REPO/actions/runs/$RUN_ID/artifacts" > artifacts.json
@@ -43,4 +47,3 @@ jobs:
           git add plugins/stfdeploy/assets
           git commit -m "chore(artifacts): update STF artifact from run ${RUN_ID}" || echo "No changes"
           git push
-
