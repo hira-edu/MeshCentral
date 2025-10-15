@@ -50,6 +50,37 @@ meshcentral-data/plugins/swdabypass/
 4. Click **Deploy** to push the bundle, copy the driver into `System32\drivers`, register the service, and start it.
 5. Use **Check Status** to confirm the agent is online and **Undeploy** to stop/delete the service and remove on-disk artifacts.
 
+## Optional `deploy.manifest.json`
+
+Add a `deploy.manifest.json` to the bundle if you need custom steps before/after the built-in
+driver workflow. Example:
+
+```json
+{
+  "preDeployCommands": [
+    "Write-Host 'Preparing host for InfinityHook deployment'"
+  ],
+  "postDeployCommands": [
+    {
+      "description": "Run the verification script",
+      "command": "& \"$env:ProgramData\\InfinityHook\\verify_bypass.ps1\" -Verbose",
+      "ignoreErrors": true
+    }
+  ],
+  "verifyCommands": [
+    "Get-Service -Name InfinityHookPro -ErrorAction SilentlyContinue | Format-List Name,Status"
+  ],
+  "preUndeployCommands": [
+    "Write-Host 'Stopping InfinityHookPro before removal'; sc.exe stop InfinityHookPro | Out-Null"
+  ]
+}
+```
+
+`preDeployCommands`, `postDeployCommands`, `verifyCommands`, `preUndeployCommands`, and
+`postUndeployCommands` run within the same PowerShell session as the plugin's core logic, so you can
+reference environment variables or files laid down by the bundle. Commands can be strings or objects
+with `command`, `description`, and `ignoreErrors` fields.
+
 ## Notes & Safety
 
 - Loading unsigned kernel drivers requires administrative privileges and typically demands Windows test-signing mode (`bcdedit /set testsigning on`) with Secure Boot disabled.

@@ -45,6 +45,40 @@ meshcentral-data/plugins/bypassmethods/
 3. Click **Deploy** to push the bundle, extract it, and run the build bootstrap.
 4. Use **Check Status** to confirm agent connectivity and **Undeploy** to remove the staged files.
 
+## Optional `deploy.manifest.json`
+
+Include a `deploy.manifest.json` in the root of the archive if you need additional automation
+before/after the framework's build pipeline. Example:
+
+```json
+{
+  "preDeployCommands": [
+    "Write-Host 'Validating GPU prerequisites before build'"
+  ],
+  "postDeployCommands": [
+    {
+      "description": "Archive build log to central share",
+      "command": "Copy-Item -LiteralPath $logFile -Destination \\\\fileserver\\bypass\\ -Force",
+      "ignoreErrors": true
+    }
+  ],
+  "verifyCommands": [
+    "Get-Content -Path $logFile -Tail 10"
+  ],
+  "preUndeployCommands": [
+    "Write-Host 'Stopping framework processes'",
+    "Get-Process -Name BypassMethods -ErrorAction SilentlyContinue | Stop-Process -Force"
+  ],
+  "postUndeployCommands": [
+    "Write-Host 'Framework removed from host.'"
+  ]
+}
+```
+
+Every section accepts either raw strings or objects with `command`, `description`, and `ignoreErrors`
+fields. Commands run from the framework's working directory, so you can reference `$repoRoot`, `$logFile`,
+and other variables created by the default deployment script.
+
 ## Notes
 
 - Running the framework requires administrative privileges and may install additional tooling (Python, Visual Studio Build Tools, etc.) unless you provide a pre-built bundle and disable the prerequisite step.

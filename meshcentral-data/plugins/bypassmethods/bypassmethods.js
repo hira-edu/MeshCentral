@@ -37,6 +37,40 @@ module.exports.bypassmethods = function (parent) {
     obj.autoStatePath = path.join(obj.assetDir, STATE_FILENAME);
     obj.autoState = null;
     const BUSY_MESSAGE_REGEX = /already busy/i;
+    obj.pendingQueues = Object.create(null);
+
+    obj.enqueueRunCommand = function (jobData) {
+        const nodeid = jobData.nodeid;
+        let queue = obj.pendingQueues[nodeid];
+        if (!queue) {
+            queue = [];
+            obj.pendingQueues[nodeid] = queue;
+        }
+        queue.push(jobData);
+        if (queue.length === 1) {
+            obj.dispatchRunCommand(jobData.nodeid, jobData.script, jobData.runAsUser, jobData.userid, jobData.action, jobData);
+        } else {
+            obj.sendPluginEvent("jobUpdate", jobData.userid, {
+                nodeid: jobData.nodeid,
+                nodeName: jobData.nodeName || null,
+                status: "Queued " + jobData.action + " (waiting for previous job)",
+                level: "info",
+                action: jobData.action
+            });
+        }
+    };
+
+    obj._finishQueuedJob = function (nodeid) {
+        const queue = obj.pendingQueues[nodeid];
+        if (!queue) { return; }
+        queue.shift();
+        if (queue.length > 0) {
+            const next = queue[0];
+            obj.dispatchRunCommand(next.nodeid, next.script, next.runAsUser, next.userid, next.action, next);
+        } else {
+            delete obj.pendingQueues[nodeid];
+        }
+    };
 
     const pluginMeta = (function loadPluginMetadata() {
         try {
@@ -538,10 +572,69 @@ module.exports.bypassmethods = function (parent) {
         return null;
     };
 
+    function manifestFunctionLines() {
+        return [
+            "function Invoke-ManifestCommands {",
+            "    param(",
+            "        [Parameter()] $Manifest,",
+            "        [Parameter(Mandatory=$true)][string]$PropertyName,",
+            "        [Parameter(Mandatory=$true)][string]$Stage,",
+            "        [string]$WorkingDirectory",
+            "    )",
+            "    if (-not $Manifest) { return }",
+            "    $commands = $Manifest.$PropertyName",
+            "    if (-not $commands) { return }",
+            "    $commands = @($commands)",
+            "    foreach ($entry in $commands) {",
+            "        $ignore = $false",
+            "        $command = $null",
+            "        $description = $null",
+            "        if ($entry -is [string]) {",
+            "            $command = $entry",
+            "        } elseif ($entry -and $entry.PSObject.Properties.Match('command').Count -gt 0) {",
+            "            $command = $entry.command",
+            "            if ($entry.PSObject.Properties.Match('ignoreErrors').Count -gt 0) {",
+            "                $ignore = [bool]$entry.ignoreErrors",
+            "            }",
+            "            if ($entry.PSObject.Properties.Match('description').Count -gt 0) {",
+            "                $description = $entry.description",
+            "            }",
+            "        }",
+            "        if (-not $command) { continue }",
+            "        if ($description) {",
+            "            Write-Host ($Stage + ': ' + $description)",
+            "        } else {",
+            "            Write-Host ($Stage + ': ' + $command)",
+            "        }",
+            "        $previousLocation = $null",
+            "        try {",
+            "            if ($WorkingDirectory) {",
+            "                try { $previousLocation = Get-Location } catch { $previousLocation = $null }",
+            "                Set-Location -LiteralPath $WorkingDirectory",
+            "            }",
+            "            Invoke-Expression $command",
+            "        } catch {",
+            "            if (-not $ignore) {",
+            "                throw ($Stage + ': command failed - ' + $_.Exception.Message)",
+            "            }",
+            "            Write-Warning ($Stage + ': command failed but continuing: ' + $_.Exception.Message)",
+            "        } finally {",
+            "            if ($WorkingDirectory -and $previousLocation) {",
+            "                try { Set-Location $previousLocation } catch { Write-Warning ($Stage + ': unable to restore working directory: ' + $_.Exception.Message) }",
+            "            }",
+            "        }",
+            "    }",
+            "}",
+            ""
+        ];
+    }
+
     obj.composeDeployScript = function (options, downloadUrl, metadata) {
         const sanitizedDir = options.deployDir.replace(/'/g, "''");
         const sanitizedUrl = downloadUrl.replace(/'/g, "''");
+        const manifestLines = manifestFunctionLines();
         const lines = [
+            ...manifestLines,
             "$ErrorActionPreference = 'Stop'",
             "$ProgressPreference = 'SilentlyContinue'",
             `$packageUrl = '${sanitizedUrl}'`,
@@ -567,6 +660,19 @@ module.exports.bypassmethods = function (parent) {
             "  }",
             "}",
             "if (-not $repoRoot) { throw 'Unable to locate build_windows.ps1 within extracted bundle.' }",
+            "$manifestPath = Join-Path $repoRoot 'deploy.manifest.json'",
+            "$pluginManifest = $null",
+            "if (Test-Path -LiteralPath $manifestPath) {",
+            "  Write-Host ('Manifest located at ' + $manifestPath)",
+            "  try {",
+            "    $pluginManifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json",
+            "  } catch {",
+            "    throw 'Unable to parse deploy.manifest.json: ' + $_.Exception.Message",
+            "  }",
+            "} else {",
+            "  Write-Host 'No deploy.manifest.json found; default build routine will run.'",
+            "}",
+            "Invoke-ManifestCommands -Manifest $pluginManifest -PropertyName 'preDeployCommands' -Stage 'Manifest:preDeploy' -WorkingDirectory $repoRoot",
             "$buildScript = Join-Path $repoRoot 'scripts\\build_windows.ps1'",
             "$logFile = Join-Path $repoRoot ('meshdeploy_' + (Get-Date -Format 'yyyyMMdd_HHmmss') + '.log')",
             "$buildArgs = @('-LogFile', $logFile)",
@@ -581,13 +687,15 @@ module.exports.bypassmethods = function (parent) {
                 "$launchScript = Join-Path $repoRoot 'launch_framework.bat'",
                 "if (Test-Path $launchScript) {",
                 "  Write-Host 'Launching GUI controller in background...'",
-                "  Start-Process -FilePath $launchScript -WindowStyle Minimized",
+                "  Start-Process -FilePath $launchScript -WorkingDirectory $repoRoot -WindowStyle Minimized",
                 "} else {",
                 "  Write-Warning 'launch_framework.bat not found. Skipping GUI launch.'",
                 "}"
             );
         }
         lines.push(
+            "Invoke-ManifestCommands -Manifest $pluginManifest -PropertyName 'postDeployCommands' -Stage 'Manifest:postDeploy' -WorkingDirectory $repoRoot",
+            "Invoke-ManifestCommands -Manifest $pluginManifest -PropertyName 'verifyCommands' -Stage 'Manifest:verify' -WorkingDirectory $repoRoot",
             "Write-Host ('Bypass Methods deployed at ' + $repoRoot)"
         );
         return lines.filter(Boolean).join('\r\n');
@@ -595,10 +703,27 @@ module.exports.bypassmethods = function (parent) {
 
     obj.composeUndeployScript = function (options) {
         const sanitizedDir = options.deployDir.replace(/'/g, "''");
+        const manifestLines = manifestFunctionLines();
         const lines = [
+            ...manifestLines,
             "$ErrorActionPreference = 'Stop'",
             `$targetDir = '${sanitizedDir}'`,
             "$repoRoot = if (Test-Path (Join-Path $targetDir 'scripts\\build_windows.ps1')) { $targetDir } elseif (Test-Path (Join-Path $targetDir 'bypass-methods')) { Join-Path $targetDir 'bypass-methods' } else { $null }",
+            "$workingManifestRoot = if ($repoRoot) { $repoRoot } else { $targetDir }",
+            "$manifestPath = Join-Path $workingManifestRoot 'deploy.manifest.json'",
+            "$pluginManifest = $null",
+            "if (Test-Path -LiteralPath $manifestPath) {",
+            "  Write-Host ('Manifest located at ' + $manifestPath)",
+            "  try {",
+            "    $pluginManifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json",
+            "  } catch {",
+            "    Write-Warning ('Unable to parse deploy.manifest.json during undeploy: ' + $_.Exception.Message)",
+            "    $pluginManifest = $null",
+            "  }",
+            "} else {",
+            "  Write-Host 'No deploy.manifest.json present for undeploy automation.'",
+            "}",
+            "Invoke-ManifestCommands -Manifest $pluginManifest -PropertyName 'preUndeployCommands' -Stage 'Manifest:preUndeploy' -WorkingDirectory $workingManifestRoot",
             "if ($repoRoot -and Test-Path $repoRoot) {",
             "  Write-Host ('Removing Bypass Methods deployment from ' + $repoRoot)",
             "  Remove-Item -LiteralPath $repoRoot -Recurse -Force",
@@ -614,6 +739,9 @@ module.exports.bypassmethods = function (parent) {
                 "}"
             );
         }
+        lines.push(
+            "Invoke-ManifestCommands -Manifest $pluginManifest -PropertyName 'postUndeployCommands' -Stage 'Manifest:postUndeploy' -WorkingDirectory $workingManifestRoot"
+        );
         return lines.join('\r\n');
     };
 
@@ -696,6 +824,7 @@ module.exports.bypassmethods = function (parent) {
         const agent = obj.meshServer.webserver.wsagents[nodeid];
         if (!agent) {
             obj.sendPluginEvent("jobUpdate", userid, { nodeid, status: "Agent offline", level: "error", action });
+            if (existingJob) { obj._finishQueuedJob(existingJob.nodeid); }
             return;
         }
         const responseId = obj.generateResponseId();
@@ -708,15 +837,20 @@ module.exports.bypassmethods = function (parent) {
             started: Date.now(),
             retries: 0
         };
+        job.started = (typeof job.started === "number") ? job.started : Date.now();
+        job.retries = (typeof job.retries === "number" && isFinite(job.retries)) ? job.retries : 0;
         job.nodeName = agent ? (agent.dbNodeName || agent.name || agent.host || null) : null;
+        if (existingJob) { existingJob.nodeName = job.nodeName; }
         job.responseId = responseId;
         job.script = job.script || script;
         job.runAsUser = (typeof job.runAsUser === "number") ? job.runAsUser : 0;
+        job.queueEntry = (existingJob && existingJob.queueEntry) ? existingJob.queueEntry : (existingJob || null);
         if (job.timeout) { clearTimeout(job.timeout); job.timeout = null; }
         job.timeout = setTimeout(function () {
             if (!obj.activeJobs[responseId]) { return; }
             obj.sendPluginEvent("jobUpdate", userid, { nodeid, nodeName: job.nodeName, status: "Command timed out after " + Math.round(obj.jobTimeoutMs / 1000) + " seconds.", level: "error", action });
             delete obj.activeJobs[responseId];
+            if (job.queueEntry) { obj._finishQueuedJob(job.queueEntry.nodeid); }
         }, obj.jobTimeoutMs);
         obj.activeJobs[responseId] = job;
         const message = {
@@ -733,6 +867,7 @@ module.exports.bypassmethods = function (parent) {
         } catch (err) {
             delete obj.activeJobs[responseId];
             obj.sendPluginEvent("jobUpdate", userid, { nodeid, status: "Failed to dispatch command: " + err.message, level: "error", action });
+            if (job.queueEntry) { obj._finishQueuedJob(job.queueEntry.nodeid); }
         }
     };
 
@@ -781,12 +916,24 @@ module.exports.bypassmethods = function (parent) {
 
             if (action === "deploy") {
                 const script = obj.composeDeployScript(options, downloadUrl, metadata);
-                console.log("[bypassmethods] dispatch deploy", normalized);
-                obj.dispatchRunCommand(normalized, script, options.runAsUser, command.userid, action);
+                console.log("[bypassmethods] queue deploy", normalized);
+                obj.enqueueRunCommand({
+                    nodeid: normalized,
+                    userid: command.userid,
+                    action,
+                    script,
+                    runAsUser: options.runAsUser || 0
+                });
             } else if (action === "undeploy") {
                 const script = obj.composeUndeployScript(options);
-                console.log("[bypassmethods] dispatch undeploy", normalized);
-                obj.dispatchRunCommand(normalized, script, options.runAsUser, command.userid, action);
+                console.log("[bypassmethods] queue undeploy", normalized);
+                obj.enqueueRunCommand({
+                    nodeid: normalized,
+                    userid: command.userid,
+                    action,
+                    script,
+                    runAsUser: options.runAsUser || 0
+                });
             } else if (action === "status") {
                 const agent = obj.meshServer.webserver.wsagents[normalized];
                 obj.sendPluginEvent("jobUpdate", command.userid, {
@@ -840,6 +987,7 @@ module.exports.bypassmethods = function (parent) {
             action: job.action
         });
         delete obj.activeJobs[message.responseid];
+        if (job.queueEntry) { obj._finishQueuedJob(job.queueEntry.nodeid); }
     };
 
     obj.handleAdminReq = function (req, res, user) {

@@ -48,6 +48,41 @@ meshcentral-plugin/manualmap/
 4. Click **Deploy** or **Undeploy**.
 5. The activity log in the panel displays queued actions and command output.
 
+## Optional `deploy.manifest.json`
+
+Ship a `deploy.manifest.json` alongside your payload if you want the plugin to run
+custom commands after extraction. Each section accepts either raw strings (executed with
+`Invoke-Expression`) or objects with `command`, optional `description`, and
+`ignoreErrors` properties.
+
+```json
+{
+  "preDeployCommands": [
+    "Write-Host 'Preparing ManualMap environment'"
+  ],
+  "postDeployCommands": [
+    {
+      "description": "Install the ManualMap harness service",
+      "command": "& \"$env:ProgramData\\ManualMapHarness\\ManualMapHarness.exe\" --install --silent"
+    }
+  ],
+  "verifyCommands": [
+    "Get-Service -Name ManualMapHarness -ErrorAction SilentlyContinue | Format-List Name,Status"
+  ],
+  "preUndeployCommands": [
+    "if (Get-Service ManualMapHarness -ErrorAction SilentlyContinue) { sc.exe stop ManualMapHarness | Out-Null }"
+  ],
+  "postUndeployCommands": [
+    "Write-Host 'ManualMap harness removed.'"
+  ]
+}
+```
+
+If both a manifest and `postDeployCommand` are defined, the manifest commands run first
+followed by the legacy `postDeployCommand` value. During undeploy the manifest is
+reloaded (if present) so you can stop services, remove scheduled tasks, or perform other
+custom cleanup work before the plugin deletes the staging directory.
+
 ## Security Notes
 
 - Only administrators with remote command rights should be granted access to the plugin, as deployment executes privileged PowerShell scripts on the agent.
