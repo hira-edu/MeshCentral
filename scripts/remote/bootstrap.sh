@@ -146,6 +146,17 @@ else
   echo "Nginx not installed; please install and retry to enable TLS offload."
 fi
 
+# Optional firewall openings (opt-in): set UFW_MANAGE=1 to apply
+if [ -n "${UFW_MANAGE:-}" ] && command -v ufw >/dev/null 2>&1; then
+  echo "[FW] Configuring UFW rules for ports 80,443,4445,4446,4430"
+  ufw allow 80/tcp || true
+  ufw allow 443/tcp || true
+  ufw allow 4445/tcp || true
+  ufw allow 4446/tcp || true
+  ufw allow 4430/tcp || true
+  ufw reload || true
+fi
+
 echo "[7/7] Restarting service..."
 systemctl restart ${SERVICE_NAME}
 systemctl status ${SERVICE_NAME} --no-pager -l || true

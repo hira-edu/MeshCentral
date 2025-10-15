@@ -1,0 +1,49 @@
+name: Fix MeshCentral
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Upload repo to server (staging dir)
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: ${{ secrets.SSH_PORT }}
+          source: "."
+          target: "/opt/meshcentral-app.new"
+          rm: true
+          strip_components: 1
+
+      - name: Apply fixes (bootstrap) and diagnose
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          NGINX_MANAGE: '1'
+          UFW_MANAGE: '1'
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            set -euo pipefail
+            [ -d /opt/meshcentral-app.new ] || { echo "Missing staging directory" >&2; exit 1; }
+            systemctl stop meshcentral || true
+            if [ -d /opt/meshcentral-app/meshcentral-data ]; then
+              mkdir -p /opt/meshcentral-app.new/meshcentral-data
+              rsync -a /opt/meshcentral-app/meshcentral-data/ /opt/meshcentral-app.new/meshcentral-data/
+            fi
+            if [ -d /opt/meshcentral-app ]; then mv /opt/meshcentral-app "/opt/meshcentral-app.prev.$(date +%Y%m%d%H%M%S)"; fi
+            mv /opt/meshcentral-app.new /opt/meshcentral-app
+            cd /opt/meshcentral-app
+            bash scripts/remote/bootstrap.sh
+            echo "--- Running diagnostics ---"
+            bash scripts/remote/diagnose.sh || true
+
