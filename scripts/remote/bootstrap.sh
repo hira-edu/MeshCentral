@@ -52,7 +52,14 @@ CONFIG_JSON="$APP_DIR/meshcentral-data/config.json"
 if [ -f "$CONFIG_JSON" ] && command -v jq >/dev/null 2>&1; then
   echo "[4a] Patching meshcentral-data/config.json for TLS offload (Port=3000,TlsOffload=true,RedirPort=0, internal agent/relay)"
   tmpcfg=$(mktemp)
-  jq '.settings.Port=3000 | .settings.TlsOffload=true | .settings.RedirPort=0 | .settings.agentPort=4449 | .settings.agentPortBind="127.0.0.1" | .settings.relayPort=4450 | .settings.relayPortBind="127.0.0.1"' "$CONFIG_JSON" > "$tmpcfg" && mv "$tmpcfg" "$CONFIG_JSON"
+  jq '.settings.Port=3000
+      | .settings.TlsOffload=true
+      | .settings.RedirPort=0
+      | .settings.TrustedProxy="127.0.0.1"
+      | .settings.agentPort=4449
+      | .settings.agentPortBind="127.0.0.1"
+      | .settings.relayPort=4450
+      | .settings.relayPortBind="127.0.0.1"' "$CONFIG_JSON" > "$tmpcfg" && mv "$tmpcfg" "$CONFIG_JSON"
   chown "$SERVICE_USER":"$SERVICE_USER" "$CONFIG_JSON"
 fi
 
