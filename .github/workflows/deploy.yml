@@ -25,6 +25,8 @@ jobs:
 
       - name: Bootstrap and restart MeshCentral (preserve data)
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          NGINX_MANAGE: '1'
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
@@ -51,7 +53,7 @@ jobs:
             cd /opt/meshcentral-app
             bash scripts/remote/bootstrap.sh
 
-      - name: Health check (direct MeshCentral TLS)
+      - name: Health check (backend + Nginx endpoints)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -60,15 +62,27 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           script: |
             set -euo pipefail
-            echo "[health] Checking MeshCentral direct TLS on 127.0.0.1:443"
-            curl -k -sSf -o /dev/null https://127.0.0.1/ || { echo "Backend health check failed" >&2; systemctl status meshcentral --no-pager -l || true; exit 1; }
-            CERT=$(jq -r '.settings.Cert // empty' /opt/meshcentral-app/meshcentral-data/config.json 2>/dev/null || echo '')
-            if [ -n "${CERT}" ]; then
-              echo "[health] Checking MeshCentral on https://${CERT}/"
-              CODE=$(curl -k -s -o /dev/null -w "%{http_code}" https://${CERT}/ || echo 000)
-              if [ "$CODE" -ge 400 ] || [ "$CODE" = "000" ]; then
-                echo "Frontend check to https://${CERT}/ failed with code $CODE" >&2
-                systemctl status meshcentral --no-pager -l || true
-                exit 1
-              fi
+            echo "[health] Checking MeshCentral backend on 127.0.0.1:3000"
+            curl -sSf -o /dev/null http://127.0.0.1:3000/ || { echo "Backend health failed" >&2; systemctl status meshcentral --no-pager -l || true; exit 1; }
+            CERT=$(jq -r '.settings.Cert // .settings.cert // empty' /opt/meshcentral-app/meshcentral-data/config.json 2>/dev/null || echo '')
+            if [ -z "${CERT}" ]; then CERT=localhost; fi
+            echo "[health] Checking https://${CERT}/"
+            CODE=$(curl -k -s -o /dev/null -w "%{http_code}" https://${CERT}/ || echo 000)
+            if [ "$CODE" -ge 400 ] || [ "$CODE" = "000" ]; then
+              echo "Frontend check failed with code $CODE" >&2
+              nginx -t || true
+              tail -n 200 /var/log/nginx/error.log || true
+              exit 1
+            fi
+            echo "[health] Checking agents endpoint https://agents.${CERT}:4445/agent.ashx"
+            CODE=$(curl -k -s -o /dev/null -w "%{http_code}" https://agents.${CERT}:4445/agent.ashx || echo 000)
+            if [ "$CODE" -ge 500 ] || [ "$CODE" = "000" ]; then
+              echo "Agent endpoint failed with code $CODE" >&2
+              exit 1
+            fi
+            echo "[health] Checking relay endpoint https://relay.${CERT}:4446/meshrelay"
+            CODE=$(curl -k -s -o /dev/null -w "%{http_code}" https://relay.${CERT}:4446/meshrelay || echo 000)
+            if [ "$CODE" -ge 500 ] || [ "$CODE" = "000" ]; then
+              echo "Relay endpoint failed with code $CODE" >&2
+              exit 1
             fi

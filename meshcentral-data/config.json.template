@@ -1,14 +1,22 @@
 {
   "settings": {
     "Cert": "mesh.example.com",
-    "Port": 443,
-    "RedirPort": 80,
-    "TlsOffload": false,
+    "Port": 3000,
+    "RedirPort": 0,
+    "TlsOffload": true,
     "AliasPort": 443,
     "AllowNewAccounts": true,
     "AllowLoginToken": true,
     "AllowFraming": false,
     "MongoDb": null,
+    "agentPort": 4449,
+    "agentPortBind": "127.0.0.1",
+    "agentAliasPort": 4445,
+    "agentAliasDNS": "agents.mesh.example.com",
+    "agentPortTls": true,
+    "relayPort": 4450,
+    "relayPortBind": "127.0.0.1",
+    "relayAliasPort": 4446,
     "plugins": {
       "stfdeploy": {
         "enabled": true
