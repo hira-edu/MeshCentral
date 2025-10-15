@@ -1,0 +1,23 @@
+{
+  "settings": {
+    "Cert": "mesh.example.com",
+    "Port": 4430,
+    "RedirPort": 80,
+    "TlsOffload": false,
+    "AliasPort": 4430,
+    "AllowNewAccounts": true,
+    "AllowLoginToken": true,
+    "AllowFraming": false,
+    "MongoDb": null,
+    "plugins": {}
+  },
+  "domains": {
+    "": {
+      "Title": "MeshCentral",
+      "NewAccounts": true,
+      "Auth": "default",
+      "UserNameIsEmail": false
+    }
+  }
+}
+

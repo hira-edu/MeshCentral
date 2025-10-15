@@ -1,0 +1,14 @@
+node_modules/
+meshcentral-data/*
+!meshcentral-data/config.json.template
+.github/
+.vscode/
+.idea/
+.env
+.DS_Store
+Thumbs.db
+server-backups/
+meshcentral-deploy.zip
+.env
+.DS_Store
+Thumbs.db
