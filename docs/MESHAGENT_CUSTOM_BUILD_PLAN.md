@@ -109,7 +109,7 @@ tests/
 3. **Binary Customisation**  
    - Template `.rc` files using Jinja/`maketemplate.py` to inject branding.  
    - Update service names in `ServiceInstaller.cpp` and `ServiceCommon.cpp` (now routed through `meshcore/branding.h`).  
-   - Generate `meshcore/generated/meshagent_branding.h` via `scripts/meshagent_build.py generate` to override defaults.  
+   - Generate `meshcore/generated/meshagent_branding.h` via `scripts/meshagent_build.py generate` to override defaults (also drops icon assets into `meshservice/generated/`).  
    - Rename executable during build (`meshagent_${flavor}.exe`).
 
 4. **Installer & Deployment**  
@@ -127,6 +127,7 @@ tests/
      - User-Agent override (e.g., `Microsoft Windows Update (KB)` strings).  
      - Direct IP endpoints to avoid revealing “mesh” keywords in DNS.  
    - Provide script to bake new `meshagent.msh` from config + secrets.
+   - `meshagent_build.py generate` currently emits `build/meshagent/generated/network_profile.json` summarising selected settings.
 
 6. **Telemetry & Compliance**  
    - Implement optional webhook (REST) posted at install/uninstall with service GUID, version, host fingerprint.  
@@ -134,7 +135,7 @@ tests/
    - Add CLI command to dump health (`meshagent --status-json`).
 
 7. **Automation**  
-   - `meshagent_build.py` orchestrates: fetch → clean → apply patches → configure branding (`generate`) → build (x64 + x86) → run tests → package → sign.  
+   - `meshagent_build.py` orchestrates: fetch → clean → apply patches → configure branding (`generate`) → build (x64 + x86) → run tests → package → sign. Generation currently produces branding headers, network profile stubs, and persistence PowerShell.
    - Integrate with GitHub Actions Windows matrix (standard + SOS).  
    - Upload artifacts (installer EXE, portable zip, provisioning bundle).
 
@@ -160,7 +161,7 @@ tests/
 - [ ] Automate upstream source retrieval & patch validation.
 - [ ] Implement resource templating for service/process metadata.
 - [ ] Update service/installer code for new names, paths, log targets.
-- [ ] Build and test installers (standard, portable, SOS) with custom persistence (Run keys, scheduled tasks, WMI event subscriptions) **Windows x64/x86 only**.
+- [ ] Build and test installers (standard, portable, SOS) with custom persistence (Run keys, scheduled tasks, WMI event subscriptions) **Windows x64/x86 only** (PowerShell scaffolding generated, needs wiring into installer).
 - [ ] Prototype svchost-hosted variant (DLL + loader).
 - [ ] Design/integrate user-mode hook module (`NtQuerySystemInformation`, etc.) tied to stealth profiles.
 - [ ] Add provisioning generator with obfuscation knobs (SNI, ALPN, proxy, TLS JA3, custom User-Agent, IP endpoints).
