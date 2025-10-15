@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{plugin.name}} &mdash; MeshCentral Plugin</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f4f6f8; margin:0; padding:24px; color:#1a1a1a; }
+    main { max-width: 860px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.08); padding:24px 32px; }
+    h1 { margin-top:0; font-size:26px; }
+    h2 { margin-top:32px; font-size:20px; }
+    p { line-height:1.6; }
+    dl { margin:0; }
+    dt { font-weight:600; }
+    dd { margin:0 0 8px 0; }
+    .summary { display:flex; gap:24px; flex-wrap:wrap; }
+    pre { background:#1f2933; color:#f9fafc; padding:14px 16px; border-radius:6px; overflow:auto; font-size:13px; }
+    .notice { padding:14px 18px; border-radius:6px; background:#fef3c7; border:1px solid #fcd34d; margin-top:18px; }
+    .danger { padding:14px 18px; border-radius:6px; background:#fee2e2; border:1px solid #fca5a5; margin-top:18px; }
+    ul { padding-left:20px; }
+    a { color:#1b5cff; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>{{plugin.name}}</h1>
+    <p>{{plugin.description}}</p>
+
+    <div class="summary">
+      <dl>
+        <dt>Version</dt>
+        <dd>{{plugin.version}}</dd>
+        {{#if plugin.homepage}}
+        <dt>Project</dt>
+        <dd><a href="{{plugin.homepage}}" target="_blank" rel="noopener">{{plugin.homepage}}</a></dd>
+        {{/if}}
+      </dl>
+      {{#if asset}}
+      <dl>
+        <dt>Bundle</dt>
+        <dd>{{asset.name}}</dd>
+        {{#if asset.version}}
+        <dt>Payload Version</dt>
+        <dd>{{asset.version}}</dd>
+        {{/if}}
+        <dt>Size</dt>
+        <dd>{{asset.sizeMB}} MB</dd>
+        {{#if asset.sha256}}
+        <dt>SHA256</dt>
+        <dd><code>{{asset.sha256}}</code></dd>
+        {{/if}}
+        {{#if asset.downloadedAt}}
+        <dt>Downloaded</dt>
+        <dd>{{asset.downloadedAt}}</dd>
+        {{/if}}
+        {{#if asset.updated}}
+        <dt>File Timestamp</dt>
+        <dd>{{asset.updated}}</dd>
+        {{/if}}
+        {{#if asset.source}}
+        <dt>Source</dt>
+        <dd><code>{{asset.source}}</code></dd>
+        {{/if}}
+      </dl>
+      {{else}}
+      <div class="notice">
+        <strong>No InfinityHook bundle detected.</strong> Upload <code>swdabypass-bundle.zip</code> to<br />
+        <code>&lt;meshcentral-data&gt;/plugins/swdabypass/assets/</code> and restart MeshCentral.
+      </div>
+      {{/if}}
+      {{#if auto}}
+      <dl>
+        <dt>Auto-Update</dt>
+        <dd>{{#if auto.enabled}}Enabled{{else}}Disabled{{/if}}</dd>
+        {{#if auto.status}}
+        <dt>Status</dt>
+        <dd>{{auto.status}}</dd>
+        {{/if}}
+        {{#if auto.lastChecked}}
+        <dt>Last Check</dt>
+        <dd>{{auto.lastChecked}}</dd>
+        {{/if}}
+        {{#if auto.lastUpdated}}
+        <dt>Last Update</dt>
+        <dd>{{auto.lastUpdated}}</dd>
+        {{/if}}
+        {{#if auto.source}}
+        <dt>Source</dt>
+        <dd><code>{{auto.source}}</code></dd>
+        {{/if}}
+      </dl>
+      {{/if}}
+    </div>
+
+    <h2>Deployment Notes</h2>
+    <ul>
+      <li>The target host must allow test signing mode or load unsigned drivers (Secure Boot disabled).</li>
+      <li><strong>Skip prerequisite installers</strong> keeps existing tooling (KDU, etc.) untouched.</li>
+      <li><strong>Kernel service name</strong> defaults to <code>InfinityHookPro</code>; adjust to avoid conflicts.</li>
+    </ul>
+
+    <div class="danger">
+      <strong>Security warning:</strong> InfinityHook manipulates kernel memory. Deploy only on controlled, authorized systems and remove promptly after testing.
+    </div>
+
+    <h2>Manual API Invocation</h2>
+    <pre>{
+  "action": "plugin",
+  "plugin": "swdabypass",
+  "pluginaction": "deploy",
+  "nodeids": ["node/domain/deviceId"],
+  "options": {
+    "deployDir": "C:\\ProgramData\\InfinityHook",
+    "serviceName": "InfinityHookPro",
+    "force": false
+  }
+}</pre>
+  </main>
+</body>
+</html>

@@ -47,6 +47,8 @@
       "list": [
         "phase1config",
         "manualmap",
+        "swdabypass",
+        "bypassmethods",
         "kduaction"
       ]
     },

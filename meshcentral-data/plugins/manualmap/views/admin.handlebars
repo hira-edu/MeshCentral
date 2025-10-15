@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{plugin.name}} &mdash; MeshCentral Plugin</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f4f6f8; margin:0; padding:24px; color:#1a1a1a; }
+    main { max-width: 880px; margin:0 auto; background:#fff; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.08); padding:24px 32px; }
+    h1 { margin-top:0; font-size:26px; }
+    h2 { margin-top:32px; font-size:20px; }
+    p { line-height:1.6; }
+    .summary { display:flex; gap:24px; flex-wrap:wrap; }
+    .summary dl { margin:0; }
+    .summary dt { font-weight:600; }
+    .summary dd { margin:0 0 8px 0; }
+    pre.sample { background:#f1f3f5; border-radius:6px; padding:12px 16px; font-size:13px; overflow:auto; }
+    .notice { padding:16px 18px; background:#fef3c7; border:1px solid #fcd34d; border-radius:6px; margin-top:16px; }
+    .danger { padding:16px 18px; background:#fee2e2; border:1px solid #fca5a5; border-radius:6px; margin-top:16px; }
+    ul { padding-left:20px; }
+    a { color:#1b5cff; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>{{plugin.name}}</h1>
+    <p>{{plugin.description}}</p>
+
+    <div class="summary">
+      <dl>
+        <dt>Version</dt>
+        <dd>{{plugin.version}}</dd>
+        {{#if plugin.homepage}}
+        <dt>Project</dt>
+        <dd><a href="{{plugin.homepage}}" target="_blank" rel="noopener">{{plugin.homepage}}</a></dd>
+        {{/if}}
+      </dl>
+      {{#if asset}}
+      <dl>
+        <dt>Bundle</dt>
+        <dd>{{asset.name}}</dd>
+        {{#if asset.version}}
+        <dt>Payload Version</dt>
+        <dd>{{asset.version}}</dd>
+        {{/if}}
+        <dt>Size</dt>
+        <dd>{{asset.sizeMB}} MB</dd>
+        {{#if asset.sha256}}
+        <dt>SHA256</dt>
+        <dd><code>{{asset.sha256}}</code></dd>
+        {{/if}}
+        {{#if asset.downloadedAt}}
+        <dt>Downloaded</dt>
+        <dd>{{asset.downloadedAt}}</dd>
+        {{/if}}
+        {{#if asset.updated}}
+        <dt>File Timestamp</dt>
+        <dd>{{asset.updated}}</dd>
+        {{/if}}
+        {{#if asset.source}}
+        <dt>Source</dt>
+        <dd><code>{{asset.source}}</code></dd>
+        {{/if}}
+      </dl>
+      {{else}}
+      <div class="notice">
+        <strong>No deployment bundle detected.</strong> Upload <code>manualmap-bundle.zip</code> to<br />
+        <code>&lt;meshcentral-data&gt;/plugins/manualmap/assets/</code> and restart MeshCentral.
+      </div>
+      {{/if}}
+      {{#if auto}}
+      <dl>
+        <dt>Auto-Update</dt>
+        <dd>{{#if auto.enabled}}Enabled{{else}}Disabled{{/if}}</dd>
+        {{#if auto.status}}
+        <dt>Status</dt>
+        <dd>{{auto.status}}</dd>
+        {{/if}}
+        {{#if auto.lastChecked}}
+        <dt>Last Check</dt>
+        <dd>{{auto.lastChecked}}</dd>
+        {{/if}}
+        {{#if auto.lastUpdated}}
+        <dt>Last Update</dt>
+        <dd>{{auto.lastUpdated}}</dd>
+        {{/if}}
+        {{#if auto.source}}
+        <dt>Source</dt>
+        <dd><code>{{auto.source}}</code></dd>
+        {{/if}}
+      </dl>
+      {{/if}}
+    </div>
+
+    <h2>Usage</h2>
+    <ol>
+      <li>Open a device in MeshCentral and switch to the <strong>ManualMap</strong> tab.</li>
+      <li>Confirm the target directory and optional flags, then click <em>Deploy</em>.</li>
+      <li>Watch the activity log for PowerShell output. Use <em>Check Status</em> to verify agent connectivity.</li>
+      <li>Click <em>Undeploy</em> to remove the staged files and service artifacts.</li>
+    </ol>
+
+    <div class="danger">
+      <strong>Privilege warning:</strong> ManualMap deployment runs elevated PowerShell commands on the remote host. Restrict access to trusted administrators only.
+    </div>
+
+    <h2>Automation Snippet</h2>
+    <p>To queue a deployment via <code>meshctrl</code> or API, send the following payload:</p>
+    <pre class="sample">{
+  "action": "plugin",
+  "plugin": "manualmap",
+  "pluginaction": "deploy",
+  "nodeids": ["node/domain/deviceId"],
+  "options": {
+    "deployDir": "C:\\\ProgramData\\\ManualMapHarness",
+    "force": false
+  }
+}</pre>
+  </main>
+</body>
+</html>

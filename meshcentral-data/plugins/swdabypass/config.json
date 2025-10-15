@@ -1,0 +1,17 @@
+{
+  "name": "Affinity Bypass Deployer",
+  "shortName": "swdabypass",
+  "version": "0.1.0",
+  "author": "High Support Automation",
+  "description": "Deploy the InfinityHook SetWindowDisplayAffinity bypass driver to selected endpoints.",
+  "hasAdminPanel": true,
+  "homepage": "https://github.com/hira-edu/Bypass-SetWindowDisplayAffinity",
+  "changelogUrl": "https://github.com/hira-edu/Bypass-SetWindowDisplayAffinity/releases",
+  "configUrl": "https://high.support/plugins/swdabypass/config.json",
+  "downloadUrl": "https://github.com/hira-edu/Bypass-SetWindowDisplayAffinity/archive/refs/heads/main.zip",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hira-edu/Bypass-SetWindowDisplayAffinity.git"
+  },
+  "meshCentralCompat": ">=1.0.0"
+}

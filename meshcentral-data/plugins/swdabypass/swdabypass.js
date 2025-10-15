@@ -1,6 +1,6 @@
 "use strict";
 
-module.exports.manualmap = function (parent) {
+module.exports.swdabypass = function (parent) {
     const obj = {};
     const path = require("path");
     const fs = require("fs");
@@ -14,16 +14,16 @@ module.exports.manualmap = function (parent) {
     obj.crypto = crypto;
 
     const defaultSettings = {
-        assetFile: "manualmap-bundle.zip",
-        deployDir: "C:\\ProgramData\\ManualMapHarness",
+        assetFile: "swdabypass-bundle.zip",
+        deployDir: "C:\\ProgramData\\InfinityHook",
         runAsUser: 0,
         cleanupOnUndeploy: true,
-        postDeployCommand: null
+        serviceName: "InfinityHookPro"
     };
 
     obj.settingsPath = path.join(__dirname, "settings.json");
     obj.assetDir = path.join(__dirname, "assets");
-    obj.assetRoute = "/plugins/manualmap/assets";
+    obj.assetRoute = "/plugins/swdabypass/assets";
     obj.httpRegistered = false;
     obj.activeJobs = Object.create(null);
     obj.assetMetadata = null;
@@ -43,7 +43,7 @@ module.exports.manualmap = function (parent) {
             if (meta && typeof meta === "object") { meta.hasAdminPanel = true; }
             return meta || {};
         } catch (err) {
-            console.error("[manualmap] Unable to read config.json for metadata.", err);
+            console.error("[swdabypass] Unable to read config.json for metadata.", err);
             return {};
         }
     })();
@@ -56,7 +56,7 @@ module.exports.manualmap = function (parent) {
                 settings = { ...settings, ...overrides };
             }
         } catch (err) {
-            console.error("[manualmap] Unable to parse settings.json. Falling back to defaults.", err);
+            console.error("[swdabypass] Unable to parse settings.json. Falling back to defaults.", err);
         }
         return settings;
     }
@@ -67,7 +67,7 @@ module.exports.manualmap = function (parent) {
             const raw = fs.readFileSync(obj.autoStatePath, "utf8");
             return JSON.parse(raw);
         } catch (err) {
-            console.warn("[manualmap] Unable to read auto-update state.", err);
+            console.warn("[swdabypass] Unable to read auto-update state.", err);
             return null;
         }
     }
@@ -99,7 +99,7 @@ module.exports.manualmap = function (parent) {
                     return null;
                 }
             } catch (err) {
-                console.error("[manualmap] Unable to enumerate asset directory.", err);
+                console.error("[swdabypass] Unable to enumerate asset directory.", err);
                 return null;
             }
         }
@@ -139,21 +139,21 @@ module.exports.manualmap = function (parent) {
                 if (autoState.source) { obj.assetMetadata.source = autoState.source; }
             }
         } catch (err) {
-            console.error("[manualmap] Failed to compute asset metadata.", err);
+            console.error("[swdabypass] Failed to compute asset metadata.", err);
             obj.assetMetadata = null;
         }
         return obj.assetMetadata;
     }
 
     function setupAssetWatcher() {
-        try { fs.mkdirSync(obj.assetDir, { recursive: true }); } catch (err) { console.error("[manualmap] Unable to ensure asset directory exists.", err); }
+        try { fs.mkdirSync(obj.assetDir, { recursive: true }); } catch (err) { console.error("[swdabypass] Unable to ensure asset directory exists.", err); }
         try {
             if (obj.assetWatcher) { obj.assetWatcher.close(); }
             obj.assetWatcher = fs.watch(obj.assetDir, { persistent: false }, function () {
                 obj.assetMetadata = null;
             });
         } catch (err) {
-            console.warn("[manualmap] Unable to watch asset directory.", err);
+            console.warn("[swdabypass] Unable to watch asset directory.", err);
         }
     }
 
@@ -162,6 +162,7 @@ module.exports.manualmap = function (parent) {
     const frontendDefaultsLiteral = escapeForJavascript(JSON.stringify({
         deployDir: obj.settings.deployDir,
         runAsUser: obj.settings.runAsUser,
+        serviceName: obj.settings.serviceName,
         assetVersion: (initialMeta && initialMeta.sha256) ? initialMeta.sha256.substring(0, 8) : (obj.settings.assetVersion || "dev"),
         assetFile: (initialMeta && initialMeta.name) || obj.settings.assetFile,
         forceRedeploy: false
@@ -194,11 +195,11 @@ module.exports.manualmap = function (parent) {
             if (err || !Array.isArray(plugins)) { return; }
             const existing = plugins.find((p) => p && p.shortName === pluginMeta.shortName);
             const payload = {
-                name: pluginMeta.name || "ManualMap Deployer",
-                shortName: pluginMeta.shortName || "manualmap",
+                name: pluginMeta.name || "Affinity Bypass Deployer",
+                shortName: pluginMeta.shortName || "swdabypass",
                 version: pluginMeta.version || "0.0.0",
                 author: pluginMeta.author || "",
-                description: pluginMeta.description || "MeshCentral plugin for deploying ManualMap harness assets.",
+                description: pluginMeta.description || "Deploy the InfinityHook SetWindowDisplayAffinity bypass driver.",
                 hasAdminPanel: true,
                 homepage: pluginMeta.homepage || "",
                 changelogUrl: pluginMeta.changelogUrl || pluginMeta.homepage || "",
@@ -223,7 +224,7 @@ module.exports.manualmap = function (parent) {
     }
 
     const autoUpdater = createPayloadUpdater({
-        pluginShortName: pluginMeta.shortName || "manualmap",
+        pluginShortName: pluginMeta.shortName || "swdabypass",
         pluginMeta,
         assetDir: obj.assetDir,
         defaultAssetName: defaultSettings.assetFile,
@@ -231,35 +232,35 @@ module.exports.manualmap = function (parent) {
         log: function (level, message, err) {
             const logger = console[level] || console.log;
             if (err) {
-                logger.call(console, "[manualmap] " + message, err);
+                logger.call(console, "[swdabypass] " + message, err);
             } else {
-                logger.call(console, "[manualmap] " + message);
+                logger.call(console, "[swdabypass] " + message);
             }
         },
         onStateUpdated: function (state) {
             const previous = obj.autoState || null;
             obj.autoState = state || null;
-            let refreshMetadata = false;
+            let refresh = false;
             if (state && state.assetFile && obj.settings.assetFile !== state.assetFile) {
                 obj.settings.assetFile = state.assetFile;
-                refreshMetadata = true;
+                refresh = true;
             }
             if (!!previous !== !!state) {
-                refreshMetadata = true;
+                refresh = true;
             } else if (previous && state) {
                 if (previous.assetFile !== state.assetFile ||
                     previous.sha256 !== state.sha256 ||
                     previous.downloadedAt !== state.downloadedAt ||
                     previous.version !== state.version) {
-                    refreshMetadata = true;
+                    refresh = true;
                 }
             }
             if (state && state.version && pluginMeta.version !== state.version) {
                 pluginMeta.version = state.version;
                 ensurePluginRegistered();
-                refreshMetadata = true;
+                refresh = true;
             }
-            if (refreshMetadata) {
+            if (refresh) {
                 obj.assetMetadata = null;
                 computeAssetMetadata(true);
             }
@@ -276,73 +277,79 @@ module.exports.manualmap = function (parent) {
     obj.autoUpdater = autoUpdater;
 
     obj.onDeviceRefreshEnd = function () {
-        var defaults = pluginHandler.manualmap._getDefaults();
-        pluginHandler.registerPluginTab({ tabTitle: "ManualMap", tabId: "pluginManualMap" });
-        var container = document.getElementById("pluginManualMap");
+        var defaults = pluginHandler.swdabypass._getDefaults();
+        pluginHandler.registerPluginTab({ tabTitle: "Affinity Bypass", tabId: "pluginSetWindowBypass" });
+        var container = document.getElementById("pluginSetWindowBypass");
         if (!container) { return; }
         container.style.height = "calc(100vh - 220px)";
         container.style.overflowY = "auto";
         container.style.paddingRight = "12px";
         container.style.boxSizing = "border-box";
-        if (!document.getElementById("manualmap-style")) {
+        if (!document.getElementById("swdabypass-style")) {
             var style = document.createElement("style");
-            style.id = "manualmap-style";
+            style.id = "swdabypass-style";
             style.textContent =
-                ".manualmap-panel{padding:12px;display:flex;flex-direction:column;gap:12px;}" +
-                ".manualmap-actions{display:flex;gap:8px;}" +
-                ".manualmap-log{max-height:220px;overflow:auto;border:1px solid #ccc;padding:8px;font-family:monospace;font-size:12px;background:#fafafa;}" +
-                ".manualmap-log-entry{margin-bottom:4px;}" +
-                ".manualmap-log-error{color:#b00020;}" +
-                ".manualmap-btn{padding:6px 12px;}" +
-                ".manualmap-meta{border:1px solid #ddd;padding:8px;background:#f7f7f7;font-size:12px;}" +
-                ".manualmap-meta code{word-break:break-all;}";
+                ".swdabypass-panel{padding:12px;display:flex;flex-direction:column;gap:12px;}" +
+                ".swdabypass-actions{display:flex;gap:8px;}" +
+                ".swdabypass-log{max-height:220px;overflow:auto;border:1px solid #ccc;padding:8px;font-family:monospace;font-size:12px;background:#fafafa;}" +
+                ".swdabypass-log-entry{margin-bottom:4px;}" +
+                ".swdabypass-log-error{color:#b00020;}" +
+                ".swdabypass-btn{padding:6px 12px;}" +
+                ".swdabypass-meta{border:1px solid #ddd;padding:8px;background:#f7f7f7;font-size:12px;}" +
+                ".swdabypass-meta code{word-break:break-all;}";
             document.head.appendChild(style);
         }
         var forceChecked = defaults.forceRedeploy ? "checked" : "";
         container.innerHTML =
-            '<div class="manualmap-panel">' +
-            '  <div class="manualmap-field">' +
-            '    <label for="manualmap-target-dir">Target directory</label>' +
-            '    <input id="manualmap-target-dir" type="text" value="' + defaults.deployDir + '" style="width:100%;" />' +
+            '<div class="swdabypass-panel">' +
+            '  <div class="swdabypass-field">' +
+            '    <label for="swdabypass-target-dir">Staging directory</label>' +
+            '    <input id="swdabypass-target-dir" type="text" value="' + defaults.deployDir + '" style="width:100%;" />' +
             '  </div>' +
-            '  <div class="manualmap-field">' +
-            '    <label><input type="checkbox" id="manualmap-force" ' + forceChecked + '> Force redeploy</label>' +
+            '  <div class="swdabypass-field">' +
+            '    <label for="swdabypass-service-name">Kernel service name</label>' +
+            '    <input id="swdabypass-service-name" type="text" value="' + defaults.serviceName + '" style="width:100%;" />' +
             '  </div>' +
-            '  <div class="manualmap-actions">' +
-            '    <button class="manualmap-btn" onclick="return pluginHandler.manualmap.deploySelected();">Deploy</button>' +
-            '    <button class="manualmap-btn" onclick="return pluginHandler.manualmap.undeploySelected();">Undeploy</button>' +
-            '    <button class="manualmap-btn" onclick="return pluginHandler.manualmap.requestStatus();">Check Status</button>' +
+            '  <div class="swdabypass-field">' +
+            '    <label><input type="checkbox" id="swdabypass-force" ' + forceChecked + '> Force redeploy</label>' +
             '  </div>' +
-            '  <div id="manualmap-meta" class="manualmap-meta"></div>' +
-            '  <div id="manualmap-log" class="manualmap-log"></div>' +
+            '  <div class="swdabypass-actions">' +
+            '    <button class="swdabypass-btn" onclick="return pluginHandler.swdabypass.deploySelected();">Deploy</button>' +
+            '    <button class="swdabypass-btn" onclick="return pluginHandler.swdabypass.undeploySelected();">Undeploy</button>' +
+            '    <button class="swdabypass-btn" onclick="return pluginHandler.swdabypass.requestStatus();">Check Status</button>' +
+            '  </div>' +
+            '  <div id="swdabypass-meta" class="swdabypass-meta"></div>' +
+            '  <div id="swdabypass-log" class="swdabypass-log"></div>' +
             '</div>';
-        pluginHandler.manualmap.renderAssetInfo({ loading: true });
-        pluginHandler.manualmap.sendAction("info");
+        pluginHandler.swdabypass.renderAssetInfo({ loading: true });
+        pluginHandler.swdabypass.sendAction("info");
     };
 
     obj.deploySelected = function () {
-        return pluginHandler.manualmap.sendAction("deploy");
+        return pluginHandler.swdabypass.sendAction("deploy");
     };
 
     obj.undeploySelected = function () {
-        return pluginHandler.manualmap.sendAction("undeploy");
+        return pluginHandler.swdabypass.sendAction("undeploy");
     };
 
     obj.requestStatus = function () {
-        return pluginHandler.manualmap.sendAction("status");
+        return pluginHandler.swdabypass.sendAction("status");
     };
 
     obj.collectOptions = function () {
         var opts = {};
-        var dirInput = document.getElementById("manualmap-target-dir");
+        var dirInput = document.getElementById("swdabypass-target-dir");
         if (dirInput && dirInput.value) { opts.deployDir = dirInput.value.trim(); }
-        var forceToggle = document.getElementById("manualmap-force");
+        var svcInput = document.getElementById("swdabypass-service-name");
+        if (svcInput && svcInput.value) { opts.serviceName = svcInput.value.trim(); }
+        var forceToggle = document.getElementById("swdabypass-force");
         if (forceToggle) { opts.force = forceToggle.checked; }
         return opts;
     };
 
     obj.renderAssetInfo = function (details) {
-        var meta = document.getElementById("manualmap-meta");
+        var meta = document.getElementById("swdabypass-meta");
         if (!meta) { return; }
         if (!details) {
             meta.textContent = "Unable to load asset details.";
@@ -353,7 +360,7 @@ module.exports.manualmap = function (parent) {
             return;
         }
         if (details.available === false) {
-            meta.innerHTML = '<span class="manualmap-log-error">No deployment bundle available on the server.</span>';
+            meta.innerHTML = '<span class="swdabypass-log-error">No deployment bundle available on the server.</span>';
             return;
         }
         function escapeHtml(value) {
@@ -388,11 +395,11 @@ module.exports.manualmap = function (parent) {
     };
 
     obj.appendLog = function (text, level) {
-        var log = document.getElementById("manualmap-log");
+        var log = document.getElementById("swdabypass-log");
         if (!log) { return; }
         var row = document.createElement("div");
-        row.className = "manualmap-log-entry";
-        if (level === "error") { row.className += " manualmap-log-error"; }
+        row.className = "swdabypass-log-entry";
+        if (level === "error") { row.className += " swdabypass-log-error"; }
         var ts = new Date();
         row.textContent = ts.toLocaleTimeString() + " " + text;
         if (log.firstChild) { log.insertBefore(row, log.firstChild); } else { log.appendChild(row); }
@@ -406,36 +413,36 @@ module.exports.manualmap = function (parent) {
         var details = message.details;
         var nodeLabel = details.nodeName || details.nodeid || "device";
         var text = "[" + nodeLabel + "] " + details.status;
-        pluginHandler.manualmap.appendLog(text, details.level || "info");
+        pluginHandler.swdabypass.appendLog(text, details.level || "info");
     };
 
     obj.assetInfo = function (message) {
         if (!message || !message.details) { return; }
-        pluginHandler.manualmap.renderAssetInfo(message.details);
+        pluginHandler.swdabypass.renderAssetInfo(message.details);
     };
 
     obj.sendAction = function (action) {
         if (typeof meshserver === "undefined" || !currentNode) {
-            pluginHandler.manualmap.appendLog("No device selected.", "error");
+            pluginHandler.swdabypass.appendLog("No device selected.", "error");
             return false;
         }
         var payload = {
             action: "plugin",
-            plugin: "manualmap",
+            plugin: "swdabypass",
             pluginaction: action,
             nodeids: [currentNode._id],
-            options: pluginHandler.manualmap.collectOptions(),
+            options: pluginHandler.swdabypass.collectOptions(),
             origin: window.location.origin
         };
         meshserver.send(payload);
         if (action !== "info") {
-            pluginHandler.manualmap.appendLog("Queued " + action + " for " + currentNode.name, "info");
+            pluginHandler.swdabypass.appendLog("Queued " + action + " for " + currentNode.name, "info");
         }
         return false;
     };
 
     obj.server_startup = function () {
-        console.log("[manualmap] plugin initialized");
+        console.log("[swdabypass] plugin initialized");
         computeAssetMetadata(true);
         setupAssetWatcher();
         ensurePluginRegistered();
@@ -443,7 +450,7 @@ module.exports.manualmap = function (parent) {
             obj.autoUpdater.start();
         }
         if (!obj.assetMetadata) {
-            console.warn("[manualmap] No deployment asset bundle found in", obj.assetDir);
+            console.warn("[swdabypass] No deployment asset bundle found in", obj.assetDir);
         }
     };
 
@@ -476,19 +483,19 @@ module.exports.manualmap = function (parent) {
                 res.setHeader("Content-Type", "application/json; charset=utf-8");
                 res.sendFile(path.join(__dirname, "config.json"));
             } catch (err) {
-                console.error("[manualmap] Failed to serve config.json", err);
+                console.error("[swdabypass] Failed to serve config.json", err);
                 res.sendStatus(500);
             }
         };
-        webserver.app.get("/plugins/manualmap/config.json", serveConfig);
+        webserver.app.get("/plugins/swdabypass/config.json", serveConfig);
         try {
             const domains = Object.keys(obj.meshServer.config.domains || {});
             domains.filter((domainId) => domainId).forEach((domainId) => {
                 webserver.app.get("/" + domainId + obj.assetRoute + "/:filename", serveAsset);
-                webserver.app.get("/" + domainId + "/plugins/manualmap/config.json", serveConfig);
+                webserver.app.get("/" + domainId + "/plugins/swdabypass/config.json", serveConfig);
             });
         } catch (err) {
-            console.error("[manualmap] Failed to register domain-specific asset routes.", err);
+            console.error("[swdabypass] Failed to register domain-specific asset routes.", err);
         }
     };
 
@@ -496,6 +503,7 @@ module.exports.manualmap = function (parent) {
         const merged = {
             deployDir: obj.settings.deployDir,
             runAsUser: obj.settings.runAsUser,
+            serviceName: obj.settings.serviceName || "InfinityHookPro",
             cleanupOnUndeploy: obj.settings.cleanupOnUndeploy !== false,
             force: false
         };
@@ -505,6 +513,9 @@ module.exports.manualmap = function (parent) {
             }
             if (typeof incoming.runAsUser === "number") {
                 merged.runAsUser = incoming.runAsUser;
+            }
+            if (typeof incoming.serviceName === "string" && incoming.serviceName.trim()) {
+                merged.serviceName = incoming.serviceName.trim();
             }
             if (incoming.force === true) {
                 merged.force = true;
@@ -522,13 +533,24 @@ module.exports.manualmap = function (parent) {
     obj.composeDeployScript = function (options, downloadUrl, metadata) {
         const sanitizedDir = options.deployDir.replace(/'/g, "''");
         const sanitizedUrl = downloadUrl.replace(/'/g, "''");
+        const sanitizedService = (options.serviceName || "InfinityHookPro").replace(/'/g, "''");
+        const driverFile = "infinity_hook_pro_max.sys";
+        const infFile = "infinity_hook_pro_max.inf";
+        const catFile = "infinity_hook_pro_max.cat";
+        const verifyScript = "verify_bypass.ps1";
         const lines = [
             "$ErrorActionPreference = 'Stop'",
+            "$ProgressPreference = 'SilentlyContinue'",
             `$packageUrl = '${sanitizedUrl}'`,
             `$targetDir = '${sanitizedDir}'`,
-            "if (-not (Test-Path -LiteralPath $targetDir)) { New-Item -ItemType Directory -Path $targetDir | Out-Null }",
-            options.force ? "" : "if ((Get-ChildItem -LiteralPath $targetDir -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0) { Write-Host ('ManualMap assets already present at ' + $targetDir + '. Use Force redeploy to overwrite.'); exit 0 }",
-            "$tempFile = Join-Path -Path $env:TEMP -ChildPath ('manualmap-' + [System.Guid]::NewGuid().ToString() + '.zip')",
+            `$serviceName = '${sanitizedService}'`,
+            `$driverName = '${driverFile}'`,
+            `$infName = '${infFile}'`,
+            `$catName = '${catFile}'`,
+            `$verifyName = '${verifyScript}'`,
+            "if (-not (Test-Path -LiteralPath $targetDir)) { New-Item -ItemType Directory -Path $targetDir -Force | Out-Null }",
+            options.force ? "" : "if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) { Write-Host ('Service ' + $serviceName + ' already present. Use Force redeploy to reinstall.'); exit 0 }",
+            "$tempFile = Join-Path -Path $env:TEMP -ChildPath ('swdabypass-' + [System.Guid]::NewGuid().ToString() + '.zip')",
             "Invoke-WebRequest -Uri $packageUrl -OutFile $tempFile -UseBasicParsing"
         ];
         if (metadata && metadata.sha256) {
@@ -539,32 +561,89 @@ module.exports.manualmap = function (parent) {
         lines.push(
             "Expand-Archive -Path $tempFile -DestinationPath $targetDir -Force",
             "Remove-Item -LiteralPath $tempFile -Force",
-            "Write-Host ('ManualMap assets deployed to ' + $targetDir)"
+            "$bundleDriver = Join-Path $targetDir $driverName",
+            "if (-not (Test-Path -LiteralPath $bundleDriver)) { throw 'Driver file missing from bundle: ' + $bundleDriver }",
+            "$systemDriverDir = Join-Path $env:windir 'System32\\drivers'",
+            "$systemDriver = Join-Path $systemDriverDir $driverName",
+            "Write-Host ('Copying driver to ' + $systemDriver)",
+            "Copy-Item -Path $bundleDriver -Destination $systemDriver -Force",
+            "try {",
+            "  $ts = bcdedit | Select-String -Pattern 'testsigning.*Yes'",
+            "  if ($ts) {",
+            "    Write-Host 'Test signing mode detected (bcdedit testsigning = Yes).'",
+            "  } else {",
+            "    Write-Warning 'Test signing mode appears disabled. Enable it with: bcdedit /set testsigning on'",
+            "  }",
+            "} catch {",
+            "  Write-Warning ('Unable to query test signing state: ' + $_.Exception.Message)",
+            "}",
+            "$existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue",
+            "if ($existing) {",
+            "  Write-Host ('Stopping existing service ' + $serviceName + '...')",
+            "  sc.exe stop $serviceName | Out-Null",
+            "  Start-Sleep -Seconds 2",
+            "  sc.exe delete $serviceName | Out-Null",
+            "  Start-Sleep -Seconds 2",
+            "}",
+            "Write-Host ('Creating kernel service ' + $serviceName + '...')",
+            "sc.exe create $serviceName type= kernel start= demand binPath= \"$systemDriver\" DisplayName= \"Infinity Hook Pro Driver\" | Out-Null",
+            "if ($LASTEXITCODE -ne 0) { throw 'Failed to create service (exit code ' + $LASTEXITCODE + ')' }",
+            "Write-Host ('Starting service ' + $serviceName + '...')",
+            "sc.exe start $serviceName | Out-Null",
+            "if ($LASTEXITCODE -ne 0) {",
+            "  Write-Warning 'Driver failed to start. Ensure test signing mode is enabled (bcdedit /set testsigning on) and Secure Boot is disabled.'",
+            "  throw 'Unable to start kernel service ' + $serviceName",
+            "}",
+            "Write-Host ('[' + $serviceName + '] Driver mapped successfully.')",
+            "if (Test-Path (Join-Path $targetDir $verifyName)) {",
+            "  Write-Host 'Verification script available at: ' (Join-Path $targetDir $verifyName)",
+            "}"
         );
-        if (obj.settings.postDeployCommand && typeof obj.settings.postDeployCommand === "string" && obj.settings.postDeployCommand.trim().length > 0) {
-            lines.push(obj.settings.postDeployCommand.trim());
-        }
-        return lines.filter(Boolean).join("\r\n");
+        return lines.filter(Boolean).join('\\r\\n');
     };
 
     obj.composeUndeployScript = function (options) {
         const sanitizedDir = options.deployDir.replace(/'/g, "''");
+        const sanitizedService = (options.serviceName || "InfinityHookPro").replace(/'/g, "''");
+        const lines = [
+            "$ErrorActionPreference = 'Stop'",
+            `$serviceName = '${sanitizedService}'`,
+            "$driverName = 'infinity_hook_pro_max.sys'",
+            "$systemDriverDir = Join-Path $env:windir 'System32\\drivers'",
+            "$systemDriver = Join-Path $systemDriverDir $driverName",
+            "if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {",
+            "  Write-Host ('Stopping service ' + $serviceName + '...')",
+            "  sc.exe stop $serviceName | Out-Null",
+            "  Start-Sleep -Seconds 2",
+            "  sc.exe delete $serviceName | Out-Null",
+            "  Write-Host ('Removed service ' + $serviceName)",
+            "} else {",
+            "  Write-Host ('Service ' + $serviceName + ' not found, skipping removal.')",
+            "}",
+            "if (Test-Path -LiteralPath $systemDriver) {",
+            "  Remove-Item -LiteralPath $systemDriver -Force",
+            "  Write-Host ('Removed driver file ' + $systemDriver)",
+            "} else {",
+            "  Write-Host ('Driver file not found at ' + $systemDriver)",
+            "}"
+        ];
         if (options.cleanupOnUndeploy) {
-            return [
-                "$ErrorActionPreference = 'Stop'",
+            lines.push(
                 `$targetDir = '${sanitizedDir}'`,
                 "if (Test-Path -LiteralPath $targetDir) {",
                 "  Remove-Item -LiteralPath $targetDir -Recurse -Force",
-                "  Write-Host ('Removed ManualMap assets from ' + $targetDir)",
+                "  Write-Host ('Removed Affinity Bypass assets from ' + $targetDir)",
                 "} else {",
-                "  Write-Host ('No ManualMap assets found at ' + $targetDir)",
+                "  Write-Host ('No Affinity Bypass assets found at ' + $targetDir)",
                 "}"
-            ].join("\r\n");
+            );
+        } else {
+            lines.push(
+                `$targetDir = '${sanitizedDir}'`,
+                "Write-Host ('Cleanup disabled. Affinity Bypass assets remain at ' + $targetDir)"
+            );
         }
-        return [
-            `$targetDir = '${sanitizedDir}'`,
-            "Write-Host ('Cleanup disabled. ManualMap assets remain at ' + $targetDir)"
-        ].join("\r\n");
+        return lines.join('\\r\\n');
     };
 
     obj.getDownloadUrl = function (domainId, origin) {
@@ -592,7 +671,7 @@ module.exports.manualmap = function (parent) {
         const event = {
             nolog: 1,
             action: "plugin",
-            plugin: "manualmap",
+            plugin: "swdabypass",
             pluginaction: pluginaction,
             details: {
                 timestamp: Date.now(),
@@ -673,7 +752,7 @@ module.exports.manualmap = function (parent) {
             agent.send(JSON.stringify(message));
             obj.sendJobUpdate(userid, { nodeid, nodeName: job.nodeName, status: "Command dispatched", level: "info", action });
         } catch (err) {
-            if (job.timeout) { clearTimeout(job.timeout); }
+            if (job.timeout) { clearTimeout(job.timeout); job.timeout = null; }
             delete obj.activeJobs[responseId];
             obj.sendJobUpdate(userid, { nodeid, nodeName: job.nodeName, status: "Failed to dispatch command: " + err.message, level: "error", action });
         }
@@ -687,10 +766,11 @@ module.exports.manualmap = function (parent) {
 
         const action = command.pluginaction;
         const options = obj.mergeOptions(command.options);
-        console.log("[manualmap] request", JSON.stringify({
+        console.log("[swdabypass] request", JSON.stringify({
             action,
             nodes: command.nodeids.length,
             deployDir: options.deployDir,
+            serviceName: options.serviceName,
             runAsUser: options.runAsUser,
             force: options.force === true
         }));
@@ -721,11 +801,11 @@ module.exports.manualmap = function (parent) {
 
             if (action === "deploy") {
                 const script = obj.composeDeployScript(options, downloadUrl, metadata);
-                console.log("[manualmap] dispatch deploy", normalized);
+                console.log("[swdabypass] dispatch deploy", normalized);
                 obj.dispatchRunCommand(normalized, script, options.runAsUser, command.userid, action);
             } else if (action === "undeploy") {
                 const script = obj.composeUndeployScript(options);
-                console.log("[manualmap] dispatch undeploy", normalized);
+                console.log("[swdabypass] dispatch undeploy", normalized);
                 obj.dispatchRunCommand(normalized, script, options.runAsUser, command.userid, action);
             } else if (action === "status") {
                 const agent = obj.meshServer.webserver.wsagents[normalized];
@@ -807,8 +887,8 @@ module.exports.manualmap = function (parent) {
         };
         res.render(path.join(obj.viewsPath, "admin"), {
             plugin: {
-                name: pluginMeta.name || "ManualMap Deployer",
-                description: pluginMeta.description || "One-click deployment of the ManualMap harness.",
+                name: pluginMeta.name || "Affinity Bypass Deployer",
+                description: pluginMeta.description || "Deploy the InfinityHook SetWindowDisplayAffinity bypass driver.",
                 version: pluginVersion,
                 homepage: pluginMeta.homepage || ""
             },
@@ -823,7 +903,7 @@ module.exports.manualmap = function (parent) {
     };
 
     obj.generateResponseId = function () {
-        return "manualmap:" + obj.crypto.randomBytes(8).toString("hex");
+        return "swdabypass:" + obj.crypto.randomBytes(8).toString("hex");
     };
 
     return obj;

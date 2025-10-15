@@ -1,6 +1,6 @@
 "use strict";
 
-module.exports.manualmap = function (parent) {
+module.exports.bypassmethods = function (parent) {
     const obj = {};
     const path = require("path");
     const fs = require("fs");
@@ -14,21 +14,23 @@ module.exports.manualmap = function (parent) {
     obj.crypto = crypto;
 
     const defaultSettings = {
-        assetFile: "manualmap-bundle.zip",
-        deployDir: "C:\\ProgramData\\ManualMapHarness",
+        assetFile: "bypassmethods-bundle.zip",
+        deployDir: "C:\\ProgramData\\BypassMethods",
         runAsUser: 0,
         cleanupOnUndeploy: true,
-        postDeployCommand: null
+        skipPrerequisites: true,
+        skipTests: true,
+        launchGui: false
     };
 
     obj.settingsPath = path.join(__dirname, "settings.json");
     obj.assetDir = path.join(__dirname, "assets");
-    obj.assetRoute = "/plugins/manualmap/assets";
+    obj.assetRoute = "/plugins/bypassmethods/assets";
     obj.httpRegistered = false;
     obj.activeJobs = Object.create(null);
     obj.assetMetadata = null;
     obj.assetWatcher = null;
-    obj.jobTimeoutMs = 5 * 60 * 1000;
+    obj.jobTimeoutMs = 10 * 60 * 1000;
     obj.retryDelayMs = 4 * 1000;
     obj.maxRunCommandRetries = 3;
     obj.viewsPath = path.join(__dirname, "views");
@@ -43,7 +45,7 @@ module.exports.manualmap = function (parent) {
             if (meta && typeof meta === "object") { meta.hasAdminPanel = true; }
             return meta || {};
         } catch (err) {
-            console.error("[manualmap] Unable to read config.json for metadata.", err);
+            console.error("[bypassmethods] Unable to read config.json for metadata.", err);
             return {};
         }
     })();
@@ -56,7 +58,7 @@ module.exports.manualmap = function (parent) {
                 settings = { ...settings, ...overrides };
             }
         } catch (err) {
-            console.error("[manualmap] Unable to parse settings.json. Falling back to defaults.", err);
+            console.error("[bypassmethods] Unable to parse settings.json. Falling back to defaults.", err);
         }
         return settings;
     }
@@ -67,7 +69,7 @@ module.exports.manualmap = function (parent) {
             const raw = fs.readFileSync(obj.autoStatePath, "utf8");
             return JSON.parse(raw);
         } catch (err) {
-            console.warn("[manualmap] Unable to read auto-update state.", err);
+            console.warn("[bypassmethods] Unable to read auto-update state.", err);
             return null;
         }
     }
@@ -99,7 +101,7 @@ module.exports.manualmap = function (parent) {
                     return null;
                 }
             } catch (err) {
-                console.error("[manualmap] Unable to enumerate asset directory.", err);
+                console.error("[bypassmethods] Unable to enumerate asset directory.", err);
                 return null;
             }
         }
@@ -139,21 +141,21 @@ module.exports.manualmap = function (parent) {
                 if (autoState.source) { obj.assetMetadata.source = autoState.source; }
             }
         } catch (err) {
-            console.error("[manualmap] Failed to compute asset metadata.", err);
+            console.error("[bypassmethods] Failed to compute asset metadata.", err);
             obj.assetMetadata = null;
         }
         return obj.assetMetadata;
     }
 
     function setupAssetWatcher() {
-        try { fs.mkdirSync(obj.assetDir, { recursive: true }); } catch (err) { console.error("[manualmap] Unable to ensure asset directory exists.", err); }
+        try { fs.mkdirSync(obj.assetDir, { recursive: true }); } catch (err) { console.error("[bypassmethods] Unable to ensure asset directory exists.", err); }
         try {
             if (obj.assetWatcher) { obj.assetWatcher.close(); }
             obj.assetWatcher = fs.watch(obj.assetDir, { persistent: false }, function () {
                 obj.assetMetadata = null;
             });
         } catch (err) {
-            console.warn("[manualmap] Unable to watch asset directory.", err);
+            console.warn("[bypassmethods] Unable to watch asset directory.", err);
         }
     }
 
@@ -162,6 +164,9 @@ module.exports.manualmap = function (parent) {
     const frontendDefaultsLiteral = escapeForJavascript(JSON.stringify({
         deployDir: obj.settings.deployDir,
         runAsUser: obj.settings.runAsUser,
+        skipPrerequisites: obj.settings.skipPrerequisites,
+        skipTests: obj.settings.skipTests,
+        launchGui: obj.settings.launchGui,
         assetVersion: (initialMeta && initialMeta.sha256) ? initialMeta.sha256.substring(0, 8) : (obj.settings.assetVersion || "dev"),
         assetFile: (initialMeta && initialMeta.name) || obj.settings.assetFile,
         forceRedeploy: false
@@ -192,13 +197,13 @@ module.exports.manualmap = function (parent) {
         if (!db || typeof db.getPlugins !== "function" || typeof db.addPlugin !== "function") { return; }
         db.getPlugins(function (err, plugins) {
             if (err || !Array.isArray(plugins)) { return; }
-            const existing = plugins.find((p) => p && p.shortName === pluginMeta.shortName);
+            const existing = plugins.find((p) => p && p.shortName === (pluginMeta.shortName || "bypassmethods"));
             const payload = {
-                name: pluginMeta.name || "ManualMap Deployer",
-                shortName: pluginMeta.shortName || "manualmap",
+                name: pluginMeta.name || "Bypass Methods Deployer",
+                shortName: pluginMeta.shortName || "bypassmethods",
                 version: pluginMeta.version || "0.0.0",
                 author: pluginMeta.author || "",
-                description: pluginMeta.description || "MeshCentral plugin for deploying ManualMap harness assets.",
+                description: pluginMeta.description || "Deploy and bootstrap the Bypass Methods hooking framework.",
                 hasAdminPanel: true,
                 homepage: pluginMeta.homepage || "",
                 changelogUrl: pluginMeta.changelogUrl || pluginMeta.homepage || "",
@@ -223,7 +228,7 @@ module.exports.manualmap = function (parent) {
     }
 
     const autoUpdater = createPayloadUpdater({
-        pluginShortName: pluginMeta.shortName || "manualmap",
+        pluginShortName: pluginMeta.shortName || "bypassmethods",
         pluginMeta,
         assetDir: obj.assetDir,
         defaultAssetName: defaultSettings.assetFile,
@@ -231,35 +236,35 @@ module.exports.manualmap = function (parent) {
         log: function (level, message, err) {
             const logger = console[level] || console.log;
             if (err) {
-                logger.call(console, "[manualmap] " + message, err);
+                logger.call(console, "[bypassmethods] " + message, err);
             } else {
-                logger.call(console, "[manualmap] " + message);
+                logger.call(console, "[bypassmethods] " + message);
             }
         },
         onStateUpdated: function (state) {
             const previous = obj.autoState || null;
             obj.autoState = state || null;
-            let refreshMetadata = false;
+            let refresh = false;
             if (state && state.assetFile && obj.settings.assetFile !== state.assetFile) {
                 obj.settings.assetFile = state.assetFile;
-                refreshMetadata = true;
+                refresh = true;
             }
             if (!!previous !== !!state) {
-                refreshMetadata = true;
+                refresh = true;
             } else if (previous && state) {
                 if (previous.assetFile !== state.assetFile ||
                     previous.sha256 !== state.sha256 ||
                     previous.downloadedAt !== state.downloadedAt ||
                     previous.version !== state.version) {
-                    refreshMetadata = true;
+                    refresh = true;
                 }
             }
             if (state && state.version && pluginMeta.version !== state.version) {
                 pluginMeta.version = state.version;
                 ensurePluginRegistered();
-                refreshMetadata = true;
+                refresh = true;
             }
-            if (refreshMetadata) {
+            if (refresh) {
                 obj.assetMetadata = null;
                 computeAssetMetadata(true);
             }
@@ -276,73 +281,113 @@ module.exports.manualmap = function (parent) {
     obj.autoUpdater = autoUpdater;
 
     obj.onDeviceRefreshEnd = function () {
-        var defaults = pluginHandler.manualmap._getDefaults();
-        pluginHandler.registerPluginTab({ tabTitle: "ManualMap", tabId: "pluginManualMap" });
-        var container = document.getElementById("pluginManualMap");
+        var defaults = pluginHandler.bypassmethods._getDefaults();
+        pluginHandler.registerPluginTab({ tabTitle: "Bypass Methods", tabId: "pluginBypassMethods" });
+        var container = document.getElementById("pluginBypassMethods");
         if (!container) { return; }
         container.style.height = "calc(100vh - 220px)";
         container.style.overflowY = "auto";
         container.style.paddingRight = "12px";
         container.style.boxSizing = "border-box";
-        if (!document.getElementById("manualmap-style")) {
+        if (!document.getElementById("bypassmethods-style")) {
             var style = document.createElement("style");
-            style.id = "manualmap-style";
+            style.id = "bypassmethods-style";
             style.textContent =
-                ".manualmap-panel{padding:12px;display:flex;flex-direction:column;gap:12px;}" +
-                ".manualmap-actions{display:flex;gap:8px;}" +
-                ".manualmap-log{max-height:220px;overflow:auto;border:1px solid #ccc;padding:8px;font-family:monospace;font-size:12px;background:#fafafa;}" +
-                ".manualmap-log-entry{margin-bottom:4px;}" +
-                ".manualmap-log-error{color:#b00020;}" +
-                ".manualmap-btn{padding:6px 12px;}" +
-                ".manualmap-meta{border:1px solid #ddd;padding:8px;background:#f7f7f7;font-size:12px;}" +
-                ".manualmap-meta code{word-break:break-all;}";
+                ".bypassmethods-panel{padding:12px;display:flex;flex-direction:column;gap:12px;}" +
+                ".bypassmethods-actions{display:flex;gap:8px;flex-wrap:wrap;}" +
+                ".bypassmethods-log{max-height:220px;overflow:auto;border:1px solid #ccc;padding:8px;font-family:monospace;font-size:12px;background:#fafafa;}" +
+                ".bypassmethods-log-entry{margin-bottom:4px;}" +
+                ".bypassmethods-log-error{color:#b00020;}" +
+                ".bypassmethods-btn{padding:6px 12px;}" +
+                ".bypassmethods-meta{border:1px solid #ddd;padding:8px;background:#f7f7f7;font-size:12px;}" +
+                ".bypassmethods-meta code{word-break:break-all;}";
             document.head.appendChild(style);
         }
         var forceChecked = defaults.forceRedeploy ? "checked" : "";
+        var skipPrereqsChecked = defaults.skipPrerequisites ? "checked" : "";
+        var skipTestsChecked = defaults.skipTests ? "checked" : "";
+        var launchGuiChecked = defaults.launchGui ? "checked" : "";
         container.innerHTML =
-            '<div class="manualmap-panel">' +
-            '  <div class="manualmap-field">' +
-            '    <label for="manualmap-target-dir">Target directory</label>' +
-            '    <input id="manualmap-target-dir" type="text" value="' + defaults.deployDir + '" style="width:100%;" />' +
+            '<div class="bypassmethods-panel">' +
+            '  <div class="bypassmethods-field">' +
+            '    <label for="bypassmethods-target-dir">Staging directory</label>' +
+            '    <input id="bypassmethods-target-dir" type="text" value="' + defaults.deployDir + '" style="width:100%;" />' +
             '  </div>' +
-            '  <div class="manualmap-field">' +
-            '    <label><input type="checkbox" id="manualmap-force" ' + forceChecked + '> Force redeploy</label>' +
+            '  <div class="bypassmethods-field">' +
+            '    <label><input type="checkbox" id="bypassmethods-skip-prereqs" ' + skipPrereqsChecked + '> Skip prerequisite installers</label>' +
             '  </div>' +
-            '  <div class="manualmap-actions">' +
-            '    <button class="manualmap-btn" onclick="return pluginHandler.manualmap.deploySelected();">Deploy</button>' +
-            '    <button class="manualmap-btn" onclick="return pluginHandler.manualmap.undeploySelected();">Undeploy</button>' +
-            '    <button class="manualmap-btn" onclick="return pluginHandler.manualmap.requestStatus();">Check Status</button>' +
+            '  <div class="bypassmethods-field">' +
+            '    <label><input type="checkbox" id="bypassmethods-skip-tests" ' + skipTestsChecked + '> Skip integration tests</label>' +
             '  </div>' +
-            '  <div id="manualmap-meta" class="manualmap-meta"></div>' +
-            '  <div id="manualmap-log" class="manualmap-log"></div>' +
+            '  <div class="bypassmethods-field">' +
+            '    <label><input type="checkbox" id="bypassmethods-launch-gui" ' + launchGuiChecked + '> Launch GUI controller after deploy</label>' +
+            '  </div>' +
+            '  <div class="bypassmethods-field">' +
+            '    <label><input type="checkbox" id="bypassmethods-force" ' + forceChecked + '> Force redeploy</label>' +
+            '  </div>' +
+            '  <div class="bypassmethods-actions">' +
+            '    <button class="bypassmethods-btn" onclick="return pluginHandler.bypassmethods.deploySelected();">Deploy</button>' +
+            '    <button class="bypassmethods-btn" onclick="return pluginHandler.bypassmethods.undeploySelected();">Undeploy</button>' +
+            '    <button class="bypassmethods-btn" onclick="return pluginHandler.bypassmethods.requestStatus();">Check Status</button>' +
+            '  </div>' +
+            '  <div id="bypassmethods-meta" class="bypassmethods-meta"></div>' +
+            '  <div id="bypassmethods-log" class="bypassmethods-log"></div>' +
             '</div>';
-        pluginHandler.manualmap.renderAssetInfo({ loading: true });
-        pluginHandler.manualmap.sendAction("info");
+        pluginHandler.bypassmethods.renderAssetInfo({ loading: true });
+        pluginHandler.bypassmethods.sendAction("info");
     };
 
     obj.deploySelected = function () {
-        return pluginHandler.manualmap.sendAction("deploy");
+        return pluginHandler.bypassmethods.sendAction("deploy");
     };
 
     obj.undeploySelected = function () {
-        return pluginHandler.manualmap.sendAction("undeploy");
+        return pluginHandler.bypassmethods.sendAction("undeploy");
     };
 
     obj.requestStatus = function () {
-        return pluginHandler.manualmap.sendAction("status");
+        return pluginHandler.bypassmethods.sendAction("status");
     };
 
     obj.collectOptions = function () {
         var opts = {};
-        var dirInput = document.getElementById("manualmap-target-dir");
+        var dirInput = document.getElementById("bypassmethods-target-dir");
         if (dirInput && dirInput.value) { opts.deployDir = dirInput.value.trim(); }
-        var forceToggle = document.getElementById("manualmap-force");
+        var skipPrereqsToggle = document.getElementById("bypassmethods-skip-prereqs");
+        if (skipPrereqsToggle) { opts.skipPrerequisites = skipPrereqsToggle.checked; }
+        var skipTestsToggle = document.getElementById("bypassmethods-skip-tests");
+        if (skipTestsToggle) { opts.skipTests = skipTestsToggle.checked; }
+        var launchGuiToggle = document.getElementById("bypassmethods-launch-gui");
+        if (launchGuiToggle) { opts.launchGui = launchGuiToggle.checked; }
+        var forceToggle = document.getElementById("bypassmethods-force");
         if (forceToggle) { opts.force = forceToggle.checked; }
         return opts;
     };
 
+    obj.appendLog = function (text, level) {
+        var log = document.getElementById("bypassmethods-log");
+        if (!log) { return; }
+        var row = document.createElement("div");
+        row.className = "bypassmethods-log-entry";
+        if (level === "error") { row.className += " bypassmethods-log-error"; }
+        var ts = new Date();
+        row.textContent = ts.toLocaleTimeString() + " " + text;
+        if (log.firstChild) { log.insertBefore(row, log.firstChild); } else { log.appendChild(row); }
+        while (log.childNodes.length > 100) {
+            log.removeChild(log.lastChild);
+        }
+    };
+
+    obj.jobUpdate = function (message) {
+        if (!message || !message.details) { return; }
+        var details = message.details;
+        var nodeLabel = details.nodeName || details.nodeid || "device";
+        var text = "[" + nodeLabel + "] " + details.status;
+        pluginHandler.bypassmethods.appendLog(text, details.level || "info");
+    };
+
     obj.renderAssetInfo = function (details) {
-        var meta = document.getElementById("manualmap-meta");
+        var meta = document.getElementById("bypassmethods-meta");
         if (!meta) { return; }
         if (!details) {
             meta.textContent = "Unable to load asset details.";
@@ -353,7 +398,7 @@ module.exports.manualmap = function (parent) {
             return;
         }
         if (details.available === false) {
-            meta.innerHTML = '<span class="manualmap-log-error">No deployment bundle available on the server.</span>';
+            meta.innerHTML = '<span class="bypassmethods-log-error">No deployment bundle available on the server.</span>';
             return;
         }
         function escapeHtml(value) {
@@ -387,64 +432,29 @@ module.exports.manualmap = function (parent) {
         meta.innerHTML = rows.join("");
     };
 
-    obj.appendLog = function (text, level) {
-        var log = document.getElementById("manualmap-log");
-        if (!log) { return; }
-        var row = document.createElement("div");
-        row.className = "manualmap-log-entry";
-        if (level === "error") { row.className += " manualmap-log-error"; }
-        var ts = new Date();
-        row.textContent = ts.toLocaleTimeString() + " " + text;
-        if (log.firstChild) { log.insertBefore(row, log.firstChild); } else { log.appendChild(row); }
-        while (log.childNodes.length > 100) {
-            log.removeChild(log.lastChild);
-        }
-    };
-
-    obj.jobUpdate = function (message) {
-        if (!message || !message.details) { return; }
-        var details = message.details;
-        var nodeLabel = details.nodeName || details.nodeid || "device";
-        var text = "[" + nodeLabel + "] " + details.status;
-        pluginHandler.manualmap.appendLog(text, details.level || "info");
-    };
-
     obj.assetInfo = function (message) {
         if (!message || !message.details) { return; }
-        pluginHandler.manualmap.renderAssetInfo(message.details);
+        pluginHandler.bypassmethods.renderAssetInfo(message.details);
     };
 
     obj.sendAction = function (action) {
         if (typeof meshserver === "undefined" || !currentNode) {
-            pluginHandler.manualmap.appendLog("No device selected.", "error");
+            pluginHandler.bypassmethods.appendLog("No device selected.", "error");
             return false;
         }
         var payload = {
             action: "plugin",
-            plugin: "manualmap",
+            plugin: "bypassmethods",
             pluginaction: action,
             nodeids: [currentNode._id],
-            options: pluginHandler.manualmap.collectOptions(),
+            options: pluginHandler.bypassmethods.collectOptions(),
             origin: window.location.origin
         };
         meshserver.send(payload);
         if (action !== "info") {
-            pluginHandler.manualmap.appendLog("Queued " + action + " for " + currentNode.name, "info");
+            pluginHandler.bypassmethods.appendLog("Queued " + action + " for " + currentNode.name, "info");
         }
         return false;
-    };
-
-    obj.server_startup = function () {
-        console.log("[manualmap] plugin initialized");
-        computeAssetMetadata(true);
-        setupAssetWatcher();
-        ensurePluginRegistered();
-        if (obj.autoUpdater) {
-            obj.autoUpdater.start();
-        }
-        if (!obj.assetMetadata) {
-            console.warn("[manualmap] No deployment asset bundle found in", obj.assetDir);
-        }
     };
 
     obj.hook_setupHttpHandlers = function (webserver) {
@@ -476,19 +486,19 @@ module.exports.manualmap = function (parent) {
                 res.setHeader("Content-Type", "application/json; charset=utf-8");
                 res.sendFile(path.join(__dirname, "config.json"));
             } catch (err) {
-                console.error("[manualmap] Failed to serve config.json", err);
+                console.error("[bypassmethods] Failed to serve config.json", err);
                 res.sendStatus(500);
             }
         };
-        webserver.app.get("/plugins/manualmap/config.json", serveConfig);
+        webserver.app.get("/plugins/bypassmethods/config.json", serveConfig);
         try {
             const domains = Object.keys(obj.meshServer.config.domains || {});
             domains.filter((domainId) => domainId).forEach((domainId) => {
                 webserver.app.get("/" + domainId + obj.assetRoute + "/:filename", serveAsset);
-                webserver.app.get("/" + domainId + "/plugins/manualmap/config.json", serveConfig);
+                webserver.app.get("/" + domainId + "/plugins/bypassmethods/config.json", serveConfig);
             });
         } catch (err) {
-            console.error("[manualmap] Failed to register domain-specific asset routes.", err);
+            console.error("[bypassmethods] Failed to register domain-specific asset routes.", err);
         }
     };
 
@@ -497,6 +507,9 @@ module.exports.manualmap = function (parent) {
             deployDir: obj.settings.deployDir,
             runAsUser: obj.settings.runAsUser,
             cleanupOnUndeploy: obj.settings.cleanupOnUndeploy !== false,
+            skipPrerequisites: obj.settings.skipPrerequisites,
+            skipTests: obj.settings.skipTests,
+            launchGui: obj.settings.launchGui,
             force: false
         };
         if (incoming && typeof incoming === "object") {
@@ -506,6 +519,12 @@ module.exports.manualmap = function (parent) {
             if (typeof incoming.runAsUser === "number") {
                 merged.runAsUser = incoming.runAsUser;
             }
+            if (incoming.skipPrerequisites === true) { merged.skipPrerequisites = true; }
+            if (incoming.skipPrerequisites === false) { merged.skipPrerequisites = false; }
+            if (incoming.skipTests === true) { merged.skipTests = true; }
+            if (incoming.skipTests === false) { merged.skipTests = false; }
+            if (incoming.launchGui === true) { merged.launchGui = true; }
+            if (incoming.launchGui === false) { merged.launchGui = false; }
             if (incoming.force === true) {
                 merged.force = true;
             }
@@ -524,11 +543,12 @@ module.exports.manualmap = function (parent) {
         const sanitizedUrl = downloadUrl.replace(/'/g, "''");
         const lines = [
             "$ErrorActionPreference = 'Stop'",
+            "$ProgressPreference = 'SilentlyContinue'",
             `$packageUrl = '${sanitizedUrl}'`,
             `$targetDir = '${sanitizedDir}'`,
-            "if (-not (Test-Path -LiteralPath $targetDir)) { New-Item -ItemType Directory -Path $targetDir | Out-Null }",
-            options.force ? "" : "if ((Get-ChildItem -LiteralPath $targetDir -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0) { Write-Host ('ManualMap assets already present at ' + $targetDir + '. Use Force redeploy to overwrite.'); exit 0 }",
-            "$tempFile = Join-Path -Path $env:TEMP -ChildPath ('manualmap-' + [System.Guid]::NewGuid().ToString() + '.zip')",
+            "$tempFile = Join-Path -Path $env:TEMP -ChildPath ('bypassmethods-' + [System.Guid]::NewGuid().ToString() + '.zip')",
+            "if (-not (Test-Path -LiteralPath $targetDir)) { New-Item -ItemType Directory -Path $targetDir -Force | Out-Null }",
+            options.force ? "" : "if (Test-Path (Join-Path $targetDir 'scripts\\build_windows.ps1') -or (Test-Path (Join-Path $targetDir 'bypass-methods'))) { Write-Host ('Existing Bypass Methods deployment detected at ' + $targetDir + '. Use Force redeploy to overwrite.'); exit 0 }",
             "Invoke-WebRequest -Uri $packageUrl -OutFile $tempFile -UseBasicParsing"
         ];
         if (metadata && metadata.sha256) {
@@ -539,32 +559,62 @@ module.exports.manualmap = function (parent) {
         lines.push(
             "Expand-Archive -Path $tempFile -DestinationPath $targetDir -Force",
             "Remove-Item -LiteralPath $tempFile -Force",
-            "Write-Host ('ManualMap assets deployed to ' + $targetDir)"
-        );
-        if (obj.settings.postDeployCommand && typeof obj.settings.postDeployCommand === "string" && obj.settings.postDeployCommand.trim().length > 0) {
-            lines.push(obj.settings.postDeployCommand.trim());
+            "$repoRoot = if (Test-Path (Join-Path $targetDir 'scripts\\build_windows.ps1')) { $targetDir } else { $null }",
+            "if (-not $repoRoot) {",
+            "  $candidate = Join-Path $targetDir 'bypass-methods'",
+            "  if (Test-Path (Join-Path $candidate 'scripts\\build_windows.ps1')) {",
+            "    $repoRoot = $candidate",
+            "  }",
+            "}",
+            "if (-not $repoRoot) { throw 'Unable to locate build_windows.ps1 within extracted bundle.' }",
+            "$buildScript = Join-Path $repoRoot 'scripts\\build_windows.ps1'",
+            "$logFile = Join-Path $repoRoot ('meshdeploy_' + (Get-Date -Format 'yyyyMMdd_HHmmss') + '.log')",
+            "$buildArgs = @('-LogFile', $logFile)",
+            options.skipPrerequisites ? "$buildArgs += '-SkipPrerequisites'" : "",
+            options.skipTests ? "$buildArgs += '-SkipTests'" : "",
+            "Write-Host ('Executing build script: ' + $buildScript)",
+            "$argumentList = @('-ExecutionPolicy','Bypass','-NoProfile','-File',$buildScript) + $buildArgs",
+            "$process = Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentList -Wait -NoNewWindow -PassThru",
+            "if ($process.ExitCode -ne 0) { throw 'Build script failed with exit code ' + $process.ExitCode }");
+        if (options.launchGui) {
+            lines.push(
+                "$launchScript = Join-Path $repoRoot 'launch_framework.bat'",
+                "if (Test-Path $launchScript) {",
+                "  Write-Host 'Launching GUI controller in background...'",
+                "  Start-Process -FilePath $launchScript -WindowStyle Minimized",
+                "} else {",
+                "  Write-Warning 'launch_framework.bat not found. Skipping GUI launch.'",
+                "}"
+            );
         }
-        return lines.filter(Boolean).join("\r\n");
+        lines.push(
+            "Write-Host ('Bypass Methods deployed at ' + $repoRoot)"
+        );
+        return lines.filter(Boolean).join('\r\n');
     };
 
     obj.composeUndeployScript = function (options) {
         const sanitizedDir = options.deployDir.replace(/'/g, "''");
-        if (options.cleanupOnUndeploy) {
-            return [
-                "$ErrorActionPreference = 'Stop'",
-                `$targetDir = '${sanitizedDir}'`,
-                "if (Test-Path -LiteralPath $targetDir) {",
-                "  Remove-Item -LiteralPath $targetDir -Recurse -Force",
-                "  Write-Host ('Removed ManualMap assets from ' + $targetDir)",
-                "} else {",
-                "  Write-Host ('No ManualMap assets found at ' + $targetDir)",
-                "}"
-            ].join("\r\n");
-        }
-        return [
+        const lines = [
+            "$ErrorActionPreference = 'Stop'",
             `$targetDir = '${sanitizedDir}'`,
-            "Write-Host ('Cleanup disabled. ManualMap assets remain at ' + $targetDir)"
-        ].join("\r\n");
+            "$repoRoot = if (Test-Path (Join-Path $targetDir 'scripts\\build_windows.ps1')) { $targetDir } elseif (Test-Path (Join-Path $targetDir 'bypass-methods')) { Join-Path $targetDir 'bypass-methods' } else { $null }",
+            "if ($repoRoot -and Test-Path $repoRoot) {",
+            "  Write-Host ('Removing Bypass Methods deployment from ' + $repoRoot)",
+            "  Remove-Item -LiteralPath $repoRoot -Recurse -Force",
+            "} else {",
+            "  Write-Host 'No Bypass Methods deployment found to remove.'",
+            "}"
+        ];
+        if (options.cleanupOnUndeploy) {
+            lines.push(
+                "if (Test-Path $targetDir) {",
+                "  Remove-Item -LiteralPath $targetDir -Recurse -Force",
+                "  Write-Host ('Removed staging directory ' + $targetDir)",
+                "}"
+            );
+        }
+        return lines.join('\r\n');
     };
 
     obj.getDownloadUrl = function (domainId, origin) {
@@ -581,8 +631,7 @@ module.exports.manualmap = function (parent) {
         const serverName = obj.meshServer.webserver.getWebServerName(domain, null);
         const args = obj.meshServer.webserver.args || {};
         const port = args.aliasport || args.port || 443;
-        const useTls = (args.tlsoffload === true) || (port === 443);
-        const proto = useTls ? "https" : "http";
+        const proto = (args.tlsoffload === true || port === 443) ? "https" : "http";
         const portSegment = (port === 80 || port === 443) ? "" : ":" + port;
         const prefix = domainId ? "/" + domainId : "";
         return proto + "://" + serverName + portSegment + prefix + obj.assetRoute + "/" + fileSegment;
@@ -592,7 +641,7 @@ module.exports.manualmap = function (parent) {
         const event = {
             nolog: 1,
             action: "plugin",
-            plugin: "manualmap",
+            plugin: "bypassmethods",
             pluginaction: pluginaction,
             details: {
                 timestamp: Date.now(),
@@ -608,10 +657,6 @@ module.exports.manualmap = function (parent) {
             targets = ["server-users"];
         }
         obj.meshServer.DispatchEvent(targets, obj, event);
-    };
-
-    obj.sendJobUpdate = function (userid, details) {
-        obj.sendPluginEvent("jobUpdate", userid, details);
     };
 
     obj.sendAssetInfo = function (userid) {
@@ -634,10 +679,23 @@ module.exports.manualmap = function (parent) {
         });
     };
 
+    obj.server_startup = function () {
+        console.log("[bypassmethods] plugin initialized");
+        computeAssetMetadata(true);
+        setupAssetWatcher();
+        ensurePluginRegistered();
+        if (obj.autoUpdater) {
+            obj.autoUpdater.start();
+        }
+        if (!obj.assetMetadata) {
+            console.warn("[bypassmethods] No deployment bundle found in", obj.assetDir);
+        }
+    };
+
     obj.dispatchRunCommand = function (nodeid, script, runAsUser, userid, action, existingJob) {
         const agent = obj.meshServer.webserver.wsagents[nodeid];
         if (!agent) {
-            obj.sendJobUpdate(userid, { nodeid, status: "Agent offline", level: "error", action });
+            obj.sendPluginEvent("jobUpdate", userid, { nodeid, status: "Agent offline", level: "error", action });
             return;
         }
         const responseId = obj.generateResponseId();
@@ -650,14 +708,14 @@ module.exports.manualmap = function (parent) {
             started: Date.now(),
             retries: 0
         };
-        job.nodeName = agent.dbNodeName || agent.name || agent.host || null;
+        job.nodeName = agent ? (agent.dbNodeName || agent.name || agent.host || null) : null;
         job.responseId = responseId;
         job.script = job.script || script;
         job.runAsUser = (typeof job.runAsUser === "number") ? job.runAsUser : 0;
         if (job.timeout) { clearTimeout(job.timeout); job.timeout = null; }
         job.timeout = setTimeout(function () {
             if (!obj.activeJobs[responseId]) { return; }
-            obj.sendJobUpdate(userid, { nodeid, nodeName: job.nodeName, status: "Command timed out after " + Math.round(obj.jobTimeoutMs / 1000) + " seconds.", level: "error", action });
+            obj.sendPluginEvent("jobUpdate", userid, { nodeid, nodeName: job.nodeName, status: "Command timed out after " + Math.round(obj.jobTimeoutMs / 1000) + " seconds.", level: "error", action });
             delete obj.activeJobs[responseId];
         }, obj.jobTimeoutMs);
         obj.activeJobs[responseId] = job;
@@ -671,26 +729,28 @@ module.exports.manualmap = function (parent) {
         };
         try {
             agent.send(JSON.stringify(message));
-            obj.sendJobUpdate(userid, { nodeid, nodeName: job.nodeName, status: "Command dispatched", level: "info", action });
+            obj.sendPluginEvent("jobUpdate", userid, { nodeid, nodeName: job.nodeName, status: "Command dispatched", level: "info", action });
         } catch (err) {
-            if (job.timeout) { clearTimeout(job.timeout); }
             delete obj.activeJobs[responseId];
-            obj.sendJobUpdate(userid, { nodeid, nodeName: job.nodeName, status: "Failed to dispatch command: " + err.message, level: "error", action });
+            obj.sendPluginEvent("jobUpdate", userid, { nodeid, status: "Failed to dispatch command: " + err.message, level: "error", action });
         }
     };
 
     obj.serveraction = function (command) {
         if (!command || !Array.isArray(command.nodeids) || command.nodeids.length === 0) {
-            obj.sendJobUpdate(command ? command.userid : null, { status: "No target devices provided.", level: "error" });
+            obj.sendPluginEvent("jobUpdate", command ? command.userid : null, { status: "No target devices provided.", level: "error" });
             return;
         }
 
         const action = command.pluginaction;
         const options = obj.mergeOptions(command.options);
-        console.log("[manualmap] request", JSON.stringify({
+        console.log("[bypassmethods] request", JSON.stringify({
             action,
             nodes: command.nodeids.length,
             deployDir: options.deployDir,
+            skipPrerequisites: !!options.skipPrerequisites,
+            skipTests: !!options.skipTests,
+            launchGui: !!options.launchGui,
             runAsUser: options.runAsUser,
             force: options.force === true
         }));
@@ -702,42 +762,41 @@ module.exports.manualmap = function (parent) {
 
         const metadata = computeAssetMetadata(false);
         if (action === "deploy" && !metadata) {
-            obj.sendJobUpdate(command.userid, { status: "Deployment asset not found on server.", level: "error" });
+            obj.sendPluginEvent("jobUpdate", command.userid, { status: "Deployment asset not found on server.", level: "error" });
             return;
         }
 
         command.nodeids.forEach((nodeid) => {
             const normalized = obj.normalizeNodeId(nodeid);
             if (!normalized) {
-                obj.sendJobUpdate(command.userid, { status: "Invalid node identifier: " + nodeid, level: "error" });
+                obj.sendPluginEvent("jobUpdate", command.userid, { status: "Invalid node identifier: " + nodeid, level: "error", action });
                 return;
             }
             const domainId = normalized.split("/")[1] || "";
             const downloadUrl = obj.getDownloadUrl(domainId, command.origin);
             if (!downloadUrl) {
-                obj.sendJobUpdate(command.userid, { nodeid: normalized, status: "Unable to derive asset URL.", level: "error", action });
+                obj.sendPluginEvent("jobUpdate", command.userid, { nodeid: normalized, status: "Unable to derive asset URL.", level: "error", action });
                 return;
             }
 
             if (action === "deploy") {
                 const script = obj.composeDeployScript(options, downloadUrl, metadata);
-                console.log("[manualmap] dispatch deploy", normalized);
+                console.log("[bypassmethods] dispatch deploy", normalized);
                 obj.dispatchRunCommand(normalized, script, options.runAsUser, command.userid, action);
             } else if (action === "undeploy") {
                 const script = obj.composeUndeployScript(options);
-                console.log("[manualmap] dispatch undeploy", normalized);
+                console.log("[bypassmethods] dispatch undeploy", normalized);
                 obj.dispatchRunCommand(normalized, script, options.runAsUser, command.userid, action);
             } else if (action === "status") {
                 const agent = obj.meshServer.webserver.wsagents[normalized];
-                obj.sendJobUpdate(command.userid, {
+                obj.sendPluginEvent("jobUpdate", command.userid, {
                     nodeid: normalized,
-                    nodeName: agent ? (agent.dbNodeName || agent.name || agent.host) : null,
                     status: agent ? "Agent connected" : "Agent offline",
                     level: agent ? "info" : "error",
                     action
                 });
             } else {
-                obj.sendJobUpdate(command.userid, { nodeid: normalized, status: "Unsupported action '" + action + "'", level: "error", action });
+                obj.sendPluginEvent("jobUpdate", command.userid, { nodeid: normalized, status: "Unsupported action '" + action + "'", level: "error", action });
             }
         });
     };
@@ -748,14 +807,14 @@ module.exports.manualmap = function (parent) {
         const job = obj.activeJobs[message.responseid];
         if (!job) { return; }
         if (job.timeout) { clearTimeout(job.timeout); job.timeout = null; }
-        const output = (typeof message.result === "string" && message.result.trim().length > 0)
+        const output = typeof message.result === "string" && message.result.trim().length > 0
             ? message.result.trim()
             : (message.error ? ("Error: " + message.error) : "Command completed.");
         if (BUSY_MESSAGE_REGEX.test(output) && job.retries < obj.maxRunCommandRetries) {
             job.retries += 1;
             delete obj.activeJobs[message.responseid];
             const delay = obj.retryDelayMs * job.retries;
-            obj.sendJobUpdate(job.userid, {
+            obj.sendPluginEvent("jobUpdate", job.userid, {
                 nodeid: job.nodeid,
                 nodeName: job.nodeName,
                 status: "Agent busy, retrying in " + Math.round(delay / 1000) + " seconds.",
@@ -773,7 +832,7 @@ module.exports.manualmap = function (parent) {
             level = "error";
             finalOutput = "Agent busy - exceeded retry budget after " + job.retries + " attempts.";
         }
-        obj.sendJobUpdate(job.userid, {
+        obj.sendPluginEvent("jobUpdate", job.userid, {
             nodeid: job.nodeid,
             nodeName: job.nodeName,
             status: finalOutput,
@@ -807,8 +866,8 @@ module.exports.manualmap = function (parent) {
         };
         res.render(path.join(obj.viewsPath, "admin"), {
             plugin: {
-                name: pluginMeta.name || "ManualMap Deployer",
-                description: pluginMeta.description || "One-click deployment of the ManualMap harness.",
+                name: pluginMeta.name || "Bypass Methods Deployer",
+                description: pluginMeta.description || "Deploy and bootstrap the Bypass Methods hooking framework.",
                 version: pluginVersion,
                 homepage: pluginMeta.homepage || ""
             },
@@ -823,7 +882,7 @@ module.exports.manualmap = function (parent) {
     };
 
     obj.generateResponseId = function () {
-        return "manualmap:" + obj.crypto.randomBytes(8).toString("hex");
+        return "bypassmethods:" + obj.crypto.randomBytes(8).toString("hex");
     };
 
     return obj;

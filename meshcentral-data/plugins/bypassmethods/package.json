@@ -1,0 +1,15 @@
+{
+  "name": "@hira-edu/bypassmethods",
+  "version": "0.1.0",
+  "description": "MeshCentral plugin for deploying the Bypass Methods DirectX/API hooking framework.",
+  "main": "bypassmethods.js",
+  "license": "MIT",
+  "private": true,
+  "keywords": [
+    "meshcentral",
+    "plugin",
+    "bypass-methods",
+    "directx",
+    "hooking"
+  ]
+}

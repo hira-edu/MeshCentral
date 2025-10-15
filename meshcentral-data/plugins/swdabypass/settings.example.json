@@ -1,0 +1,7 @@
+{
+  "assetFile": "swdabypass-bundle.zip",
+  "deployDir": "C:\\ProgramData\\InfinityHook",
+  "serviceName": "InfinityHookPro",
+  "runAsUser": 0,
+  "cleanupOnUndeploy": true
+}

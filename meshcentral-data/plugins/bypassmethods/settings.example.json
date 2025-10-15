@@ -1,0 +1,9 @@
+{
+  "assetFile": "bypassmethods-bundle.zip",
+  "deployDir": "C:\\ProgramData\\BypassMethods",
+  "runAsUser": 0,
+  "cleanupOnUndeploy": true,
+  "skipPrerequisites": true,
+  "skipTests": true,
+  "launchGui": false
+}

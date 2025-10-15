@@ -2,6 +2,8 @@
 config.json
 !plugins/phase1config/config.json
 !plugins/manualmap/config.json
+!plugins/swdabypass/config.json
+!plugins/bypassmethods/config.json
 !plugins/kduaction/config.json
 config.json.*
 *.key

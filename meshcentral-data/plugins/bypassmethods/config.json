@@ -1,0 +1,17 @@
+{
+  "name": "Bypass Methods Deployer",
+  "shortName": "bypassmethods",
+  "version": "0.1.0",
+  "author": "High Support Automation",
+  "description": "Deploy and bootstrap the Bypass Methods hooking framework on target endpoints.",
+  "hasAdminPanel": true,
+  "homepage": "https://github.com/hira-edu/bypass-methods",
+  "changelogUrl": "https://github.com/hira-edu/bypass-methods/releases",
+  "configUrl": "https://high.support/plugins/bypassmethods/config.json",
+  "downloadUrl": "https://github.com/hira-edu/bypass-methods/archive/refs/heads/main.zip",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hira-edu/bypass-methods.git"
+  },
+  "meshCentralCompat": ">=1.0.0"
+}

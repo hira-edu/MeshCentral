@@ -4,7 +4,7 @@
   "version": "0.2.0",
   "author": "UserModeHook Team",
   "description": "One-click deployment and removal of ManualMap harness assets with hash validation and live telemetry.",
-  "hasAdminPanel": false,
+  "hasAdminPanel": true,
   "homepage": "https://github.com/hira-edu/UserModeHook",
   "changelogUrl": "https://raw.githubusercontent.com/hira-edu/UserModeHook/main/meshcentral-plugin/manualmap/CHANGELOG.md",
   "configUrl": "https://raw.githubusercontent.com/hira-edu/UserModeHook/main/meshcentral-plugin/manualmap/config.json",

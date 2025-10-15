@@ -1,0 +1,15 @@
+{
+  "name": "@hira-edu/swdabypass",
+  "version": "0.1.0",
+  "description": "MeshCentral plugin for deploying the InfinityHook SetWindowDisplayAffinity bypass driver.",
+  "main": "swdabypass.js",
+  "license": "MIT",
+  "private": true,
+  "keywords": [
+    "meshcentral",
+    "plugin",
+    "setwindowdisplayaffinity",
+    "infinityhook",
+    "driver"
+  ]
+}
