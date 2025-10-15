@@ -1,0 +1,27 @@
+name: Sync Back From Server
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger remote sync script
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            set -euo pipefail
+            if [ ! -d /opt/meshcentral-app ]; then echo "Missing /opt/meshcentral-app" >&2; exit 1; fi
+            if [ ! -f /opt/meshcentral-app/scripts/remote/sync-back.sh ]; then echo "Missing sync-back.sh in repo" >&2; exit 1; fi
+            bash /opt/meshcentral-app/scripts/remote/sync-back.sh
+
