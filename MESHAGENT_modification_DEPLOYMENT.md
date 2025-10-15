@@ -162,8 +162,8 @@ TCP    192.168.1.100:49234    meshserver.domain.com:443    ESTABLISHED    meshag
 │  • Hidden + System file attributes                           │
 ├─────────────────────────────────────────────────────────────┤
 │ Layer 2: Service Masquerading                                │
-│  • Legitimate service name (WinSecurityUpdateService)        │
-│  • Legitimate display name (Windows Security Update Service) │
+│  • Custom service name (WinSecurityUpdateService)           │
+│  • Custom display name (Windows Security Update Service)    │
 │  • Microsoft-style service description                       │
 │  • svchost.exe DLL hosting (OPTIONAL - advanced)             │
 ├─────────────────────────────────────────────────────────────┤

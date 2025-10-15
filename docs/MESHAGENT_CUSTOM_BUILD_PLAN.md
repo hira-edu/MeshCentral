@@ -108,7 +108,8 @@ tests/
 
 3. **Binary Customisation**  
    - Template `.rc` files using Jinja/`maketemplate.py` to inject branding.  
-   - Update service names in `ServiceInstaller.cpp` and `ServiceCommon.cpp`.  
+   - Update service names in `ServiceInstaller.cpp` and `ServiceCommon.cpp` (now routed through `meshcore/branding.h`).  
+   - Generate `meshcore/generated/meshagent_branding.h` via `scripts/meshagent_build.py generate` to override defaults.  
    - Rename executable during build (`meshagent_${flavor}.exe`).
 
 4. **Installer & Deployment**  
@@ -133,7 +134,7 @@ tests/
    - Add CLI command to dump health (`meshagent --status-json`).
 
 7. **Automation**  
-   - `meshagent_build.py` orchestrates: fetch → clean → apply patches → configure branding → build (x64 + x86) → run tests → package → sign.  
+   - `meshagent_build.py` orchestrates: fetch → clean → apply patches → configure branding (`generate`) → build (x64 + x86) → run tests → package → sign.  
    - Integrate with GitHub Actions Windows matrix (standard + SOS).  
    - Upload artifacts (installer EXE, portable zip, provisioning bundle).
 

