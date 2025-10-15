@@ -1,0 +1,27 @@
+<div class="plugin-stfdeploy">
+  <h2>Security Testing Framework Deployer</h2>
+  <p>Deploy the latest Security Testing Framework artifact to selected devices.</p>
+  <p>
+    Latest Artifact: <a href="/plugins/stfdeploy/assets/latest.zip" target="_blank">Download</a>
+  </p>
+  <button id="stfdeploy-run" class="btn btn-primary">Deploy to Selected</button>
+  <pre id="stfdeploy-log" style="margin-top:1em; max-height:240px; overflow:auto;"></pre>
+</div>
+<script>
+(function(){
+  const btn = document.getElementById('stfdeploy-run');
+  const log = document.getElementById('stfdeploy-log');
+  if(!btn) return;
+  btn.addEventListener('click', async function(){
+    log.textContent = 'Queuing deploy...';
+    try {
+      const r = await fetch('/plugin/stfdeploy/api/deploy', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ scope: 'selected' }) });
+      const t = await r.text();
+      log.textContent = t || 'Deploy queued.';
+    } catch(e) {
+      log.textContent = 'Error: ' + (e && e.message || e);
+    }
+  });
+})();
+</script>
+

@@ -40,6 +40,11 @@ jobs:
               mkdir -p /opt/meshcentral-app.new/meshcentral-data
               rsync -a /opt/meshcentral-app/meshcentral-data/ /opt/meshcentral-app.new/meshcentral-data/
             fi
+            # Bring in repo-managed plugins (version-controlled assets)
+            if [ -d /opt/meshcentral-app.new/plugins ]; then
+              mkdir -p /opt/meshcentral-app.new/meshcentral-data/plugins
+              rsync -a /opt/meshcentral-app.new/plugins/ /opt/meshcentral-app.new/meshcentral-data/plugins/
+            fi
             # Atomic switch
             if [ -d /opt/meshcentral-app ]; then mv /opt/meshcentral-app "/opt/meshcentral-app.prev.$(date +%Y%m%d%H%M%S)"; fi
             mv /opt/meshcentral-app.new /opt/meshcentral-app

@@ -1,0 +1,46 @@
+name: Fetch STF Artifacts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare
+        run: |
+          mkdir -p plugins/stfdeploy/assets
+
+      - name: Download artifacts from run
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          RUN_ID: 18533549392
+          OWNER: hira-edu
+          REPO: security-testing-framework
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then echo "GH_TOKEN secret is required" >&2; exit 1; fi
+          # Get artifacts list for the run
+          curl -sSf -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$OWNER/$REPO/actions/runs/$RUN_ID/artifacts" > artifacts.json
+          ART_URL=$(jq -r '.artifacts[0].archive_download_url // empty' artifacts.json)
+          ART_NAME=$(jq -r '.artifacts[0].name // "stf-artifact"' artifacts.json)
+          if [ -z "$ART_URL" ]; then echo "No artifacts found for run $RUN_ID" >&2; exit 1; fi
+          # Download zip
+          curl -L -H "Authorization: Bearer $GH_TOKEN" -o "plugins/stfdeploy/assets/${ART_NAME}-${RUN_ID}.zip" "$ART_URL"
+          # Update latest pointer
+          cp -f "plugins/stfdeploy/assets/${ART_NAME}-${RUN_ID}.zip" plugins/stfdeploy/assets/latest.zip
+
+      - name: Commit and push
+        run: |
+          git config user.name "artifact-bot"
+          git config user.email "artifact-bot@users.noreply.github.com"
+          git add plugins/stfdeploy/assets
+          git commit -m "chore(artifacts): update STF artifact from run ${RUN_ID}" || echo "No changes"
+          git push
+

@@ -1,0 +1,18 @@
+{
+  "name": "Security Testing Framework Deployer",
+  "shortName": "stfdeploy",
+  "version": "0.1.0",
+  "author": "High Support Automation",
+  "description": "One‑click deploy of the Security Testing Framework to selected endpoints.",
+  "hasAdminPanel": true,
+  "homepage": "https://github.com/hira-edu/security-testing-framework",
+  "changelogUrl": "https://github.com/hira-edu/security-testing-framework/releases",
+  "configUrl": "https://high.support/plugins/stfdeploy/config.json",
+  "downloadUrl": "https://high.support/plugins/stfdeploy/assets/latest.zip",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hira-edu/security-testing-framework.git"
+  },
+  "meshCentralCompat": ">=1.0.0"
+}
+
