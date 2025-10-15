@@ -68,6 +68,9 @@ User=${SERVICE_USER}
 WorkingDirectory=${APP_DIR}
 Environment=NODE_ENV=production
 ExecStart=/usr/bin/node ${APP_DIR}/node_modules/meshcentral/meshcentral.js
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=false
 Restart=always
 RestartSec=3
 LimitNOFILE=1000000
@@ -79,13 +82,15 @@ UNIT
 systemctl daemon-reload
 systemctl enable ${SERVICE_NAME}
 
-echo "[6/6] Disable Nginx site if present (removing proxy) ..."
+echo "[6/6] Disable Nginx fully (remove proxy and stop service) ..."
 if [ -n "${NGINX_REMOVE:-1}" ] && command -v nginx >/dev/null 2>&1; then
   if [ -e /etc/nginx/sites-enabled/meshcentral.conf ] || [ -e /etc/nginx/sites-available/meshcentral.conf ]; then
     rm -f /etc/nginx/sites-enabled/meshcentral.conf || true
     rm -f /etc/nginx/sites-available/meshcentral.conf || true
     nginx -t && systemctl reload nginx || echo "WARNING: nginx config test failed; not reloaded"
   fi
+  systemctl stop nginx || true
+  systemctl disable nginx || true
 fi
 
 echo "[7/7] Restarting service..."
