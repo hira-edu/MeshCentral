@@ -1,4 +1,4 @@
-/* Minimal MeshCentral plugin to expose an admin panel and a deploy API.
+﻿/* Minimal MeshCentral plugin to expose an admin panel and a deploy API.
    Note: This uses a simple placeholder endpoint. Integrate with your existing
    device selection + task queuing pattern from other plugins for full rollout. */
 
@@ -75,7 +75,7 @@ module.exports.stfdeploy = function (parent) {
       const p = path.join(obj.assetDir, safe);
       fs.stat(p, function (err, st) {
         if (err || !st.isFile()) { res.sendStatus(404); return; }
-        res.setHeader("Content-Type", safe.toLowerCase().endsWith(".zip") ? "application/zip" : "application/octet-stream");
+        res.setHeader("Content-Type", safe.toLowerCase().endsWith(".zip") |  "application/zip" : "application/octet-stream");
         res.setHeader("Content-Length", st.size);
         res.setHeader("Cache-Control", "no-store");
         res.sendFile(p);
@@ -92,20 +92,166 @@ module.exports.stfdeploy = function (parent) {
     };
     webserver.app.get(obj.assetRoute + "/:filename", serveAsset);
     webserver.app.get("/plugins/stfdeploy/config.json", serveConfig);
+    // Admin API: POST /plugin/stfdeploy/api/deploy and domain-scoped variant
+    const MESHRIGHT_REMOTECONTROL = 0x00000008;
+    function extractDomainIdFromNodeId(n){ if (typeof n !== 'string') return null; var m = /^node\/([^/]+)\//.exec(n); return m |  m[1] : null; }
+    function getOnlineNodeIdsForMesh(meshid){
+      const r = [];
+      try {
+        const agents = obj.meshServer && obj.meshServer.webserver && obj.meshServer.webserver.wsagents;
+        if (agents) {
+          for (const k in agents) { const a = agents[k]; if (a && a.dbMeshKey === meshid && a.dbNodeKey) { r.push(a.dbNodeKey); } }
+        }
+      } catch (_) {}
+      return r;
+    }
+    function filterAuthorizedNodes(user, nodeids, expectedDomainId, done){
+      if (isSiteAdmin(user)) { return done(null, nodeids.slice(0)); }
+      const out = [], errors = [];
+      let pending = nodeids.length;
+      if (pending === 0) return done(null, out);
+      const web = obj.meshServer && obj.meshServer.webserver;
+      const db = obj.meshServer && obj.meshServer.db;
+      function finish(){ if (--pending === 0) done(null, out, errors); }
+      nodeids.forEach(function(nodeid){
+        try {
+          if (expectedDomainId && extractDomainIdFromNodeId(nodeid) !== expectedDomainId) { errors.push({ nodeid, error: 'Node/domain mismatch' }); return finish(); }
+          let meshid = null; const agent = web && web.wsagents && web.wsagents[nodeid]; if (agent && agent.dbMeshKey) { meshid = agent.dbMeshKey; }
+          function checkRights(){ try { const rights = web && typeof web.GetNodeRights === 'function' |  web.GetNodeRights(user, meshid, nodeid) : MESHRIGHT_REMOTECONTROL; if ((rights & MESHRIGHT_REMOTECONTROL) !== 0) { out.push(nodeid); } else { errors.push({ nodeid, error: 'Insufficient rights' }); } } catch (e) { errors.push({ nodeid, error: 'Rights check failed' }); } finish(); }
+          if (!meshid) {
+            if (db && typeof db.Get === 'function') {
+              db.Get(nodeid, function(err, docs){ if (!err && docs && docs[0] && docs[0].meshid) { meshid = docs[0].meshid; } checkRights(); });
+            } else { errors.push({ nodeid, error: 'Unable to resolve meshid for rights' }); finish(); }
+          } else { checkRights(); }
+        } catch(e){ errors.push({ nodeid, error: 'Resolution error' }); finish(); }
+      });
+    }
+    // Simple search DSL: supports keys name, host (= exact, ~= contains), online=true|false
+    function parseSearchQuery(q) {
+      if (typeof q !== 'string' || q.trim().length === 0) { return function(){ return true; }; }
+      const parts = q.split(/\s+AND\s+|\s+/i).filter(Boolean);
+      const tests = [];
+      parts.forEach(function(p){
+        const m = /^([a-zA-Z]+)\s*(=|~=)?\s*(.*)$/.exec(p);
+        if (!m) { return; }
+        const key = m[1].toLowerCase(); const op = (m[2] || '~=').trim(); const val = (m[3] || '').trim();
+        if ((key === 'name') || (key === 'host')) {
+          if (op === '=') { tests.push(function(n){ const v = (n && String(n[key]||'')).toLowerCase(); return v === val.toLowerCase(); }); }
+          else { tests.push(function(n){ const v = (n && String(n[key]||'')).toLowerCase(); return v.indexOf(val.toLowerCase()) !== -1; }); }
+        } else if (key === 'online') {
+          const want = /^true|1|yes$/i.test(val);
+          tests.push(function(n){ try { const st = obj.meshServer.GetConnectivityState(n._id); return (st != null) === want; } catch(_) { return !want; } });
+        }
+      });
+      if (tests.length === 0) return function(){ return true; };
+      return function(n){ for (let i=0;i<tests.length;i++){ if (!tests[i](n)) return false; } return true; };
+    }
+
+    const createDeployHandler = function(expectedDomainId) {
+      return function(req, res) {
+        try {
+          const user = req.user || null;
+          if (!isSiteAdmin(user)) { res.sendStatus(401); return; }
+          const body = (req && req.body) || {};
+          const action = String(body.action || '').trim() || 'deploy_win';
+          const allowed = ['deploy_win','deploy_lin','uninstall_win','uninstall_lin'];
+          if (allowed.indexOf(action) === -1) { res.status(400).send('Invalid action'); return; }
+          let nodeids = Array.isArray(body.nodeids) |  body.nodeids.slice(0) : [];
+          const scope = String(body.scope || (nodeids.length |  'nodeids' : '')).trim();
+          // Optional group scope: requires meshid (mesh/<domain>/<id>). Resolves online nodes only if DB listing is not available.
+          if (scope === 'group') {
+            const meshid = String(body.meshid || body.groupId || '').trim();
+            if (!/^mesh\/[A-Za-z0-9_-]+\/[A-Fa-f0-9]+$/.test(meshid)) { res.status(400).send('meshid required (mesh/<domain>/<id>)'); return; }
+            // Domain enforcement
+            if (expectedDomainId && meshid.split('/')[1] !== expectedDomainId) { res.status(400).send('Mesh/domain mismatch'); return; }
+            // Try online agents first
+            const online = getOnlineNodeIdsForMesh(meshid);
+            if (online.length > 0) { nodeids = online; }
+            else { nodeids = []; }
+          } else if (scope === 'search') {
+            const meshid = String(body.meshid || '').trim();
+            const query = String(body.query || body.filter || '').trim();
+            if (!/^mesh\/[A-Za-z0-9_-]+\/[A-Fa-f0-9]+$/.test(meshid)) { res.status(400).send('meshid required for search'); return; }
+            if (expectedDomainId && meshid.split('/')[1] !== expectedDomainId) { res.status(400).send('Mesh/domain mismatch'); return; }
+            const pred = parseSearchQuery(query);
+            const web = obj.meshServer && obj.meshServer.webserver; const db = obj.meshServer && obj.meshServer.db;
+            if (!db || typeof db.GetAllTypeNoTypeFieldMeshFiltered !== 'function') { res.status(400).send('Search not supported on this server'); return; }
+            db.GetAllTypeNoTypeFieldMeshFiltered([meshid], null, meshid.split('/')[1], 'node', null, 0, 10000, function (err, docs) {
+              if (err || !Array.isArray(docs)) { res.status(500).send('Search failed'); return; }
+              try { if (web && web.common && typeof web.common.unEscapeAllLinksFieldName === 'function') { web.common.unEscapeAllLinksFieldName(docs); } } catch(_){}
+              const filtered = docs.filter(pred);
+              nodeids = filtered.map(function(n){ return n && n._id; }).filter(function(x){ return typeof x === 'string'; });
+              if (nodeids.length === 0) { res.status(400).send('No nodes matched'); return; }
+              return continueWithNodes();
+            });
+            return; // async continue
+          } else if (scope && scope !== 'nodeids') {
+            // Unsupported scope
+            res.status(400).send('Unsupported scope'); return;
+          }
+          if (nodeids.length === 0) { res.status(400).send('No nodes resolved'); return; }
+          continueWithNodes();
+          function continueWithNodes(){
+            if (typeof expectedDomainId === 'string' && expectedDomainId.length > 0) {
+              for (let i=0;i<nodeids.length;i++){ if (extractDomainIdFromNodeId(nodeids[i]) !== expectedDomainId) { res.status(400).send('Node/domain mismatch'); return; } }
+            }
+            filterAuthorizedNodes(user, nodeids, expectedDomainId || null, function(err, allowedNodes, rightsErrors){
+              const batchId = obj.generateResponseId();
+              const results = { batchId, queued: 0, errors: Array.isArray(rightsErrors) |  rightsErrors : [] };
+              (allowedNodes || []).forEach(function(nodeid){
+                const normalized = obj.normalizeNodeId(nodeid);
+                if (!normalized) { results.errors.push({ nodeid, error: 'Invalid node id' }); return; }
+                let script = null;
+                if (action === 'deploy_win' && commands.windowsInstall) { script = commands.windowsInstall; }
+                else if (action === 'deploy_lin' && commands.linuxInstall) { script = commands.linuxInstall; }
+                else if (action === 'uninstall_win' && commands.windowsUninstall) { script = commands.windowsUninstall; }
+                else if (action === 'uninstall_lin' && commands.linuxUninstall) { script = commands.linuxUninstall; }
+                else { results.errors.push({ nodeid: normalized, error: 'Unsupported action or missing command' }); return; }
+                const cmds = Array.isArray(script) |  script : [ String(script) ];
+                obj.enqueueRunCommand({ nodeid: normalized, userid: (user && user._id) || null, action, script: cmds, runAsUser: 0, batchId });
+                results.queued++;
+              });
+              res.setHeader('Content-Type','application/json; charset=utf-8');
+              res.status(202).send(JSON.stringify(results));
+            });
+          }
+        } catch(e) {
+          console.error('[stfdeploy] Admin deploy API error', e);
+          res.sendStatus(500);
+        }
+      };
+    };
     try {
       const domains = Object.keys(obj.meshServer.config.domains || {});
       domains.filter((d) => d).forEach((domainId) => {
         webserver.app.get("/" + domainId + obj.assetRoute + "/:filename", serveAsset);
         webserver.app.get("/" + domainId + "/plugins/stfdeploy/config.json", serveConfig);
+        // Domain-scoped admin API
+        webserver.app.post("/" + domainId + "/plugin/stfdeploy/api/deploy", createDeployHandler(domainId));
       });
     } catch (err) {
       console.error("[stfdeploy] Failed to register domain asset routes.", err);
     }
+    // Global (non-domain) admin API
+    try { webserver.app.post("/plugin/stfdeploy/api/deploy", createDeployHandler(null)); } catch(_) {}
   };
 
-  // Load plugin metadata/commands
-  const pluginMeta = (function(){ try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'),'utf8')) } catch(e){ return {} } })();
-  const commands = (pluginMeta && pluginMeta.commands) ? pluginMeta.commands : {};
+  // Load plugin metadata/commands with minimal schema validation
+  function loadPluginMetaSafe() {
+    let meta = {};
+    try { meta = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8')); } catch (e) { return {}; }
+    if (typeof meta !== 'object' || meta === null) return {};
+    if (typeof meta.commands !== 'object' || meta.commands === null) { meta.commands = {}; }
+    const cmd = meta.commands;
+    function requireString(obj, key) { if (typeof obj[key] !== 'string') delete obj[key]; }
+    requireString(cmd, 'windowsInstall');
+    requireString(cmd, 'linuxInstall');
+    requireString(cmd, 'windowsUninstall');
+    requireString(cmd, 'linuxUninstall');
+    return meta;
+  }
+  const pluginMeta = loadPluginMetaSafe();
+  const commands = pluginMeta.commands || {};
 
   // UI: add a simple panel on device page similar to manualmap
   obj.onDeviceRefreshEnd = function () {
@@ -115,6 +261,31 @@ module.exports.stfdeploy = function (parent) {
         pluginHandler.stfdeploy = pluginHandler.stfdeploy || {};
         pluginHandler.stfdeploy.runSelected = function(mode){ return obj.runSelected(mode); };
         pluginHandler.stfdeploy.appendLog = function(text, level){ return obj.appendLog(text, level); };
+        // Subscribe to plugin events if UI dispatches them to plugins
+        if (!pluginHandler.stfdeploy._subscribed) {
+          pluginHandler.stfdeploy._subscribed = true;
+          pluginHandler.stfdeploy.onPluginEvent = function (e) {
+            try {
+              if (!e || e.action !== 'plugin' || e.plugin !== 'stfdeploy') return;
+              if (e.pluginaction === 'jobUpdate' && e.details) {
+                try {
+                  var st = pluginHandler.stfdeploy._state || (pluginHandler.stfdeploy._state = { info:0, error:0, lastAction:null, lastJobId:null, started:null });
+                  st.lastAction = e.details.action || st.lastAction;
+                  st.lastJobId = e.details.jobId || st.lastJobId;
+                  st.started = e.details.started || st.started;
+                } catch(_){}
+                var msg = '';
+                if (e.details.nodeName) { msg += e.details.nodeName + ': '; }
+                if (e.details.action) { msg += '[' + e.details.action + '] '; }
+                if (e.details.jobId) { msg += '(' + String(e.details.jobId).slice(-8) + ') '; }
+                var elapsed = '';
+                try { if (e.details.started) { var ms = Date.now() - Number(e.details.started); if (!isNaN(ms) && ms >= 0) { elapsed = ' [' + Math.round(ms/1000) + 's]'; } } } catch(_){}
+                msg += (e.details.status || '') + elapsed;
+                obj.appendLog(msg, e.details.level || 'info');
+              }
+            } catch (_) { }
+          };
+        }
       }
       if (typeof pluginHandler !== 'undefined' && pluginHandler.registerPluginTab) {
         pluginHandler.registerPluginTab({ tabTitle: "STF", tabId: "pluginSTF" });
@@ -133,23 +304,32 @@ module.exports.stfdeploy = function (parent) {
         '  <div style="margin-top:12px; display:grid; grid-template-columns:1fr; gap:12px">' +
         '    <div><b>Windows Install</b><br><textarea id="stf-win-install" style="width:100%;height:70px">'+winInstall+'</textarea><br>'+
         '      <button onclick="navigator.clipboard.writeText(document.getElementById(\'stf-win-install\').value);return false;">Copy</button> '+
-        '      <button onclick="return pluginHandler.stfdeploy && pluginHandler.stfdeploy.runSelected ? pluginHandler.stfdeploy.runSelected(\'deploy_win\') : false;">Run on Selected</button>'+
+        '      <button onclick="return pluginHandler.stfdeploy && pluginHandler.stfdeploy.runSelected |  pluginHandler.stfdeploy.runSelected(\'deploy_win\') : false;">Run on Selected</button>'+
         '    </div>'+
         '    <div><b>Linux Install</b><br><textarea id="stf-lin-install" style="width:100%;height:70px">'+linInstall+'</textarea><br>'+
         '      <button onclick="navigator.clipboard.writeText(document.getElementById(\'stf-lin-install\').value);return false;">Copy</button> '+
-        '      <button onclick="return pluginHandler.stfdeploy && pluginHandler.stfdeploy.runSelected ? pluginHandler.stfdeploy.runSelected(\'deploy_lin\') : false;">Run on Selected</button>'+
+        '      <button onclick="return pluginHandler.stfdeploy && pluginHandler.stfdeploy.runSelected |  pluginHandler.stfdeploy.runSelected(\'deploy_lin\') : false;">Run on Selected</button>'+
         '    </div>'+
         '    <div><b>Windows Uninstall</b><br><textarea id="stf-win-uninstall" style="width:100%;height:60px">'+winUninstall+'</textarea><br>'+
         '      <button onclick="navigator.clipboard.writeText(document.getElementById(\'stf-win-uninstall\').value);return false;">Copy</button> '+
-        '      <button onclick="return pluginHandler.stfdeploy && pluginHandler.stfdeploy.runSelected ? pluginHandler.stfdeploy.runSelected(\'uninstall_win\') : false;">Run on Selected</button>'+
+        '      <button onclick="return pluginHandler.stfdeploy && pluginHandler.stfdeploy.runSelected |  pluginHandler.stfdeploy.runSelected(\'uninstall_win\') : false;">Run on Selected</button>'+
         '    </div>'+
         '    <div><b>Linux Uninstall</b><br><textarea id="stf-lin-uninstall" style="width:100%;height:60px">'+linUninstall+'</textarea><br>'+
         '      <button onclick="navigator.clipboard.writeText(document.getElementById(\'stf-lin-uninstall\').value);return false;">Copy</button> '+
-        '      <button onclick="return pluginHandler.stfdeploy && pluginHandler.stfdeploy.runSelected ? pluginHandler.stfdeploy.runSelected(\'uninstall_lin\') : false;">Run on Selected</button>'+
+        '      <button onclick="return pluginHandler.stfdeploy && pluginHandler.stfdeploy.runSelected |  pluginHandler.stfdeploy.runSelected(\'uninstall_lin\') : false;">Run on Selected</button>'+
         '    </div>'+
         '  </div>' +
-        '  <div id="stf-log" style="margin-top:10px;max-height:200px;overflow:auto;border:1px solid #ccc;padding:6px;font-family:monospace;font-size:12px"></div>' +
+        '  <div id="stf-status" style="margin-top:8px;color:#555;font-size:12px"></div>' +
+        '  <div id="stf-log" style="margin-top:6px;max-height:200px;overflow:auto;border:1px solid #ccc;padding:6px;font-family:monospace;font-size:12px"></div>' +
         '</div>';
+      // Attempt to attach to global event bus used by MeshCentral UI
+      try {
+        if (typeof pluginHandler !== 'undefined' && pluginHandler.addEventHandler && typeof pluginHandler.addEventHandler === 'function') {
+          pluginHandler.addEventHandler(function (e) { if (pluginHandler.stfdeploy && pluginHandler.stfdeploy.onPluginEvent) pluginHandler.stfdeploy.onPluginEvent(e); });
+        } else if (typeof meshserver !== 'undefined' && meshserver.addEventHandler && typeof meshserver.addEventHandler === 'function') {
+          meshserver.addEventHandler(function (e) { if (pluginHandler && pluginHandler.stfdeploy && pluginHandler.stfdeploy.onPluginEvent) pluginHandler.stfdeploy.onPluginEvent(e); });
+        }
+      } catch (_) { }
     } catch (err) {}
   };
 
@@ -161,6 +341,19 @@ module.exports.stfdeploy = function (parent) {
     if (level === "error") { row.style.color = "#b00020"; }
     if (log.firstChild) log.insertBefore(row, log.firstChild); else log.appendChild(row);
     while (log.childNodes.length > 100) { log.removeChild(log.lastChild); }
+    try {
+      if (typeof pluginHandler !== 'undefined') {
+        var state = pluginHandler.stfdeploy._state || (pluginHandler.stfdeploy._state = { info:0, error:0, lastAction:null, lastJobId:null, started:null });
+        if (level === 'error') { state.error++; } else { state.info++; }
+        var s = document.getElementById('stf-status');
+        if (s) {
+          var tail = state.lastJobId ? String(state.lastJobId).slice(-8) : '-' ;
+          var elapsed = '';
+          try { if (state.started) { var ms = Date.now() - Number(state.started); if (ms >= 0) { elapsed = ' [' + Math.round(ms/1000) + 's]'; } } } catch(_){}
+          s.textContent = 'Last: ' + (state.lastAction||'-') + ' (' + tail + ')' + ' â€¢ Info: ' + state.info + ' â€¢ Errors: ' + state.error + (elapsed||'');
+        }
+      }
+    } catch (_) { }
   };
 
   obj.runSelected = function (mode) {
@@ -172,13 +365,13 @@ module.exports.stfdeploy = function (parent) {
 
   obj.sendPluginEvent = function (pluginaction, userid, details) {
     const event = { nolog: 1, action: "plugin", plugin: "stfdeploy", pluginaction, details: { timestamp: Date.now(), ...details } };
-    const targets = (typeof userid === "string" && userid.length > 0) ? [userid] : ["server-users"];
+    const targets = (typeof userid === "string" && userid.length > 0) |  [userid] : ["server-users"];
     obj.meshServer.DispatchEvent(targets, obj, event);
   };
 
   obj.sendJobUpdate = function (userid, details) { obj.sendPluginEvent("jobUpdate", userid, details); };
 
-  obj.normalizeNodeId = function (nodeid) { if (typeof nodeid !== "string") return null; return nodeid.startsWith("node/") ? nodeid : null; };
+  obj.normalizeNodeId = function (nodeid) { if (typeof nodeid !== "string") return null; return nodeid.startsWith("node/") |  nodeid : null; };
 
   obj.generateResponseId = function () { return "stfdeploy:" + obj.crypto.randomBytes(8).toString("hex"); };
 
@@ -201,16 +394,24 @@ module.exports.stfdeploy = function (parent) {
 
   obj.dispatchRunCommand = function (nodeid, script, runAsUser, userid, action, existingJob) {
     const agent = obj.meshServer.webserver.wsagents[nodeid];
-    if (!agent) { obj.sendJobUpdate(userid, { nodeid, status: "Agent offline", level: "error", action }); if (existingJob) obj._finishQueuedJob(existingJob.nodeid); return; }
+    if (!agent) { obj.sendJobUpdate(userid, { nodeid, status: "Agent offline", level: "error", action, jobId: null, batchId: (existingJob && existingJob.batchId) || null }); if (existingJob) obj._finishQueuedJob(existingJob.nodeid); return; }
     const responseId = obj.generateResponseId();
-    const job = existingJob || { nodeid, userid, action, script, runAsUser: (typeof runAsUser === "number") ? runAsUser : 0, started: Date.now(), retries: 0 };
+    const job = existingJob || { nodeid, userid, action, script, runAsUser: (typeof runAsUser === "number") |  runAsUser : 0, started: Date.now(), retries: 0 };
     job.nodeName = agent.dbNodeName || agent.name || agent.host || null;
     job.responseId = responseId;
     if (job.timeout) { clearTimeout(job.timeout); job.timeout = null; }
     job.timeout = setTimeout(function () { if (!obj.activeJobs[responseId]) return; obj.sendJobUpdate(userid, { nodeid, nodeName: job.nodeName, status: "Command timed out after " + Math.round(obj.jobTimeoutMs / 1000) + " seconds.", level: "error", action }); delete obj.activeJobs[responseId]; if (job.queueEntry) obj._finishQueuedJob(job.queueEntry.nodeid); }, obj.jobTimeoutMs);
     obj.activeJobs[responseId] = job;
     const message = { action: "runcommands", type: 2, cmds: job.script, runAsUser: job.runAsUser || 0, responseid: responseId, reply: true };
-    try { agent.send(JSON.stringify(message)); obj.sendJobUpdate(userid, { nodeid, nodeName: job.nodeName, status: "Command dispatched", level: "info", action }); } catch (err) { if (job.timeout) clearTimeout(job.timeout); delete obj.activeJobs[responseId]; obj.sendJobUpdate(userid, { nodeid, nodeName: job.nodeName, status: "Failed to dispatch command: " + err.message, level: "error", action }); if (job.queueEntry) obj._finishQueuedJob(job.queueEntry.nodeid); }
+    try {
+      agent.send(JSON.stringify(message));
+      obj.sendJobUpdate(userid, { nodeid, nodeName: job.nodeName, status: "Command dispatched", level: "info", action, jobId: responseId, batchId: job.batchId || null, started: job.started });
+    } catch (err) {
+      if (job.timeout) clearTimeout(job.timeout);
+      delete obj.activeJobs[responseId];
+      obj.sendJobUpdate(userid, { nodeid, nodeName: job.nodeName, status: "Failed to dispatch command: " + err.message, level: "error", action, jobId: responseId, batchId: job.batchId || null, started: job.started });
+      if (job.queueEntry) obj._finishQueuedJob(job.queueEntry.nodeid);
+    }
   };
 
   obj.composeDeployScript = function (options, downloadUrl) {
@@ -223,9 +424,23 @@ module.exports.stfdeploy = function (parent) {
       `$url = '${downloadUrl.replace(/'/g, "''")}'`,
       "Write-Host ('Downloading STF artifact from ' + $url)",
       "Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing",
+      "# Optional SHA256 verification if <url>.sha256 is available",
+      "$shaFile = $tmp + '.sha256'",
+      "try { Invoke-WebRequest -Uri ($url + '.sha256') -OutFile $shaFile -UseBasicParsing } catch { $shaFile = $null }",
+      "if ($shaFile -and (Test-Path -LiteralPath $shaFile)) {",
+      "  try {",
+      "    $expected = (Get-Content -Raw -LiteralPath $shaFile).Trim();",
+      "    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $tmp).Hash.ToLowerInvariant();",
+      "    if ($expected -and ($expected.Contains(' '))) { $expected = $expected.Split(' ')[0] }",
+      "    if ($expected.StartsWith('sha256:', [System.StringComparison]::OrdinalIgnoreCase)) { $expected = $expected.Substring(7) }",
+      "    if ($actual.ToLowerInvariant() -ne $expected.ToLowerInvariant()) { throw 'Checksum mismatch' }",
+      "    Write-Host 'SHA256 verified'",
+      "  } catch { throw ('Artifact hash verification failed: ' + $_) }",
+      "}",
       "New-Item -ItemType Directory -Force -Path $targetDir | Out-Null",
       "Expand-Archive -Path $tmp -DestinationPath $targetDir -Force",
       "Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue",
+      "if ($shaFile) { Remove-Item -LiteralPath $shaFile -Force -ErrorAction SilentlyContinue }",
       "# Attempt to run install script if present",
       "$installPs1 = Join-Path $targetDir 'install.ps1'",
       "if (Test-Path -LiteralPath $installPs1) {",
@@ -244,13 +459,17 @@ module.exports.stfdeploy = function (parent) {
 
   obj.serveraction = function (command) {
     if (!command || !Array.isArray(command.nodeids) || command.nodeids.length === 0) {
-      obj.sendJobUpdate(command ? command.userid : null, { status: "No target devices provided.", level: "error" });
+      obj.sendJobUpdate(command |  command.userid : null, { status: "No target devices provided.", level: "error" });
       return;
     }
     const action = String(command.pluginaction||'');
+    // Optional: enforce that node domain matches command.domain or user domain if provided
+    function extractDomainIdFromNodeId(n){ if (typeof n !== 'string') return null; var m = /^node\/([^/]+)\//.exec(n); return m |  m[1] : null; }
+    const expectedDomain = (command && (command.domain || command.domainid)) || null;
     command.nodeids.forEach((nodeid) => {
       const normalized = obj.normalizeNodeId(nodeid);
       if (!normalized) { obj.sendJobUpdate(command.userid, { status: "Invalid node id: " + nodeid, level: "error", action }); return; }
+      if (expectedDomain) { const nd = extractDomainIdFromNodeId(normalized); if (nd && nd !== expectedDomain) { obj.sendJobUpdate(command.userid, { nodeid: normalized, status: "Node/domain mismatch", level: "error", action }); return; } }
       let script = null;
       if (action === 'deploy_win' && commands.windowsInstall) {
         script = commands.windowsInstall;
@@ -265,7 +484,7 @@ module.exports.stfdeploy = function (parent) {
         return;
       }
       // Wrap as array for MeshCentral runcommands type:2 expects list of commands
-      const cmds = Array.isArray(script) ? script : [ String(script) ];
+      const cmds = Array.isArray(script) |  script : [ String(script) ];
       obj.enqueueRunCommand({ nodeid: normalized, userid: command.userid, action, script: cmds, runAsUser: 0 });
     });
   };
@@ -277,22 +496,22 @@ module.exports.stfdeploy = function (parent) {
     if (!job) return;
     if (job.timeout) { clearTimeout(job.timeout); job.timeout = null; }
     const output = (typeof message.result === "string" && message.result.trim().length > 0)
-      ? message.result.trim() : (message.error ? ("Error: " + message.error) : "Command completed.");
-    obj.sendJobUpdate(job.userid, { nodeid: job.nodeid, nodeName: job.nodeName, status: output, level: message.error ? "error" : "info", action: job.action });
+      |  message.result.trim() : (message.error |  ("Error: " + message.error) : "Command completed.");
+    obj.sendJobUpdate(job.userid, { nodeid: job.nodeid, nodeName: job.nodeName, status: output, level: message.error |  "error" : "info", action: job.action, jobId: job.responseId, batchId: job.batchId || null, started: job.started });
     delete obj.activeJobs[message.responseid];
     if (job.queueEntry) obj._finishQueuedJob(job.queueEntry.nodeid);
   };
 
   obj.server_startup = function () {
     console.log("[stfdeploy] plugin initialized");
-    // Register into server plugin registry so it appears under My Server → Plugins
+    // Register into server plugin registry so it appears under My Server â†’ Plugins
     try {
       const db = obj.meshServer && obj.meshServer.db;
       const meta = pluginMeta || {};
       if (db && db.getPlugins) {
         db.getPlugins(function (err, list) {
           if (err) { return; }
-          const existing = Array.isArray(list) ? list.find(function (p) { return p && p.shortName === (meta.shortName || 'stfdeploy'); }) : null;
+          const existing = Array.isArray(list) |  list.find(function (p) { return p && p.shortName === (meta.shortName || 'stfdeploy'); }) : null;
           const payload = {
             shortName: meta.shortName || 'stfdeploy',
             name: meta.name || 'Security Testing Framework Deployer',

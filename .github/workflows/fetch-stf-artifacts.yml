@@ -39,6 +39,8 @@ jobs:
           curl -L -H "Authorization: Bearer $GH_TOKEN" -o "plugins/stfdeploy/assets/${ART_NAME}-${RUN_ID}.zip" "$ART_URL"
           # Update latest pointer
           cp -f "plugins/stfdeploy/assets/${ART_NAME}-${RUN_ID}.zip" plugins/stfdeploy/assets/latest.zip
+          # Compute checksum for integrity verification
+          (cd plugins/stfdeploy/assets && sha256sum latest.zip > latest.zip.sha256)
 
       - name: Commit and push
         run: |

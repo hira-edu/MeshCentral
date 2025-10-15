@@ -1,27 +1,95 @@
 <div class="plugin-stfdeploy">
   <h2>Security Testing Framework Deployer</h2>
-  <p>Deploy the latest Security Testing Framework artifact to selected devices.</p>
+  <p>Run install/uninstall actions against specific nodes by ID.</p>
   <p>
     Latest Artifact: <a href="/plugins/stfdeploy/assets/latest.zip" target="_blank">Download</a>
   </p>
-  <button id="stfdeploy-run" class="btn btn-primary">Deploy to Selected</button>
-  <pre id="stfdeploy-log" style="margin-top:1em; max-height:240px; overflow:auto;"></pre>
+  <div style="display:grid; gap:10px; max-width:760px;">
+    <label>
+      Scope
+      <select id="stfdeploy-scope">
+        <option value="nodeids">Node IDs</option>
+        <option value="group">Group (meshid)</option>
+        <option value="search">Search (query + meshid)</option>
+      </select>
+    </label>
+    <label>
+      Action
+      <select id="stfdeploy-action">
+        <option value="deploy_win">Deploy (Windows)</option>
+        <option value="deploy_lin">Deploy (Linux)</option>
+        <option value="uninstall_win">Uninstall (Windows)</option>
+        <option value="uninstall_lin">Uninstall (Linux)</option>
+      </select>
+    </label>
+    <label>
+      Node IDs (one per line)
+      <textarea id="stfdeploy-nodeids" style="width:100%; height:120px; font-family:monospace"></textarea>
+    </label>
+    <label>
+      Mesh ID (mesh/<domain>/<id>)
+      <input id="stfdeploy-meshid" style="width:100%; font-family:monospace" placeholder="mesh/<domain>/<id>" />
+    </label>
+    <label>
+      Query (e.g., "name~=server online=true")
+      <input id="stfdeploy-query" style="width:100%; font-family:monospace" placeholder="name~=substring online=true" />
+    </label>
+    <div>
+      <button id="stfdeploy-run" class="btn btn-primary">Queue Action</button>
+    </div>
+    <pre id="stfdeploy-log" style="margin-top:1em; max-height:280px; overflow:auto; border:1px solid #ccc; padding:8px; font-family:monospace"></pre>
+  </div>
 </div>
 <script>
 (function(){
   const btn = document.getElementById('stfdeploy-run');
   const log = document.getElementById('stfdeploy-log');
+  const sel = document.getElementById('stfdeploy-action');
+  const ids = document.getElementById('stfdeploy-nodeids');
+  const scope = document.getElementById('stfdeploy-scope');
+  const meshid = document.getElementById('stfdeploy-meshid');
+  const query = document.getElementById('stfdeploy-query');
+  function append(s){ log.textContent = (new Date().toLocaleTimeString()) + ' ' + s + '\n' + log.textContent; }
   if(!btn) return;
+  // Toggle inputs based on scope
+  function syncScope(){
+    const sc = scope.value;
+    ids.parentElement.style.display = (sc === 'nodeids') ? '' : 'none';
+    meshid.parentElement.style.display = (sc === 'group' || sc === 'search') ? '' : 'none';
+    query.parentElement.style.display = (sc === 'search') ? '' : 'none';
+  }
+  scope.addEventListener('change', syncScope);
+  syncScope();
   btn.addEventListener('click', async function(){
-    log.textContent = 'Queuing deploy...';
+    const sc = scope.value;
+    const action = sel.value;
+    let payload = { action };
+    if(sc === 'nodeids'){
+      const nodeids = (ids.value || '').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+      if(nodeids.length === 0){ append('Please provide at least one node id.'); return; }
+      payload.nodeids = nodeids; payload.scope = 'nodeids';
+      append('Queuing ' + action + ' on ' + nodeids.length + ' node(s)...');
+    } else if (sc === 'group') {
+      const m = (meshid.value || '').trim();
+      if(!m){ append('Please enter a meshid.'); return; }
+      payload.scope = 'group'; payload.meshid = m;
+      append('Queuing ' + action + ' on group ' + m + '...');
+    } else if (sc === 'search') {
+      const m = (meshid.value || '').trim();
+      const q = (query.value || '').trim();
+      if(!m){ append('Please enter a meshid.'); return; }
+      if(!q){ append('Please enter a query.'); return; }
+      payload.scope = 'search'; payload.meshid = m; payload.query = q;
+      append('Searching in ' + m + ' with query: ' + q);
+    }
     try {
-      const r = await fetch('/plugin/stfdeploy/api/deploy', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ scope: 'selected' }) });
+      const r = await fetch('/plugin/stfdeploy/api/deploy', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
       const t = await r.text();
-      log.textContent = t || 'Deploy queued.';
+      try { const j = JSON.parse(t); append('Batch ' + (j.batchId || '?') + ': queued=' + j.queued + ', errors=' + (j.errors ? j.errors.length : 0)); }
+      catch(_) { append('Response: ' + t); }
     } catch(e) {
-      log.textContent = 'Error: ' + (e && e.message || e);
+      append('Error: ' + (e && e.message || e));
     }
   });
 })();
 </script>
-
