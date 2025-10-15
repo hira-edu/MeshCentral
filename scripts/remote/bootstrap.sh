@@ -47,12 +47,12 @@ if ! command -v jq >/dev/null 2>&1; then
   fi
 fi
 
-# Patch MeshCentral config for TLS offload if present
+# Patch MeshCentral config for direct TLS (no Nginx)
 CONFIG_JSON="$APP_DIR/meshcentral-data/config.json"
 if [ -f "$CONFIG_JSON" ] && command -v jq >/dev/null 2>&1; then
-  echo "[4a] Patching meshcentral-data/config.json for TLS offload (Port=3000,TlsOffload=true,RedirPort=0)"
+  echo "[4a] Patching meshcentral-data/config.json for direct TLS (Port=443,TlsOffload=false,RedirPort=80)"
   tmpcfg=$(mktemp)
-  jq '.settings.Port=3000 | .settings.TlsOffload=true | .settings.RedirPort=0' "$CONFIG_JSON" > "$tmpcfg" && mv "$tmpcfg" "$CONFIG_JSON"
+  jq '.settings.Port=443 | .settings.TlsOffload=false | .settings.RedirPort=80' "$CONFIG_JSON" > "$tmpcfg" && mv "$tmpcfg" "$CONFIG_JSON"
   chown "$SERVICE_USER":"$SERVICE_USER" "$CONFIG_JSON"
 fi
 
@@ -79,29 +79,12 @@ UNIT
 systemctl daemon-reload
 systemctl enable ${SERVICE_NAME}
 
-echo "[6/6] (Optional) Install/refresh Nginx site..."
-if [ -n "${NGINX_MANAGE:-}" ] && [ -f "${APP_DIR}/infra/nginx/meshcentral.conf" ]; then
-  if command -v nginx >/dev/null 2>&1; then
-    # If we can read the MeshCentral cert name from config, patch template server_name and cert paths
-    TARGET_SITE="/etc/nginx/sites-available/meshcentral.conf"
-    TMP_SITE=$(mktemp)
-    CERT_CN="_"
-    if [ -f "$CONFIG_JSON" ] && command -v jq >/dev/null 2>&1; then
-      CERT_CN=$(jq -r '.settings.Cert // "_"' "$CONFIG_JSON")
-    fi
-    cp "${APP_DIR}/infra/nginx/meshcentral.conf" "$TMP_SITE"
-    sed -i "s/server_name _;/server_name ${CERT_CN};/g" "$TMP_SITE" || true
-    if [ -d "/etc/letsencrypt/live/${CERT_CN}" ]; then
-      sed -i "s#/etc/letsencrypt/live/mesh.example.com#/etc/letsencrypt/live/${CERT_CN}#g" "$TMP_SITE" || true
-    fi
-    install -D -m 0644 "$TMP_SITE" "$TARGET_SITE"
-    rm -f "$TMP_SITE"
-    ln -sf /etc/nginx/sites-available/meshcentral.conf /etc/nginx/sites-enabled/meshcentral.conf
-    # Disable default if present
-    if [ -e /etc/nginx/sites-enabled/default ]; then rm -f /etc/nginx/sites-enabled/default; fi
+echo "[6/6] Disable Nginx site if present (removing proxy) ..."
+if [ -n "${NGINX_REMOVE:-1}" ] && command -v nginx >/dev/null 2>&1; then
+  if [ -e /etc/nginx/sites-enabled/meshcentral.conf ] || [ -e /etc/nginx/sites-available/meshcentral.conf ]; then
+    rm -f /etc/nginx/sites-enabled/meshcentral.conf || true
+    rm -f /etc/nginx/sites-available/meshcentral.conf || true
     nginx -t && systemctl reload nginx || echo "WARNING: nginx config test failed; not reloaded"
-  else
-    echo "Nginx not installed; skipping site install."
   fi
 fi
 
