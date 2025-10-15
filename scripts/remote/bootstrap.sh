@@ -99,6 +99,36 @@ if command -v nginx >/dev/null 2>&1; then
   ln -sf /etc/nginx/sites-available/meshcentral.conf /etc/nginx/sites-enabled/meshcentral.conf
   if [ -e /etc/nginx/sites-enabled/default ]; then rm -f /etc/nginx/sites-enabled/default; fi
   nginx -t && systemctl restart nginx || echo "WARNING: nginx config test failed; not restarted"
+
+  echo "[6a/6] Installing Certbot and issuing Let's Encrypt certificates..."
+  # Install certbot with Nginx plugin
+  if ! command -v certbot >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+      apt-get update -y && apt-get install -y certbot python3-certbot-nginx
+    elif command -v yum >/dev/null 2>&1; then
+      yum install -y certbot python3-certbot-nginx || yum install -y certbot-nginx || true
+    fi
+  fi
+  CERT_EMAIL=""
+  if [ -f "$CONFIG_JSON" ] && command -v jq >/dev/null 2>&1; then
+    CERT_EMAIL=$(jq -r '.letsencrypt.email // empty' "$CONFIG_JSON" 2>/dev/null || echo "")
+  fi
+  if [ -z "$CERT_EMAIL" ]; then CERT_EMAIL="admin@${CERT_CN}"; fi
+  if command -v certbot >/dev/null 2>&1; then
+    # Allow certbot to modify Nginx config for HTTP-01 challenges
+    set +e
+    certbot --nginx -n --agree-tos -m "$CERT_EMAIL" -d "$CERT_CN" -d "agents.$CERT_CN" -d "relay.$CERT_CN"
+    CERTBOT_RC=$?
+    set -e
+    if [ $CERTBOT_RC -eq 0 ]; then
+      echo "[certbot] Certificates issued/renewed successfully. Reloading Nginx..."
+      nginx -t && systemctl reload nginx || true
+    else
+      echo "WARNING: certbot failed with code $CERTBOT_RC. Check DNS and firewall for ports 80/443."
+    fi
+  else
+    echo "WARNING: certbot not installed. Skipping automatic TLS issuance."
+  fi
 else
   echo "Nginx not installed; please install and retry to enable TLS offload."
 fi
