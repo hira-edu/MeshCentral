@@ -86,6 +86,17 @@
         "timestampUrl": { "type": "string" }
       },
       "additionalProperties": false
+    },
+    "provisioning": {
+      "type": "object",
+      "properties": {
+        "meshName": { "type": "string" },
+        "meshType": { "type": "string" },
+        "meshId": { "type": "string" },
+        "serverId": { "type": "string" },
+        "serverUrl": { "type": "string" }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

@@ -5,6 +5,8 @@ rollouts (including SOS mode). Scripts should:
 - Parse the branding configuration.
 - Deploy binaries to the target install root.
 - Register persistence mechanisms as required.
-- Trigger the MeshAgent provisioning workflow.
+- Trigger the MeshAgent provisioning workflow (`meshagent.msh`).
+- Invoke or embed the generated `build/meshagent/generated/persistence.ps1`
+  helper.
 
 Implementation requires Windows testing and will be added later.

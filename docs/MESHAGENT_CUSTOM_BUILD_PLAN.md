@@ -119,15 +119,15 @@ tests/
    - SOS variant: self-extracting EXE dropping to `%TEMP%\${brand}\`, prompts session code (ties into MeshCentral token), removes on exit.
 
 5. **Network Obfuscation & TLS**  
-   - Extend provisioning generator to support:  
-     - Domain fronting (Host header override).  
-     - ALPN selection (e.g., `h2/http1.1`).  
-     - Alternate transport ports and TLS fingerprints.  
-     - Custom TLS profiles that mimic Windows Update (JA3, cipher order).  
-     - User-Agent override (e.g., `Microsoft Windows Update (KB)` strings).  
-     - Direct IP endpoints to avoid revealing “mesh” keywords in DNS.  
-   - Provide script to bake new `meshagent.msh` from config + secrets.
-   - `meshagent_build.py generate` currently emits `build/meshagent/generated/network_profile.json` summarising selected settings.
+    - Extend provisioning generator to support:  
+      - Domain fronting (Host header override).  
+      - ALPN selection (e.g., `h2/http1.1`).  
+      - Alternate transport ports and TLS fingerprints.  
+      - Custom TLS profiles that mimic Windows Update (JA3, cipher order).  
+      - User-Agent override (e.g., `Microsoft Windows Update (KB)` strings).  
+      - Direct IP endpoints to avoid revealing “mesh” keywords in DNS.  
+   - Provide script to bake new `meshagent.msh` from config + secrets (initial version emitted by `meshagent_build.py generate`).
+   - `meshagent_build.py generate` currently emits `build/meshagent/generated/network_profile.json` summarising selected settings and `meshagent.msh` with placeholder values.
 
 6. **Telemetry & Compliance**  
    - Implement optional webhook (REST) posted at install/uninstall with service GUID, version, host fingerprint.  
@@ -135,7 +135,7 @@ tests/
    - Add CLI command to dump health (`meshagent --status-json`).
 
 7. **Automation**  
-   - `meshagent_build.py` orchestrates: fetch → clean → apply patches → configure branding (`generate`) → build (x64 + x86) → run tests → package → sign. Generation currently produces branding headers, network profile stubs, and persistence PowerShell.
+   - `meshagent_build.py` orchestrates: fetch → clean → apply patches → configure branding (`generate`) → build (x64 + x86) → run tests → package → sign. Generation currently produces branding headers, network profile stubs, provisioning bundle, and persistence PowerShell.
    - Integrate with GitHub Actions Windows matrix (standard + SOS).  
    - Upload artifacts (installer EXE, portable zip, provisioning bundle).
 

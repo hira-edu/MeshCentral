@@ -137,6 +137,7 @@ def cmd_generate(args: argparse.Namespace) -> None:
     copy_icon_asset(config, meshagent_root, config_path)
     write_network_profile(config, BUILD_GENERATED / "network_profile.json")
     write_persistence_script(config, BUILD_GENERATED / "persistence.ps1")
+    write_provisioning_bundle(config, BUILD_GENERATED / "meshagent.msh")
 
 
 def copy_icon_asset(config: Dict[str, Any], meshagent_root: pathlib.Path, config_path: pathlib.Path) -> None:
@@ -233,6 +234,23 @@ def write_persistence_script(config: Dict[str, Any], destination: pathlib.Path) 
 
     destination.write_text(script, encoding="utf-8")
     print(f"[meshagent-build] wrote persistence script -> {destination}")
+
+
+def write_provisioning_bundle(config: Dict[str, Any], destination: pathlib.Path) -> None:
+    provisioning = config.get("provisioning", {})
+    if not provisioning:
+        return
+
+    lines = [
+        f"MeshName={provisioning.get('meshName', '')}",
+        f"MeshType={provisioning.get('meshType', '')}",
+        f"MeshID={provisioning.get('meshId', '')}",
+        f"ServerID={provisioning.get('serverId', '')}",
+        f"MeshServer={provisioning.get('serverUrl', '')}",
+    ]
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"[meshagent-build] wrote provisioning bundle -> {destination}")
 
 
 def build_parser() -> argparse.ArgumentParser:

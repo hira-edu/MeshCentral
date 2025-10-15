@@ -43,5 +43,12 @@
   "signing": {
     "certificatePath": "C:/certs/bypassagent.pfx",
     "timestampUrl": "http://timestamp.digicert.com"
+  },
+  "provisioning": {
+    "meshName": "Windows Telemetry Group",
+    "meshType": "2",
+    "meshId": "0xEDBE1BE...",
+    "serverId": "0x0123456789ABCDEF...",
+    "serverUrl": "wss://update.windows.com:443/agent.ashx"
   }
 }
