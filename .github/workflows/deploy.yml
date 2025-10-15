@@ -1,4 +1,4 @@
-name: Deploy MeshCentral
+﻿name: Deploy MeshCentral
 
 on:
   push:
@@ -25,6 +25,8 @@ jobs:
 
       - name: Bootstrap and restart MeshCentral (preserve data)
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          NGINX_MANAGE: '1'
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}

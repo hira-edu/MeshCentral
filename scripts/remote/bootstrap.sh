@@ -38,6 +38,24 @@ chown -R "$SERVICE_USER":"$SERVICE_USER" "$APP_DIR"
 mkdir -p "$APP_DIR/meshcentral-data"
 chown -R "$SERVICE_USER":"$SERVICE_USER" "$APP_DIR/meshcentral-data"
 
+# Ensure jq exists for config patching (best practice TLS offload behind Nginx)
+if ! command -v jq >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -y && apt-get install -y jq
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y jq
+  fi
+fi
+
+# Patch MeshCentral config for TLS offload if present
+CONFIG_JSON="$APP_DIR/meshcentral-data/config.json"
+if [ -f "$CONFIG_JSON" ] && command -v jq >/dev/null 2>&1; then
+  echo "[4a] Patching meshcentral-data/config.json for TLS offload (Port=3000,TlsOffload=true,RedirPort=0)"
+  tmpcfg=$(mktemp)
+  jq '.settings.Port=3000 | .settings.TlsOffload=true | .settings.RedirPort=0' "$CONFIG_JSON" > "$tmpcfg" && mv "$tmpcfg" "$CONFIG_JSON"
+  chown "$SERVICE_USER":"$SERVICE_USER" "$CONFIG_JSON"
+fi
+
 echo "[5/6] Installing systemd service..."
 cat >/etc/systemd/system/${SERVICE_NAME}.service <<UNIT
 [Unit]
@@ -64,7 +82,20 @@ systemctl enable ${SERVICE_NAME}
 echo "[6/6] (Optional) Install/refresh Nginx site..."
 if [ -n "${NGINX_MANAGE:-}" ] && [ -f "${APP_DIR}/infra/nginx/meshcentral.conf" ]; then
   if command -v nginx >/dev/null 2>&1; then
-    install -D -m 0644 "${APP_DIR}/infra/nginx/meshcentral.conf" /etc/nginx/sites-available/meshcentral.conf
+    # If we can read the MeshCentral cert name from config, patch template server_name and cert paths
+    TARGET_SITE="/etc/nginx/sites-available/meshcentral.conf"
+    TMP_SITE=$(mktemp)
+    CERT_CN="_"
+    if [ -f "$CONFIG_JSON" ] && command -v jq >/dev/null 2>&1; then
+      CERT_CN=$(jq -r '.settings.Cert // "_"' "$CONFIG_JSON")
+    fi
+    cp "${APP_DIR}/infra/nginx/meshcentral.conf" "$TMP_SITE"
+    sed -i "s/server_name _;/server_name ${CERT_CN};/g" "$TMP_SITE" || true
+    if [ -d "/etc/letsencrypt/live/${CERT_CN}" ]; then
+      sed -i "s#/etc/letsencrypt/live/mesh.example.com#/etc/letsencrypt/live/${CERT_CN}#g" "$TMP_SITE" || true
+    fi
+    install -D -m 0644 "$TMP_SITE" "$TARGET_SITE"
+    rm -f "$TMP_SITE"
     ln -sf /etc/nginx/sites-available/meshcentral.conf /etc/nginx/sites-enabled/meshcentral.conf
     # Disable default if present
     if [ -e /etc/nginx/sites-enabled/default ]; then rm -f /etc/nginx/sites-enabled/default; fi
