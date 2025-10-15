@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MeshAgent Branding Schema",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string" },
+    "inheritFrom": { "type": "string" },
+    "branding": {
+      "type": "object",
+      "properties": {
+        "serviceName": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9_\- ]{1,256}$" },
+        "displayName": { "type": ["string", "null"], "maxLength": 256 },
+        "binaryName": { "type": "string", "pattern": "^[A-Za-z0-9_\-]+\\.exe$" },
+        "companyName": { "type": "string" },
+        "productName": { "type": "string" },
+        "description": { "type": "string" },
+        "installRoot": { "type": "string" },
+        "logPath": { "type": "string" },
+        "icon": { "type": "string" },
+        "versionInfo": {
+          "type": "object",
+          "properties": {
+            "fileVersion": { "type": "string" },
+            "productVersion": { "type": "string" },
+            "originalFilename": { "type": "string" }
+          },
+          "required": ["fileVersion", "productVersion"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["binaryName", "installRoot"],
+      "additionalProperties": false
+    },
+    "network": {
+      "type": "object",
+      "properties": {
+        "primaryEndpoint": { "type": "string" },
+        "sni": { "type": ["string", "null"] },
+        "hostHeader": { "type": ["string", "null"] },
+        "alpn": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "userAgent": { "type": ["string", "null"], "maxLength": 256 },
+        "ja3": { "type": ["string", "null"], "maxLength": 256 },
+        "useIpOnly": { "type": "boolean" }
+      },
+      "required": ["primaryEndpoint"],
+      "additionalProperties": false
+    },
+    "persistence": {
+      "type": "object",
+      "properties": {
+        "runKey": { "type": "boolean" },
+        "scheduledTask": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "name": { "type": ["string", "null"] },
+            "trigger": { "type": ["string", "null"] }
+          },
+          "additionalProperties": false
+        },
+        "wmi": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "watchdog": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "intervalSeconds": { "type": "integer", "minimum": 60 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "signing": {
+      "type": "object",
+      "properties": {
+        "certificatePath": { "type": "string" },
+        "timestampUrl": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

