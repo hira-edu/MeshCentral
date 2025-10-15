@@ -52,3 +52,29 @@ jobs:
             mv /opt/meshcentral-app.new /opt/meshcentral-app
             cd /opt/meshcentral-app
             bash scripts/remote/bootstrap.sh
+
+      - name: Health check (backend and Nginx)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            set -euo pipefail
+            echo "[health] Checking MeshCentral backend on 127.0.0.1:3000"
+            curl -sSf -o /dev/null http://127.0.0.1:3000/ || { echo "Backend health check failed" >&2; systemctl status meshcentral --no-pager -l || true; exit 1; }
+            CERT=$(jq -r '.settings.Cert // empty' /opt/meshcentral-app/meshcentral-data/config.json 2>/dev/null || echo '')
+            if [ -z "${CERT}" ]; then CERT=localhost; fi
+            if command -v nginx >/dev/null 2>&1; then
+              echo "[health] Checking Nginx frontend at https://${CERT}/"
+              CODE=$(curl -k -s -o /dev/null -w "%{http_code}" https://${CERT}/ || echo 000)
+              if [ "$CODE" -ge 400 ] || [ "$CODE" = "000" ]; then
+                echo "Nginx health check failed with code $CODE" >&2
+                nginx -t || true
+                tail -n 200 /var/log/nginx/error.log || true
+                exit 1
+              fi
+            else
+              echo "[health] Nginx not installed; skipping frontend check"
+            fi
