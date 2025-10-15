@@ -26,6 +26,17 @@ Quick Start (Local)
    - Windows PowerShell: `pwsh -File scripts/setup-local.ps1`
 3) Access MeshCentral at the host/port from your config (default 443 or 8080 depending on config).
 
+One-Click STF Deploy (no plugin)
+- Windows endpoints (run in MeshCentral PowerShell or local admin PowerShell):
+  - One-liner to fetch latest STF release, extract, and run installer:
+    - powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; iwr -useb https://raw.githubusercontent.com/hira-edu/MeshCentral/main/scripts/oneclick/stf-install.ps1 | iex"
+- Linux endpoints (run in MeshCentral terminal or local root shell):
+  - curl -fsSL https://raw.githubusercontent.com/hira-edu/MeshCentral/main/scripts/oneclick/stf-install.sh | bash
+
+Notes
+- These one-click scripts pull from GitHub Releases of `hira-edu/security-testing-framework` and run the repo’s installer scripts if present (e.g., `install.ps1` or `install.sh`).
+- If this repository is private, paste the script contents directly from `scripts/oneclick/` into the console instead of using raw.githubusercontent.com URLs.
+
 CI/CD (GitHub Actions → Server)
 1) Push this project to a GitHub repository.
 2) In the GitHub repo Settings → Secrets and variables → Actions, add:
