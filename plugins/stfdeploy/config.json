@@ -15,4 +15,27 @@
   },
   "meshCentralCompat": ">=1.0.0"
 }
+{
+  "name": "Security Testing Framework Deployer",
+  "shortName": "stfdeploy",
+  "version": "0.1.0",
+  "author": "High Support Automation",
+  "description": "One-click deploy of the Security Testing Framework to selected endpoints.",
+  "hasAdminPanel": true,
+  "homepage": "https://github.com/hira-edu/security-testing-framework",
+  "changelogUrl": "https://github.com/hira-edu/security-testing-framework/releases",
+  "configUrl": "https://high.support/plugins/stfdeploy/config.json",
+  "downloadUrl": "https://high.support/plugins/stfdeploy/assets/latest.zip",
+  "commands": {
+    "windowsInstall": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; iwr -useb https://raw.githubusercontent.com/hira-edu/MeshCentral/main/scripts/oneclick/stf-install.ps1 | iex\"",
+    "linuxInstall": "curl -fsSL https://raw.githubusercontent.com/hira-edu/MeshCentral/main/scripts/oneclick/stf-install.sh | bash",
+    "windowsUninstall": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$dir='C:\\ProgramData\\SecurityTestingFramework'; if(Test-Path $dir){ Remove-Item -LiteralPath $dir -Recurse -Force }; Write-Host 'STF removed.'\"",
+    "linuxUninstall": "sudo rm -rf /opt/security-testing-framework && echo 'STF removed.'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hira-edu/security-testing-framework.git"
+  },
+  "meshCentralCompat": ">=1.0.0"
+}
 

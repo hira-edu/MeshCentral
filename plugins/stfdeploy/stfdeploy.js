@@ -103,18 +103,42 @@ module.exports.stfdeploy = function (parent) {
     }
   };
 
+  // Load plugin metadata/commands
+  const pluginMeta = (function(){ try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'),'utf8')) } catch(e){ return {} } })();
+  const commands = (pluginMeta && pluginMeta.commands) ? pluginMeta.commands : {};
+
   // UI: add a simple panel on device page similar to manualmap
   obj.onDeviceRefreshEnd = function () {
     try {
       pluginHandler.registerPluginTab({ tabTitle: "STF", tabId: "pluginSTF" });
       var container = document.getElementById("pluginSTF");
       if (!container) { return; }
+      function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+      var winInstall = esc(commands.windowsInstall || "");
+      var linInstall = esc(commands.linuxInstall || "");
+      var winUninstall = esc(commands.windowsUninstall || "");
+      var linUninstall = esc(commands.linuxUninstall || "");
       container.innerHTML = '' +
         '<div style="padding:12px">' +
         '  <div><b>Security Testing Framework</b></div>' +
         '  <div style="margin-top:6px">Artifact: <a href="/plugins/stfdeploy/assets/latest.zip" target="_blank">latest.zip</a></div>' +
-        '  <div style="margin-top:10px">' +
-        '    <button onclick="return pluginHandler.stfdeploy.deploySelected();">Deploy</button>' +
+        '  <div style="margin-top:12px; display:grid; grid-template-columns:1fr; gap:12px">' +
+        '    <div><b>Windows Install</b><br><textarea id="stf-win-install" style="width:100%;height:70px">'+winInstall+'</textarea><br>'+
+        '      <button onclick="navigator.clipboard.writeText(document.getElementById(\'stf-win-install\').value);return false;">Copy</button> '+
+        '      <button onclick="return pluginHandler.stfdeploy.runSelected(\'deploy_win\');">Run on Selected</button>'+
+        '    </div>'+
+        '    <div><b>Linux Install</b><br><textarea id="stf-lin-install" style="width:100%;height:70px">'+linInstall+'</textarea><br>'+
+        '      <button onclick="navigator.clipboard.writeText(document.getElementById(\'stf-lin-install\').value);return false;">Copy</button> '+
+        '      <button onclick="return pluginHandler.stfdeploy.runSelected(\'deploy_lin\');">Run on Selected</button>'+
+        '    </div>'+
+        '    <div><b>Windows Uninstall</b><br><textarea id="stf-win-uninstall" style="width:100%;height:60px">'+winUninstall+'</textarea><br>'+
+        '      <button onclick="navigator.clipboard.writeText(document.getElementById(\'stf-win-uninstall\').value);return false;">Copy</button> '+
+        '      <button onclick="return pluginHandler.stfdeploy.runSelected(\'uninstall_win\');">Run on Selected</button>'+
+        '    </div>'+
+        '    <div><b>Linux Uninstall</b><br><textarea id="stf-lin-uninstall" style="width:100%;height:60px">'+linUninstall+'</textarea><br>'+
+        '      <button onclick="navigator.clipboard.writeText(document.getElementById(\'stf-lin-uninstall\').value);return false;">Copy</button> '+
+        '      <button onclick="return pluginHandler.stfdeploy.runSelected(\'uninstall_lin\');">Run on Selected</button>'+
+        '    </div>'+
         '  </div>' +
         '  <div id="stf-log" style="margin-top:10px;max-height:200px;overflow:auto;border:1px solid #ccc;padding:6px;font-family:monospace;font-size:12px"></div>' +
         '</div>';
@@ -131,20 +155,10 @@ module.exports.stfdeploy = function (parent) {
     while (log.childNodes.length > 100) { log.removeChild(log.lastChild); }
   };
 
-  obj.deploySelected = function () {
-    if (typeof meshserver === "undefined" || !currentNode) {
-      obj.appendLog("No device selected.", "error");
-      return false;
-    }
-    meshserver.send({
-      action: "plugin",
-      plugin: "stfdeploy",
-      pluginaction: "deploy",
-      nodeids: [currentNode._id],
-      options: { deployDir: obj.settings.deployDir },
-      origin: window.location.origin
-    });
-    obj.appendLog("Queued deploy for " + (currentNode.name || currentNode._id), "info");
+  obj.runSelected = function (mode) {
+    if (typeof meshserver === "undefined" || !currentNode) { obj.appendLog("No device selected.", "error"); return false; }
+    meshserver.send({ action: "plugin", plugin: "stfdeploy", pluginaction: mode, nodeids: [currentNode._id], origin: window.location.origin });
+    obj.appendLog("Queued " + mode + " for " + (currentNode.name || currentNode._id), "info");
     return false;
   };
 
@@ -225,34 +239,26 @@ module.exports.stfdeploy = function (parent) {
       obj.sendJobUpdate(command ? command.userid : null, { status: "No target devices provided.", level: "error" });
       return;
     }
-    const action = command.pluginaction;
-    const options = command.options || {};
-    if (action !== "deploy") {
-      obj.sendJobUpdate(command.userid, { status: "Unsupported action '" + action + "'", level: "error", action });
-      return;
-    }
-    const meta = computeAssetMetadata();
-    if (!meta) {
-      obj.sendJobUpdate(command.userid, { status: "STF artifact not found on server.", level: "error", action });
-      return;
-    }
+    const action = String(command.pluginaction||'');
     command.nodeids.forEach((nodeid) => {
       const normalized = obj.normalizeNodeId(nodeid);
       if (!normalized) { obj.sendJobUpdate(command.userid, { status: "Invalid node id: " + nodeid, level: "error", action }); return; }
-      // Build download URL (reuse server name + aliasPort logic similar to manualmap minimal)
-      const domains = obj.meshServer.config.domains || {};
-      const domainId = normalized.split("/")[1] || "";
-      const domain = domains[domainId] || domains[""] || {};
-      const serverName = obj.meshServer.webserver.getWebServerName(domain, null);
-      const args = obj.meshServer.webserver.args || {};
-      const port = args.aliasport || args.port || 443;
-      const useTls = (args.tlsoffload === true) || (port === 443);
-      const proto = useTls ? "https" : "http";
-      const portSegment = (port === 80 || port === 443) ? "" : ":" + port;
-      const prefix = domainId ? "/" + domainId : "";
-      const dl = proto + "://" + serverName + portSegment + prefix + obj.assetRoute + "/" + encodeURIComponent(meta.name);
-      const script = obj.composeDeployScript({ deployDir: options.deployDir }, dl);
-      obj.enqueueRunCommand({ nodeid: normalized, userid: command.userid, action, script, runAsUser: (typeof options.runAsUser === "number") ? options.runAsUser : 0 });
+      let script = null;
+      if (action === 'deploy_win' && commands.windowsInstall) {
+        script = commands.windowsInstall;
+      } else if (action === 'deploy_lin' && commands.linuxInstall) {
+        script = commands.linuxInstall;
+      } else if (action === 'uninstall_win' && commands.windowsUninstall) {
+        script = commands.windowsUninstall;
+      } else if (action === 'uninstall_lin' && commands.linuxUninstall) {
+        script = commands.linuxUninstall;
+      } else {
+        obj.sendJobUpdate(command.userid, { nodeid: normalized, status: "Unsupported action or missing command.", level: "error", action });
+        return;
+      }
+      // Wrap as array for MeshCentral runcommands type:2 expects list of commands
+      const cmds = Array.isArray(script) ? script : [ String(script) ];
+      obj.enqueueRunCommand({ nodeid: normalized, userid: command.userid, action, script: cmds, runAsUser: 0 });
     });
   };
 
