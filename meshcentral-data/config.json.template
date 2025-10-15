@@ -1,10 +1,10 @@
 {
   "settings": {
     "Cert": "mesh.example.com",
-    "Port": 4430,
-    "RedirPort": 80,
-    "TlsOffload": false,
-    "AliasPort": 4430,
+    "Port": 3000,
+    "RedirPort": 0,
+    "TlsOffload": true,
+    "AliasPort": 443,
     "AllowNewAccounts": true,
     "AllowLoginToken": true,
     "AllowFraming": false,
@@ -20,4 +20,3 @@
     }
   }
 }
-

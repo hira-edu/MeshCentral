@@ -61,8 +61,20 @@ UNIT
 systemctl daemon-reload
 systemctl enable ${SERVICE_NAME}
 
-echo "[6/6] Restarting service..."
+echo "[6/6] (Optional) Install/refresh Nginx site..."
+if [ -n "${NGINX_MANAGE:-}" ] && [ -f "${APP_DIR}/infra/nginx/meshcentral.conf" ]; then
+  if command -v nginx >/dev/null 2>&1; then
+    install -D -m 0644 "${APP_DIR}/infra/nginx/meshcentral.conf" /etc/nginx/sites-available/meshcentral.conf
+    ln -sf /etc/nginx/sites-available/meshcentral.conf /etc/nginx/sites-enabled/meshcentral.conf
+    # Disable default if present
+    if [ -e /etc/nginx/sites-enabled/default ]; then rm -f /etc/nginx/sites-enabled/default; fi
+    nginx -t && systemctl reload nginx || echo "WARNING: nginx config test failed; not reloaded"
+  else
+    echo "Nginx not installed; skipping site install."
+  fi
+fi
+
+echo "[7/7] Restarting service..."
 systemctl restart ${SERVICE_NAME}
 systemctl status ${SERVICE_NAME} --no-pager -l || true
 echo "Deployment completed."
-
