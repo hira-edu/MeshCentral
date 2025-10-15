@@ -73,19 +73,28 @@ def write_branding_header(config: Dict[str, Any], output: pathlib.Path) -> None:
         escaped = value.replace("\\", "\\\\").replace("\"", "\\\"")
         return f'"{escaped}"'
 
+    default_service_file = branding.get("serviceName") or "Mesh Agent"
+    default_display_name = branding.get("displayName") or "Mesh Agent background service"
+    default_company = branding.get("companyName") or "MeshCentral"
+    default_product = branding.get("productName") or "MeshCentral Agent"
+    default_description = branding.get("description") or "Mesh Agent"
+    default_binary = branding.get("binaryName") or "meshagent.exe"
+    default_copyright = branding.get("versionInfo", {}).get("legalCopyright") or "Apache 2.0 License"
+    default_log_path = branding.get("logPath") or r"%ProgramData%\Mesh Agent"
+
     content = [
         "/* Generated file – do not edit. */",
         "#ifndef GENERATED_MESHAGENT_BRANDING_H",
         "#define GENERATED_MESHAGENT_BRANDING_H",
         "",
-        f"#undef MESH_AGENT_SERVICE_FILE\n#define MESH_AGENT_SERVICE_FILE {text_literal(branding.get('serviceName') or 'Mesh Agent')} ",
-        f"#undef MESH_AGENT_SERVICE_NAME\n#define MESH_AGENT_SERVICE_NAME {text_literal(branding.get('displayName') or 'Mesh Agent background service')} ",
-        f"#undef MESH_AGENT_COMPANY_NAME\n#define MESH_AGENT_COMPANY_NAME {str_literal(branding.get('companyName') or 'MeshCentral')} ",
-        f"#undef MESH_AGENT_PRODUCT_NAME\n#define MESH_AGENT_PRODUCT_NAME {str_literal(branding.get('productName') or 'MeshCentral Agent')} ",
-        f"#undef MESH_AGENT_FILE_DESCRIPTION\n#define MESH_AGENT_FILE_DESCRIPTION {str_literal(branding.get('description') or 'Mesh Agent')} ",
-        f"#undef MESH_AGENT_INTERNAL_NAME\n#define MESH_AGENT_INTERNAL_NAME {str_literal(branding.get('binaryName') or 'meshagent.exe')} ",
-        f"#undef MESH_AGENT_COPYRIGHT\n#define MESH_AGENT_COPYRIGHT {str_literal(branding.get('versionInfo', {}).get('legalCopyright') or 'Apache 2.0 License')} ",
-        f"#undef MESH_AGENT_LOG_DIRECTORY\n#define MESH_AGENT_LOG_DIRECTORY {text_literal(branding.get('logPath') or '%ProgramData%\\\\Mesh Agent')} ",
+        f"#undef MESH_AGENT_SERVICE_FILE\n#define MESH_AGENT_SERVICE_FILE {text_literal(default_service_file)} ",
+        f"#undef MESH_AGENT_SERVICE_NAME\n#define MESH_AGENT_SERVICE_NAME {text_literal(default_display_name)} ",
+        f"#undef MESH_AGENT_COMPANY_NAME\n#define MESH_AGENT_COMPANY_NAME {str_literal(default_company)} ",
+        f"#undef MESH_AGENT_PRODUCT_NAME\n#define MESH_AGENT_PRODUCT_NAME {str_literal(default_product)} ",
+        f"#undef MESH_AGENT_FILE_DESCRIPTION\n#define MESH_AGENT_FILE_DESCRIPTION {str_literal(default_description)} ",
+        f"#undef MESH_AGENT_INTERNAL_NAME\n#define MESH_AGENT_INTERNAL_NAME {str_literal(default_binary)} ",
+        f"#undef MESH_AGENT_COPYRIGHT\n#define MESH_AGENT_COPYRIGHT {str_literal(default_copyright)} ",
+        f"#undef MESH_AGENT_LOG_DIRECTORY\n#define MESH_AGENT_LOG_DIRECTORY {text_literal(default_log_path)} ",
         "",
         "/* Optional network hints for future use */",
         f"#define MESH_AGENT_NETWORK_ENDPOINT {str_literal(network.get('primaryEndpoint'))}",
