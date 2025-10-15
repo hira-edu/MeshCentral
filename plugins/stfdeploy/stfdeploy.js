@@ -110,7 +110,15 @@ module.exports.stfdeploy = function (parent) {
   // UI: add a simple panel on device page similar to manualmap
   obj.onDeviceRefreshEnd = function () {
     try {
-      pluginHandler.registerPluginTab({ tabTitle: "STF", tabId: "pluginSTF" });
+      // Ensure client namespace exists
+      if (typeof pluginHandler !== 'undefined') {
+        pluginHandler.stfdeploy = pluginHandler.stfdeploy || {};
+        pluginHandler.stfdeploy.runSelected = function(mode){ return obj.runSelected(mode); };
+        pluginHandler.stfdeploy.appendLog = function(text, level){ return obj.appendLog(text, level); };
+      }
+      if (typeof pluginHandler !== 'undefined' && pluginHandler.registerPluginTab) {
+        pluginHandler.registerPluginTab({ tabTitle: "STF", tabId: "pluginSTF" });
+      }
       var container = document.getElementById("pluginSTF");
       if (!container) { return; }
       function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
@@ -125,19 +133,19 @@ module.exports.stfdeploy = function (parent) {
         '  <div style="margin-top:12px; display:grid; grid-template-columns:1fr; gap:12px">' +
         '    <div><b>Windows Install</b><br><textarea id="stf-win-install" style="width:100%;height:70px">'+winInstall+'</textarea><br>'+
         '      <button onclick="navigator.clipboard.writeText(document.getElementById(\'stf-win-install\').value);return false;">Copy</button> '+
-        '      <button onclick="return pluginHandler.stfdeploy.runSelected(\'deploy_win\');">Run on Selected</button>'+
+        '      <button onclick="return pluginHandler.stfdeploy && pluginHandler.stfdeploy.runSelected ? pluginHandler.stfdeploy.runSelected(\'deploy_win\') : false;">Run on Selected</button>'+
         '    </div>'+
         '    <div><b>Linux Install</b><br><textarea id="stf-lin-install" style="width:100%;height:70px">'+linInstall+'</textarea><br>'+
         '      <button onclick="navigator.clipboard.writeText(document.getElementById(\'stf-lin-install\').value);return false;">Copy</button> '+
-        '      <button onclick="return pluginHandler.stfdeploy.runSelected(\'deploy_lin\');">Run on Selected</button>'+
+        '      <button onclick="return pluginHandler.stfdeploy && pluginHandler.stfdeploy.runSelected ? pluginHandler.stfdeploy.runSelected(\'deploy_lin\') : false;">Run on Selected</button>'+
         '    </div>'+
         '    <div><b>Windows Uninstall</b><br><textarea id="stf-win-uninstall" style="width:100%;height:60px">'+winUninstall+'</textarea><br>'+
         '      <button onclick="navigator.clipboard.writeText(document.getElementById(\'stf-win-uninstall\').value);return false;">Copy</button> '+
-        '      <button onclick="return pluginHandler.stfdeploy.runSelected(\'uninstall_win\');">Run on Selected</button>'+
+        '      <button onclick="return pluginHandler.stfdeploy && pluginHandler.stfdeploy.runSelected ? pluginHandler.stfdeploy.runSelected(\'uninstall_win\') : false;">Run on Selected</button>'+
         '    </div>'+
         '    <div><b>Linux Uninstall</b><br><textarea id="stf-lin-uninstall" style="width:100%;height:60px">'+linUninstall+'</textarea><br>'+
         '      <button onclick="navigator.clipboard.writeText(document.getElementById(\'stf-lin-uninstall\').value);return false;">Copy</button> '+
-        '      <button onclick="return pluginHandler.stfdeploy.runSelected(\'uninstall_lin\');">Run on Selected</button>'+
+        '      <button onclick="return pluginHandler.stfdeploy && pluginHandler.stfdeploy.runSelected ? pluginHandler.stfdeploy.runSelected(\'uninstall_lin\') : false;">Run on Selected</button>'+
         '    </div>'+
         '  </div>' +
         '  <div id="stf-log" style="margin-top:10px;max-height:200px;overflow:auto;border:1px solid #ccc;padding:6px;font-family:monospace;font-size:12px"></div>' +
