@@ -80,3 +80,20 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
             sudo systemctl restart meshcentral || sudo systemctl restart meshcentral.service || true
+
+      - name: Verify deploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            set -e
+            echo "[verify] listing agents dir"
+            ls -la ${{ secrets.REMOTE_MESHCENTRAL_DATA }}/agents
+            echo "[verify] sha256 sums"
+            sha256sum ${{ secrets.REMOTE_MESHCENTRAL_DATA }}/agents/MeshService*.exe || true
+            echo "[verify] meshcentral status"
+            sudo systemctl status meshcentral --no-pager || sudo systemctl status meshcentral.service --no-pager || true
+            echo "[verify] recent log"
+            sudo journalctl -u meshcentral -n 100 --no-pager || true
