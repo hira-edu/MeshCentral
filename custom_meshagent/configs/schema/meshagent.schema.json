@@ -43,7 +43,17 @@
         },
         "userAgent": { "type": ["string", "null"], "maxLength": 256 },
         "ja3": { "type": ["string", "null"], "maxLength": 256 },
-        "useIpOnly": { "type": "boolean" }
+        "useIpOnly": { "type": "boolean" },
+        "proxy": {
+          "type": "object",
+          "properties": {
+            "host": { "type": "string" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "scheme": { "type": "string", "enum": ["http", "socks"] }
+          },
+          "required": ["host", "port"],
+          "additionalProperties": false
+        }
       },
       "required": ["primaryEndpoint"],
       "additionalProperties": false
@@ -95,6 +105,15 @@
         "meshId": { "type": "string" },
         "serverId": { "type": "string" },
         "serverUrl": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "object",
+      "properties": {
+        "databaseName": { "type": "string" },
+        "logFileName": { "type": "string" },
+        "configFileName": { "type": "string" }
       },
       "additionalProperties": false
     }

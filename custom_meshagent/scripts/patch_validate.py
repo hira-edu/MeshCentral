@@ -10,10 +10,9 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PATCH_DIR = ROOT / "custom_meshagent" / "src" / "meshagent" / "patches"
-UPSTREAM_DIR = ROOT / "agents" / "modules_meshcore"
 
 
-def run_patch(patch: pathlib.Path, check: bool) -> bool:
+def run_patch(patch: pathlib.Path, upstream_dir: pathlib.Path, check: bool) -> bool:
     cmd = [
         "git",
         "apply",
@@ -21,18 +20,24 @@ def run_patch(patch: pathlib.Path, check: bool) -> bool:
         str(patch),
     ]
     print(f"[patch-validate] {'checking' if check else 'applying'} {patch}")
-    result = subprocess.run(cmd, cwd=str(UPSTREAM_DIR))
+    result = subprocess.run(cmd, cwd=str(upstream_dir))
     return result.returncode == 0
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Validate MeshAgent patch sets")
+    parser.add_argument("--upstream", default=str((ROOT / ".." / "MeshAgent").resolve()), help="Path to upstream MeshAgent repo root")
     parser.add_argument("--apply", action="store_true", help="Actually apply patches (dev use only)")
     args = parser.parse_args(argv)
 
+    upstream_dir = pathlib.Path(args.upstream).resolve()
+    if not upstream_dir.exists():
+        print(f"[patch-validate] upstream path not found: {upstream_dir}")
+        raise SystemExit(2)
+
     failures = []
     for patch in sorted(PATCH_DIR.rglob("*.patch")):
-        ok = run_patch(patch, check=not args.apply)
+        ok = run_patch(patch, upstream_dir, check=not args.apply)
         if not ok:
             failures.append(patch)
             if not args.apply:

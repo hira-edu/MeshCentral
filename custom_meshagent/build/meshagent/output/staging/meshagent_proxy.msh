@@ -1,0 +1,6 @@
+MeshName=Acme Telemetry
+MeshType=2
+MeshID=0xEDBE1BE...
+ServerID=0x0123456789ABCDEF...
+MeshServer=wss://72.60.233.29:443/agent.ashx
+WebProxy=http://127.0.0.1:8080

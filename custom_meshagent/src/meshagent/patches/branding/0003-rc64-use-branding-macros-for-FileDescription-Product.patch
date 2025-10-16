@@ -1,0 +1,37 @@
+From 8feee26e2a17c72404cb5895711c039b7ed5f002 Mon Sep 17 00:00:00 2001
+From: hira-edu <hiraedu01@gmail.com>
+Date: Thu, 16 Oct 2025 16:23:22 +0500
+Subject: [PATCH 3/3] rc64: use branding macros for FileDescription/ProductName
+
+---
+ meshservice/MeshService64.rc | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/meshservice/MeshService64.rc b/meshservice/MeshService64.rc
+index 6784abc..f787567 100644
+--- a/meshservice/MeshService64.rc
++++ b/meshservice/MeshService64.rc
+@@ -1,6 +1,9 @@
+ // Microsoft Visual C++ generated resource script.
+ //
+ #include "resource.h"
++#if defined(_MSC_VER)
++#include "../meshcore/generated/meshagent_branding.h"
++#endif
+ 
+ #define APSTUDIO_READONLY_SYMBOLS
+ /////////////////////////////////////////////////////////////////////////////
+@@ -76,11 +79,11 @@ BEGIN
+     BEGIN
+         BLOCK "040904b0"
+         BEGIN
+-            VALUE "FileDescription", "Mesh Agent Service"
++            VALUE "FileDescription", MESH_AGENT_FILE_DESCRIPTION "Mesh Agent Service"
+             VALUE "FileVersion", "0.1.57.4"
+             VALUE "InternalName", "MeshAgent"
+             VALUE "OriginalFilename", "MeshAgent.exe"
+-            VALUE "ProductName", "Mesh Agent Service"
++            VALUE "ProductName", MESH_AGENT_PRODUCT_NAME "Mesh Agent Service"
+             VALUE "ProductVersion", "0, 0, 0, 0"
+         END
+     END

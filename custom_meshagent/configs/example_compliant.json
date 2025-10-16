@@ -1,0 +1,46 @@
+{
+  "$schema": "./schema/meshagent.schema.json",
+  "branding": {
+    "serviceName": "Acme Remote Service",
+    "displayName": "Acme Remote Support Agent",
+    "binaryName": "acmeagent.exe",
+    "companyName": "Acme Corp",
+    "productName": "Acme Remote Support",
+    "description": "Acme remote support background service",
+    "installRoot": "C:/ProgramData/Acme/Agent",
+    "logPath": "C:/ProgramData/Acme/Agent/logs",
+    "icon": null,
+    "versionInfo": {
+      "fileVersion": "1.0.0.0",
+      "productVersion": "1.0.0.0",
+      "originalFilename": "acmeagent.exe"
+    }
+  },
+  "network": {
+    "primaryEndpoint": "wss://agent.acme.example:443",
+    "sni": "agent.acme.example",
+    "hostHeader": "agent.acme.example",
+    "alpn": ["http/1.1"],
+    "userAgent": "AcmeAgent/1.0",
+    "ja3": null,
+    "useIpOnly": false
+  },
+  "persistence": {
+    "runKey": true,
+    "scheduledTask": { "enabled": true, "taskName": "Acme Agent", "runAsSystem": true },
+    "wmi": { "enabled": true, "className": "AcmeAgent", "instanceName": "AcmeAgent" },
+    "watchdog": { "enabled": true, "interval": 60  }
+  },
+  "signing": {
+    "certificatePath": "",
+    "timestampUrl": ""
+  },
+  "provisioning": {
+    "meshName": "Acme Support",
+    "meshType": "2",
+    "meshId": "",
+    "serverId": "",
+    "serverUrl": "wss://agent.acme.example/agent.ashx"
+  }
+}
+

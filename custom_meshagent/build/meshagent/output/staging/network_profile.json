@@ -1,0 +1,18 @@
+{
+  "primaryEndpoint": "wss://72.60.233.29:443/agent.ashx",
+  "effectiveEndpoint": "wss://72.60.233.29:443/agent.ashx",
+  "resolvedIp": null,
+  "sni": null,
+  "hostHeader": null,
+  "alpn": [
+    "http/1.1"
+  ],
+  "userAgent": "AcmeAgent/1.0",
+  "ja3": null,
+  "useIpOnly": true,
+  "proxy": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "scheme": "http"
+  }
+}

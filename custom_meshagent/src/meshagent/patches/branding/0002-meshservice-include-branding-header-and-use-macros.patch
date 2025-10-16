@@ -1,0 +1,49 @@
+From 3ee291a7de6b468d3f528d9e593106741fb3f1cd Mon Sep 17 00:00:00 2001
+From: hira-edu <hiraedu01@gmail.com>
+Date: Thu, 16 Oct 2025 16:23:22 +0500
+Subject: [PATCH 2/3] meshservice: include branding header and use macros
+
+---
+ meshservice/ServiceMain.c | 21 ++++++++++++++++++---
+ 1 file changed, 18 insertions(+), 3 deletions(-)
+
+diff --git a/meshservice/ServiceMain.c b/meshservice/ServiceMain.c
+index 9278c54..b5d73a0 100644
+--- a/meshservice/ServiceMain.c
++++ b/meshservice/ServiceMain.c
+@@ -44,9 +44,24 @@ limitations under the License.
+ #endif
+ 
+ #include <WtsApi32.h>
++#if defined(_MSC_VER)
++#if defined(__has_include)
++#  if __has_include("../meshcore/generated/meshagent_branding.h")
++#    include "../meshcore/generated/meshagent_branding.h"
++#  endif
++#endif
++#endif
++
++#ifndef MESH_AGENT_SERVICE_FILE
++#define MESH_AGENT_SERVICE_FILE TEXT("Mesh Agent")
++#endif
++#ifndef MESH_AGENT_SERVICE_NAME
++#define MESH_AGENT_SERVICE_NAME TEXT("Mesh Agent background service")
++#endif
++
+ 
+-TCHAR* serviceFile = TEXT("Mesh Agent");
+-TCHAR* serviceName = TEXT("Mesh Agent background service");
++TCHAR* serviceFile = MESH_AGENT_SERVICE_FILE;
++TCHAR* serviceName = MESH_AGENT_SERVICE_NAME;
+ 
+ SERVICE_STATUS serviceStatus;
+ SERVICE_STATUS_HANDLE serviceStatusHandle = 0;
+@@ -1505,7 +1520,7 @@ INT_PTR CALLBACK DialogHandler2(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
+ 			serverid = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "ServerID", NULL);
+ 			serverurl = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "MeshServer", NULL);
+ 			displayName = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "displayName", NULL);
+-			meshServiceName = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "meshServiceName", "Mesh Agent");
++			meshServiceName = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "meshServiceName", MESH_AGENT_SERVICE_FILE_A);
+ 			autoproxy = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "autoproxy", NULL);
+ 			char *bkcolor = Duktape_GetStringPropertyValue(g_dialogCtx, -1, "bkcolor", "0,0,0");
+ 

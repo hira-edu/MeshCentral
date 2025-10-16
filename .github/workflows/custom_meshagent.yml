@@ -1,0 +1,82 @@
+name: Custom MeshAgent Pipeline
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Prepare MeshAgent header path
+        run: |
+          New-Item -ItemType Directory -Force -Path MeshAgent\meshcore\generated | Out-Null
+
+      - name: Validate config (IP-only)
+        run: |
+          python custom_meshagent\scripts\meshagent_build.py validate --config ip_only_acme.json
+
+      - name: Generate artifacts
+        run: |
+          python custom_meshagent\scripts\meshagent_build.py generate --config ip_only_acme.json --meshagent-root .\MeshAgent
+          python custom_meshagent\provisioning\generators\install_gen.py --config custom_meshagent\configs\ip_only_acme.json --out custom_meshagent\build\meshagent\generated\install.ps1
+
+      - name: Package bundle
+        run: |
+          python custom_meshagent\scripts\meshagent_build.py package --config ip_only_acme.json --binary C:\Windows\System32\notepad.exe --nsis
+
+      - name: Upload generated artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated
+          path: |
+            custom_meshagent/build/meshagent/generated/**
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle
+          path: custom_meshagent/build/meshagent/output/**
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bundle
+          path: bundle
+
+      - name: Push MeshService binaries to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: |
+            bundle/staging/MeshService.exe
+            bundle/staging/MeshService64.exe
+          target: ${{ secrets.REMOTE_MESHCENTRAL_DATA }}/agents
+          overwrite: true
+
+      - name: Restart MeshCentral
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            sudo systemctl restart meshcentral || sudo systemctl restart meshcentral.service || true

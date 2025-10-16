@@ -6983,7 +6983,34 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                 });
                 obj.app.ws(url + 'devicefile.ashx', function (ws, req) { obj.meshDeviceFileHandler.CreateMeshDeviceFile(obj, ws, null, req, domain); });
                 obj.app.get(url + 'devicefile.ashx', handleDeviceFile);
-                obj.app.get(url + 'agentdownload.ashx', handleAgentDownloadFile);
+            obj.app.get(url + 'agentdownload.ashx', handleAgentDownloadFile);
+            // Custom MeshAgent bundle download (serves locally built custom bundles)
+            obj.app.get(url + 'customagentdownload.ashx', function (req, res) {
+                try {
+                    const outputDir = obj.path.join(__dirname, 'custom_meshagent', 'build', 'meshagent', 'output');
+                    const fs = obj.fs;
+                    const q = req.query || {};
+                    if (typeof q.file === 'string') {
+                        const fname = q.file.replace(/[^A-Za-z0-9_\.-]/g, '');
+                        const full = obj.path.join(outputDir, fname);
+                        if (full.indexOf(outputDir) !== 0) { return res.sendStatus(400); }
+                        if (fs.existsSync(full) && fs.statSync(full).isFile()) {
+                            res.download(full, fname);
+                        } else {
+                            res.status(404).send('File not found');
+                        }
+                        return;
+                    }
+                    // List available bundles
+                    if (!fs.existsSync(outputDir)) { return res.status(404).send('No custom bundles'); }
+                    const files = fs.readdirSync(outputDir).filter(f => f.toLowerCase().endsWith('_bundle.zip'));
+                    const list = files.map(f => ({ file: f, size: fs.statSync(obj.path.join(outputDir, f)).size }));
+                    res.setHeader('Content-Type', 'application/json');
+                    res.send(JSON.stringify({ bundles: list }));
+                } catch (ex) {
+                    try { res.status(500).send('Error'); } catch (e) { }
+                }
+            });
                 obj.app.get(url + 'logo.png', handleLogoRequest);
                 obj.app.get(url + 'loginlogo.png', handleLoginLogoRequest);
                 obj.app.get(url + 'pwalogo.png', handlePWALogoRequest);

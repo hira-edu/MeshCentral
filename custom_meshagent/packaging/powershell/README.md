@@ -10,3 +10,9 @@ rollouts (including SOS mode). Scripts should:
   helper.
 
 Implementation requires Windows testing and will be added later.
+
+## Registry Keys Created
+- HKLM:\SYSTEM\CurrentControlSet\Services\\<ServiceName>\\Parameters: InstallRoot, BinaryName, LogPath, CompanyName, ProductName, ProductVersion (optional)
+- HKLM:\Software\\<Company>\\<Product>: InstallRoot, BinaryName, ServiceName, DisplayName, LogPath, ProductVersion, InstallDate
+
+Use install_gen.py to produce install.ps1 and the bootstrap to run it against a staged bundle.
