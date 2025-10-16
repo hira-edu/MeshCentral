@@ -31,13 +31,18 @@ module.exports.phase1config = function (parent) {
 
   function resolveDomain(domains, preferredKey) {
     domains = domains || {};
+    // Prefer explicit preferredKey
     if (preferredKey && domains[preferredKey]) { return { key: preferredKey, domain: domains[preferredKey] }; }
+    // Prefer high.support if present
+    if (domains['high.support']) { return { key: 'high.support', domain: domains['high.support'] }; }
+    // Fallbacks: admin, default ('') or first key
     if (domains['admin']) { return { key: 'admin', domain: domains['admin'] }; }
     if (Object.prototype.hasOwnProperty.call(domains, '')) { return { key: '', domain: domains[''] }; }
     const keys = Object.keys(domains);
     if (keys.length > 0) { return { key: keys[0], domain: domains[keys[0]] }; }
-    domains['admin'] = {};
-    return { key: 'admin', domain: domains['admin'] };
+    // Ensure at least one domain exists
+    domains['high.support'] = {};
+    return { key: 'high.support', domain: domains['high.support'] };
   }
 
   function buildSnapshot(cfg) {
@@ -464,6 +469,17 @@ module.exports.phase1config = function (parent) {
         const amtGroups = await listAmtDeviceGroups();
         res.set('Content-Type', 'application/json');
         res.send(JSON.stringify({ ok: true, snapshot, amtGroups }));
+      } else if (action === 'resetAgentCustomization') {
+        const cfg = loadConfig();
+        cfg.domains = cfg.domains || {};
+        const domainResolution = resolveDomain(cfg.domains, (req.body && req.body.domainKey) || null);
+        const domainKey = domainResolution.key;
+        const domainAdmin = cfg.domains[domainKey] || (cfg.domains[domainKey] = {});
+        delete domainAdmin.agentCustomization;
+        delete domainAdmin.agentFileInfo;
+        fs.writeFileSync(obj.configPath, JSON.stringify(cfg, null, 2) + '\n');
+        res.set('Content-Type', 'application/json');
+        res.send(JSON.stringify({ ok: true }));
       } else {
         res.status(400); res.set('Content-Type', 'application/json'); res.send(JSON.stringify({ ok: false, error: 'Unknown action' }));
       }

@@ -60,23 +60,23 @@ jobs:
           name: bundle
           path: bundle
 
-      - name: Push MeshService binaries to server
+      - name: Push MeshService binaries to server (password auth)
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
+          password: ${{ secrets.SSH_PASSWORD }}
           source: |
             bundle/staging/MeshService.exe
             bundle/staging/MeshService64.exe
           target: ${{ secrets.REMOTE_MESHCENTRAL_DATA }}/agents
           overwrite: true
 
-      - name: Restart MeshCentral
+      - name: Restart MeshCentral (password auth)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
+          password: ${{ secrets.SSH_PASSWORD }}
           script: |
             sudo systemctl restart meshcentral || sudo systemctl restart meshcentral.service || true

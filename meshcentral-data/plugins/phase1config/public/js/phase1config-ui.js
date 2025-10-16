@@ -77,6 +77,10 @@
       '      <tr><td>Agent Image<td><input id="phase1-agentImagePath" type="text" placeholder="agent-logo.png"><br><input id="phase1-agentImageFile" type="file" accept="image/png"></td></tr>',
       '    </table>',
       '  </fieldset>',
+      '  <div style="margin:10px 0">',
+      '    <button id="phase1-resetAgentBranding" type="button">Reset Agent Branding to Defaults</button>',
+      '    <span class="inline-info" style="margin-left:8px">Clears domains.admin.agentCustomization and agentFileInfo (no restart).</span>',
+      '  </div>',
       '  <fieldset>',
       '    <legend>Windows Agent Metadata</legend>',
       '    <table class="inputtable">',
@@ -464,6 +468,21 @@
       reloadBtn.addEventListener('click', function (ev) {
         ev.preventDefault();
         reloadSnapshot();
+      });
+    }
+
+    const resetBtn = q('phase1-resetAgentBranding');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        const body = new URLSearchParams();
+        body.set('action', 'resetAgentCustomization');
+        body.set('domainKey', (window.phase1configData && window.phase1configData.snapshot && window.phase1configData.snapshot.domainKey) || 'admin');
+        log('Resetting agent branding to defaults...');
+        fetch('pluginadmin.ashx?pin=phase1config', { method: 'POST', body: body })
+          .then(function (res) { if (!res.ok) { return res.text().then(function (t) { throw new Error(t || ('HTTP ' + res.status)); }); } return res.json(); })
+          .then(function (json) { if (json.ok) { log('Agent branding cleared. Reloading...'); reloadSnapshot(); } else { throw new Error(json.error || 'Unknown error'); } })
+          .catch(function (err) { log('Reset failed: ' + err.message, 'error'); });
       });
     }
   }
