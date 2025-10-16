@@ -171,3 +171,39 @@ jobs:
             curl -I -sS https://${{ env.PUBLIC_HOSTNAME }}/meshagents?id=3 | sed -n '1,6p' || true
             curl -I -sS https://${{ env.PUBLIC_HOSTNAME }}/agents-slow/MeshService64.exe | sed -n '1,6p' || true
             curl -I -sS https://${{ env.PUBLIC_HOSTNAME }}/agents-slow/MeshService.exe | sed -n '1,6p' || true
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bundle
+          path: bundle
+
+      - name: Compute tag name
+        id: tag
+        run: |
+          echo "TS=$(date +%Y%m%d-%H%M%S)" >> $GITHUB_ENV
+          echo "tag=custom-agents-${GITHUB_SHA:0:7}-$TS" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Custom Agents ${{ steps.tag.outputs.tag }}
+          body: |
+            Automated build of custom agents.
+            Includes Windows x64/x86 drop-in binaries for MeshCentral.
+          draft: false
+          prerelease: false
+          files: |
+            bundle/staging/MeshService64.exe
+            bundle/staging/MeshService.exe
