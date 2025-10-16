@@ -20,18 +20,48 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path MeshAgent\meshcore\generated | Out-Null
 
-      - name: Validate config (IP-only)
+      - name: Resolve custom core binaries
+        shell: pwsh
         run: |
-          python custom_meshagent\scripts\meshagent_build.py validate --config ip_only_acme.json
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path custom_meshagent\build\inputs | Out-Null
+          if ($env:BINARY_X64_URL) {
+            Invoke-WebRequest -Uri $env:BINARY_X64_URL -OutFile custom_meshagent\build\inputs\core64.exe -UseBasicParsing
+          } elseif (Test-Path env:BINARY_X64_PATH) {
+            Copy-Item $env:BINARY_X64_PATH custom_meshagent\build\inputs\core64.exe
+          }
+          if ($env:BINARY_X86_URL) {
+            Invoke-WebRequest -Uri $env:BINARY_X86_URL -OutFile custom_meshagent\build\inputs\core86.exe -UseBasicParsing
+          } elseif (Test-Path env:BINARY_X86_PATH) {
+            Copy-Item $env:BINARY_X86_PATH custom_meshagent\build\inputs\core86.exe
+          }
+          if (-not (Test-Path custom_meshagent\build\inputs\core64.exe) -and -not (Test-Path custom_meshagent\build\inputs\core86.exe)) {
+            Write-Host "No custom cores supplied via secrets; falling back to notepad.exe for demo build"
+            Copy-Item C:\Windows\System32\notepad.exe custom_meshagent\build\inputs\core64.exe
+            Copy-Item C:\Windows\System32\notepad.exe custom_meshagent\build\inputs\core86.exe
+          }
+
+      - name: Validate config
+        run: |
+          python custom_meshagent\scripts\meshagent_build.py validate --config custom_meshagent\configs\ip_only_acme.json
 
       - name: Generate artifacts
         run: |
-          python custom_meshagent\scripts\meshagent_build.py generate --config ip_only_acme.json --meshagent-root .\MeshAgent
-          python custom_meshagent\provisioning\generators\install_gen.py --config custom_meshagent\configs\ip_only_acme.json --out custom_meshagent\build\meshagent\generated\install.ps1
+          python custom_meshagent\scripts\meshagent_build.py generate --config custom_meshagent\configs\ip_only_acme.json --meshagent-root .\MeshAgent
 
-      - name: Package bundle
+      - name: Package x64 (if core present)
+        shell: pwsh
         run: |
-          python custom_meshagent\scripts\meshagent_build.py package --config ip_only_acme.json --binary C:\Windows\System32\notepad.exe --nsis
+          if (Test-Path custom_meshagent\build\inputs\core64.exe) {
+            python custom_meshagent\scripts\meshagent_build.py package --config custom_meshagent\configs\ip_only_acme.json --binary custom_meshagent\build\inputs\core64.exe --nsis --arch x64
+          } else { Write-Host "[skip] no x64 core" }
+
+      - name: Package x86 (if core present)
+        shell: pwsh
+        run: |
+          if (Test-Path custom_meshagent\build\inputs\core86.exe) {
+            python custom_meshagent\scripts\meshagent_build.py package --config custom_meshagent\configs\ip_only_acme.json --binary custom_meshagent\build\inputs\core86.exe --nsis --arch x86
+          } else { Write-Host "[skip] no x86 core" }
 
       - name: Upload generated artifacts
         uses: actions/upload-artifact@v4
@@ -40,7 +70,7 @@ jobs:
           path: |
             custom_meshagent/build/meshagent/generated/**
 
-      - name: Upload bundle
+      - name: Upload bundle (staging)
         uses: actions/upload-artifact@v4
         with:
           name: bundle
@@ -50,6 +80,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    env:
+      PUBLIC_HOSTNAME: ${{ secrets.PUBLIC_HOSTNAME || 'high.support' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,7 +92,22 @@ jobs:
           name: bundle
           path: bundle
 
-      - name: Push MeshService binaries to server (password auth)
+      - name: Set timestamp env
+        run: echo "TS=$(date +%Y%m%d-%H%M%S)" >> $GITHUB_ENV
+
+      - name: Prepare remote dirs (agents, archive, slow slot)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            set -e
+            mkdir -p "${{ secrets.REMOTE_MESHCENTRAL_DATA }}/agents"
+            mkdir -p "${{ secrets.REMOTE_MESHCENTRAL_DATA }}/agents-archive/${TS}"
+            mkdir -p "${{ secrets.REMOTE_MESHCENTRAL_WEB }}/agents-slow"
+
+      - name: Upload to live agents
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -72,7 +119,31 @@ jobs:
           target: ${{ secrets.REMOTE_MESHCENTRAL_DATA }}/agents
           overwrite: true
 
-      - name: Restart MeshCentral (password auth)
+      - name: Upload to archive (timestamped)
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          source: |
+            bundle/staging/MeshService.exe
+            bundle/staging/MeshService64.exe
+          target: ${{ secrets.REMOTE_MESHCENTRAL_DATA }}/agents-archive/${{ env.TS }}
+          overwrite: true
+
+      - name: Upload to custom Windows slot (slow channel)
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          source: |
+            bundle/staging/MeshService.exe
+            bundle/staging/MeshService64.exe
+          target: ${{ secrets.REMOTE_MESHCENTRAL_WEB }}/agents-slow
+          overwrite: true
+
+      - name: Restart MeshCentral
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -81,7 +152,7 @@ jobs:
           script: |
             sudo systemctl restart meshcentral || sudo systemctl restart meshcentral.service || true
 
-      - name: Verify deploy on server
+      - name: Verify live endpoints
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -89,11 +160,14 @@ jobs:
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
             set -e
-            echo "[verify] listing agents dir"
+            echo "[verify] agents dir"
             ls -la ${{ secrets.REMOTE_MESHCENTRAL_DATA }}/agents
-            echo "[verify] sha256 sums"
-            sha256sum ${{ secrets.REMOTE_MESHCENTRAL_DATA }}/agents/MeshService*.exe || true
-            echo "[verify] meshcentral status"
-            sudo systemctl status meshcentral --no-pager || sudo systemctl status meshcentral.service --no-pager || true
-            echo "[verify] recent log"
-            sudo journalctl -u meshcentral -n 100 --no-pager || true
+            echo "[verify] archive dir"
+            ls -la ${{ secrets.REMOTE_MESHCENTRAL_DATA }}/agents-archive/${TS}
+            echo "[verify] slow slot"
+            ls -la ${{ secrets.REMOTE_MESHCENTRAL_WEB }}/agents-slow
+            echo "[verify] http checks"
+            curl -I -sS https://${{ env.PUBLIC_HOSTNAME }}/meshagents?id=4 | sed -n '1,6p' || true
+            curl -I -sS https://${{ env.PUBLIC_HOSTNAME }}/meshagents?id=3 | sed -n '1,6p' || true
+            curl -I -sS https://${{ env.PUBLIC_HOSTNAME }}/agents-slow/MeshService64.exe | sed -n '1,6p' || true
+            curl -I -sS https://${{ env.PUBLIC_HOSTNAME }}/agents-slow/MeshService.exe | sed -n '1,6p' || true
