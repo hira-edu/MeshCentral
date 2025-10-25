@@ -312,3 +312,8 @@ __pycache__/
 docs/__pycache__/
 docs/env/
 docker-compose.yaml
+
+# Custom deployment configurations
+deployment-configs/
+meshcentral-data/agents-custom/
+meshcentral-data/config.template.json
