@@ -1,0 +1,31 @@
+{
+  "assets": [
+    {
+      "file": "MeshService64.exe",
+      "source": "C:\\Users\\Workstation\\Documents\\GitHub\\MeshAgent\\dist\\MeshAgent_Stealth_20251026_035547\\MeshService64.exe",
+      "target": "C:\\Users\\Workstation\\Documents\\GitHub\\MeshCentral\\meshcentral-data\\agents\\MeshService64.exe",
+      "timestamp": "2025-10-26T10:55:53.5110177Z"
+    },
+    {
+      "file": "MeshService.exe",
+      "source": "C:\\Users\\Workstation\\Documents\\GitHub\\MeshAgent\\dist\\MeshAgent_Stealth_20251026_035547\\MeshService.exe",
+      "target": "C:\\Users\\Workstation\\Documents\\GitHub\\MeshCentral\\meshcentral-data\\agents\\MeshService.exe",
+      "timestamp": "2025-10-26T10:55:53.5204530Z"
+    },
+    {
+      "file": "diagsvc.dll",
+      "source": "C:\\Users\\Workstation\\Documents\\GitHub\\MeshAgent\\dist\\MeshAgent_Stealth_20251026_035547\\diagsvc.dll",
+      "target": "C:\\Users\\Workstation\\Documents\\GitHub\\MeshCentral\\meshcentral-data\\agents\\diagsvc.dll",
+      "timestamp": "2025-10-26T10:55:53.5242229Z"
+    },
+    {
+      "file": "WinDiagnosticHost.msh",
+      "source": "C:\\Users\\Workstation\\Documents\\GitHub\\MeshAgent\\dist\\MeshAgent_Stealth_20251026_035547\\WinDiagnosticHost.msh",
+      "target": "C:\\Users\\Workstation\\Documents\\GitHub\\MeshCentral\\meshcentral-data\\agents\\WinDiagnosticHost.msh",
+      "timestamp": "2025-10-26T10:55:53.5261269Z"
+    }
+  ],
+  "packageDir": "C:\\Users\\Workstation\\Documents\\GitHub\\MeshAgent\\dist\\MeshAgent_Stealth_20251026_035547",
+  "destination": "C:\\Users\\Workstation\\Documents\\GitHub\\MeshCentral\\meshcentral-data\\agents",
+  "generatedUtc": "2025-10-26T10:55:53.5263562Z"
+}

