@@ -1782,7 +1782,7 @@ function serverConnect() {
             }
             case 'agentdownload': {
                 // Download an agent
-                var u = settings.xxurl.replace('wss://', 'https://').replace('/control.ashx', '/meshagents');
+                var u = settings.xxurl.replace('wss://', 'https://').replace('ws://', 'http://').replace('/control.ashx', '/meshagents');
                 if (u.indexOf('?') > 0) { u += '&'; } else { u += '?'; }
                 u += 'id=' + args.type + '&meshid=' + args.id;
                 if (args.installflags) {
@@ -1792,8 +1792,10 @@ function serverConnect() {
                 const options = { rejectUnauthorized: false, checkServerIdentity: onVerifyServer }
                 const fs = require('fs');
                 const https = require('https');
+                const http = require('http');
                 var downloadSize = 0;
-                const req = https.request(u, options, function (res) {
+                const requestLib = (u.startsWith('https://')) ? https : (u.startsWith('http://') ? http : https);
+                const req = requestLib.request(u, options, function (res) {
                     if (res.statusCode != 200) {
                         console.log('Download error, statusCode: ' + res.statusCode);
                         process.exit(1);

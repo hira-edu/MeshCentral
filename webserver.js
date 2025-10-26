@@ -6795,8 +6795,12 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
             // If the web relay port is enabled, allow the web page to redirect to it
             var extraFrameSrc = '';
             if ((parent.webrelayserver != null) && (parent.webrelayserver.port != 0)) {
-                extraFrameSrc = ' https://' + req.headers.host + ':' + parent.webrelayserver.port;
-                if ((xforwardedhost != null) && (xforwardedhost != req.headers.host)) { extraFrameSrc += ' https://' + xforwardedhost + ':' + parent.webrelayserver.port; }
+                const hostNoPort = (typeof req.headers.host == 'string') ? req.headers.host.split(':')[0] : '';
+                extraFrameSrc = ' https://' + hostNoPort + ':' + parent.webrelayserver.port;
+                if ((typeof xforwardedhost == 'string') && (xforwardedhost.length > 0)) {
+                    const forwardedNoPort = xforwardedhost.split(':')[0];
+                    if (forwardedNoPort.length > 0 && forwardedNoPort != hostNoPort) { extraFrameSrc += ' https://' + forwardedNoPort + ':' + parent.webrelayserver.port; }
+                }
             }
             
 
