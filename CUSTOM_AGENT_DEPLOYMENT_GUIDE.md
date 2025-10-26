@@ -15,7 +15,7 @@
 3. **`meshAgentBinDir` config setting** - Appears in examples but is never read by code
 
 ### ✅ REALITY (What actually works)
-1. Custom agents go in: **`meshcentral-data/agents/`**
+1. Custom agents go in: **`meshcentral-data/agents/`** (when you run MeshCentral from `Documents\GitHub\MeshCentral`, the server defaults to the sibling path `..\meshcentral-data`, not `MeshCentral\meshcentral-data`).
 2. Use `noagentupdate` setting to disable updates
 3. Directory paths are hardcoded in `meshcentral.js`
 
@@ -23,12 +23,12 @@
 
 ## 📁 Agent Loading Priority (FROM CODE)
 
-Based on `meshcentral.js` lines 3566-3571, MeshCentral checks directories in this EXACT order:
+Based on `meshcentral.js` lines 3566-3571, MeshCentral evaluates directories in this order (later checks override earlier ones):
 
 ```
-1. meshcentral-data/signedagents/[agent]  ← HIGHEST PRIORITY (signed agents)
-2. meshcentral-data/agents/[agent]        ← CUSTOM AGENTS GO HERE
-3. agents/[agent]                         ← Lowest priority (built-in)
+1. agents/[agent]                         ← Base path bundled with MeshCentral
+2. meshcentral-data/signedagents/[agent]  ← Used when the server re-signs agents
+3. meshcentral-data/agents/[agent]        ← Highest priority (custom payloads win)
 ```
 
 ### Code Reference:
@@ -78,6 +78,12 @@ copy "your-build\MeshService.exe" "meshcentral-data\agents\"
 # Linux example:
 cp build/meshagent_x86_64 /opt/meshcentral/meshcentral-data/agents/
 ```
+
+## 🔒 Signed Binary Behavior & Runtime Validation
+
+- When MeshCentral embeds `.msh` data into a **signed** executable, it expands the PE certificate table so the appended payload sits inside the Authenticode blob. This mutates two 4-byte fields (certificate table size and `WIN_CERTIFICATE.dwLength`) even if the base binary matches your build byte-for-byte.
+- `tools/Invoke-RuntimeValidation.ps1` / `test.ps1` now normalizes those certificate fields before hashing, so the \"MeshCentral Binary Matches StealthLab\" test **passes** for signed payloads. Expect the console message `Normalized SHA256 ... (certificate delta XXXX bytes)` whenever MeshCentral served a signed/embedded agent.
+- If you diff the files manually, strip the appended payload (`MSH + LEN + GUID + padding`) and subtract the delta (embedded length + 20 bytes + padding) from the certificate size fields to compare hashes confidently.
 
 ### Step 4: Configure MeshCentral Correctly
 Edit `meshcentral-data/config.json`:
