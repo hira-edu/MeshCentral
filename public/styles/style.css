@@ -1,6 +1,12 @@
 ﻿
+/* ── Phase 5: Accessible focus ── */
 :focus {
     outline: 0;
+}
+
+:focus-visible {
+    outline: 2px solid #036;
+    outline-offset: 2px;
 }
 
 
@@ -14,8 +20,8 @@ body {
     padding: 0;
     border: 0;
     color: black;
-    font-size: 13px;
-    font-family: "Trebuchet MS", Arial, Helvetica, sans-serif;
+    font-size: 0.875rem;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     background-color: #d3d9d6;
     /* overflow-y: hidden; */
 }
@@ -26,8 +32,9 @@ body {
 
 #container {
     background-color: #fff;
-    width: 960px;
-    min-width: 960px;
+    width: 100%;
+    max-width: 960px;
+    min-width: 0;
     max-height: 100vh;
     margin: 0 auto;
     border-top: 0;
@@ -100,7 +107,7 @@ body {
 .fulldesk #container {
     width: 100%;
     height: 100%;
-    min-width: 700px;
+    min-width: 0;
     min-height: 0px;
     border-right: 0px none #b7b7b7;
     border-left: 0px none #b7b7b7;
@@ -3315,4 +3322,51 @@ a {
 #notesPanel thead tr {
     background-color: #AAA;
     font-weight: bold;
+}
+
+/* ── Phase 5: Login page responsive breakpoints ── */
+@media (max-width: 768px) {
+    #logincell {
+        padding: 1rem !important;
+    }
+
+    #loginpanel, #createpanel, #resetpanel, #tokenpanel,
+    #resettokenpanel, #resetpasswordpanel, #checkemailpanel, #waitpushpanel {
+        width: 100% !important;
+        max-width: 320px;
+        box-sizing: border-box;
+    }
+
+    /* Override inline width:280px on login2 inputs */
+    #loginpanel input[type="text"],
+    #loginpanel input[type="password"],
+    #createpanel input[type="text"],
+    #createpanel input[type="password"],
+    #createpanel input[type="email"],
+    #resetpanel input[type="text"],
+    #tokenpanel input[type="text"],
+    #resettokenpanel input[type="text"],
+    #resetpasswordpanel input[type="password"],
+    #loginpanel input[type="submit"],
+    #createpanel input[type="submit"],
+    #resetpanel input[type="submit"],
+    #tokenpanel input[type="submit"],
+    #resettokenpanel input[type="submit"],
+    #resetpasswordpanel input[type="submit"],
+    #loginpanel select,
+    #createpanel select {
+        width: 100% !important;
+        max-width: 280px;
+        box-sizing: border-box;
+    }
+}
+
+@media (max-width: 576px) {
+    #masthead .title {
+        font-size: 18px;
+    }
+
+    #masthead .title2 {
+        display: none;
+    }
 }
