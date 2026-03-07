@@ -2,6 +2,15 @@
 :root {
     --sub-menu-bg: linear-gradient(180deg,#fff,#fff,#e9ecef);
     --sub-menu-color: #888;
+
+    /* ── Phase 2: Spacing & typography tokens ── */
+    --mc-spacing-xs: 0.25rem;  /* 4px */
+    --mc-spacing-sm: 0.5rem;   /* 8px */
+    --mc-spacing-md: 1rem;     /* 16px */
+    --mc-spacing-lg: 1.5rem;   /* 24px */
+    --mc-spacing-xl: 2rem;     /* 32px */
+    --mc-font-size-base: 0.875rem; /* 14px */
+    --mc-font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 :focus {
@@ -19,8 +28,8 @@ body {
     padding: 0;
     border: 0;
     color: black;
-    font-size: 13px;
-    font-family: "Trebuchet MS", Arial, Helvetica, sans-serif;
+    font-size: var(--mc-font-size-base);
+    font-family: var(--mc-font-family);
     background-color: #d3d9d6;
     /* overflow-y: hidden; */
 }
@@ -719,6 +728,8 @@ body {
 }
 
 #dialogHeader {
+    display: flex;
+    align-items: center;
     width: 100%;
     background-color: #003366;
     color: #FFF;
@@ -728,15 +739,16 @@ body {
 }
 
 #id_dialogclose {
-    float: right;
-    padding: 3px;
-    margin-right: 3px;
+    padding: var(--mc-spacing-xs);
+    margin-right: var(--mc-spacing-xs);
     cursor: pointer;
-    background-color: white; 
+    background-color: white;
+    margin-left: auto;
 }
 
 #id_dialogtitle {
-    padding: 5px;
+    padding: var(--mc-spacing-sm);
+    flex: 1 1 auto;
 }
 
 #dialogBody {
@@ -810,28 +822,28 @@ body {
 }
 
 #idx_dlgButtonBar {
-    padding: 10px;
-    margin-bottom: 5px;
-    margin-right: 10px;
-    overflow: auto;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: var(--mc-spacing-sm);
+    padding: var(--mc-spacing-md);
+    margin-bottom: var(--mc-spacing-xs);
 }
 
 #idx_dlgCancelButton, #idx_dlgCancelButton2 {
-    float: right;
     min-width: 80px;
-    margin-left: 5px;
+    order: 2;
 }
 
 #idx_dlgOkButton, #idx_dlgOkButton2 {
-    float: right;
     min-width: 80px;
-    margin-left: 5px;
+    order: 3;
 }
 
 #idx_dlgDeleteButton {
-    float: left;
     min-width: 80px;
-    margin-left: 5px;
+    margin-right: auto;
+    order: 1;
 }
 
 #ua_fileaccessquota {
