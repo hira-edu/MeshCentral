@@ -32,6 +32,11 @@
     --mc-container-bg: #fff;
     --mc-device-bar-bg: white;
     --mc-device-bar-text: black;
+    --mc-primary: #036;
+    --mc-sidebar-bg: linear-gradient(to bottom, #104893 0%, #113962 100%);
+    --mc-highlight-bg: #FDFFBE;
+    --mc-table-header-bg: #EEE;
+    --mc-table-alt-bg: #F5F5F5;
 }
 
 /* ── Phase 3: Night mode color overrides ── */
@@ -49,6 +54,11 @@
     --mc-container-bg: #000;
     --mc-device-bar-bg: #111;
     --mc-device-bar-text: #bbb;
+    --mc-primary: #069;
+    --mc-sidebar-bg: linear-gradient(to bottom, #1a3a5c 0%, #0d2137 100%);
+    --mc-highlight-bg: #3a3a1a;
+    --mc-table-header-bg: #333;
+    --mc-table-alt-bg: #1a1a1a;
 }
 
 /* ── Phase 4: Accessible focus — visible outline for keyboard users only ── */
@@ -133,9 +143,9 @@ body {
     width: 100%;
     min-width: 100%;
     min-height: 0px;
-    border-right: 0px none #b7b7b7;
-    border-left: 0px none #b7b7b7;
-    height: calc(100% - 0px);
+    border-right: none;
+    border-left: none;
+    height: 100%;
     position: relative;
     display: -ms-grid;
     display: grid;
@@ -157,8 +167,8 @@ body {
     height: 100%;
     min-width: 0;
     min-height: 0px;
-    border-right: 0px none #b7b7b7;
-    border-left: 0px none #b7b7b7;
+    border-right: none;
+    border-left: none;
     position: unset;
     position: relative;
     display: -ms-grid !important;
@@ -173,7 +183,7 @@ body {
 
 .AgentInviteMasthead {
     background:url(logo.png) 0px 0px;
-    background-color:#036;
+    background-color: var(--mc-primary);
     background-repeat:no-repeat;height:66px;width:100%;overflow:hidden;
 }
 
@@ -184,7 +194,7 @@ body {
     width: auto;
     margin: 0;
     padding: 0 1rem;
-    background-color: #036;
+    background-color: var(--mc-primary);
     background-image: url(../logo.png);
     background-position: 0 0;
     background-repeat: no-repeat;
@@ -200,31 +210,6 @@ body {
 .idle-timeout-notify {
     color: yellow;
 }
-.masthead-left {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow: hidden;
-}
-
-.masthead-right {
-    display: flex;
-    align-items: center;
-    gap: 1.5rem;
-    flex: 0 0 auto;
-}
-
-.notification-icon {
-    cursor: pointer;
-}
-
-.user-menu-container {
-    display: flex;
-    align-items: center;
-}
-
 .fullscreen #masthead {
     width: 100%;
     grid-area: header;
@@ -396,8 +381,7 @@ body {
     /* height: calc(100vh - 66px); */
     width: 70px;
     z-index: 1000;
-    background: #113962;
-    background: linear-gradient(to bottom, #104893 0%,#113962 100%);
+    background: var(--mc-sidebar-bg);
     color: white;
     overflow-y: hidden;
     overflow-x: hidden;
@@ -672,11 +656,14 @@ body {
 }
 
 #footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     position: fixed;
     bottom: 0;
     left: 0;
     width: 100%;
-    background-color: #113962;
+    background-color: var(--mc-primary);
     padding: 5px 0;
     text-align: center;
     z-index: 1000;
@@ -712,15 +699,16 @@ body {
 
 .footer1 {
     text-align: left;
-    float: left;
-    padding: 10px;
+    padding: var(--mc-spacing-md);
     color: white;
+    flex: 0 0 auto;
 }
 
 .footer2 {
-    padding: 10px;
+    padding: var(--mc-spacing-md);
     text-align: right;
     color: white;
+    flex: 1 1 auto;
 }
 
 #masthead img {
@@ -766,7 +754,7 @@ body {
     display: flex;
     align-items: center;
     width: 100%;
-    background-color: #003366;
+    background-color: var(--mc-primary);
     color: #FFF;
     border-radius: 5px 5px 0 0;
     margin-bottom: 6px;
@@ -955,11 +943,7 @@ body {
 }
 
 #SearchInput.search, #KvmSearchInput.search {
-    background-color: #FDFFBE;
-}
-
-.night #SearchInput.search, .night #KvmSearchInput.search {
-    background-color: grey;
+    background-color: var(--mc-highlight-bg);
 }
 
 #devListToolbarView, #devListToolbarSort, #devListToolbarSize, #devListToolbarSettings {
@@ -1195,7 +1179,7 @@ NoMeshesPanel img {
 
 #xmapSearchResultsBck {
     width: 100%;
-    background-color: #003366;
+    background-color: var(--mc-primary);
     color: #FFF;
     border-radius: 5px 5px 0 0;
 }
@@ -1737,16 +1721,16 @@ nav .lbbuttonsel {
     width: 100%;
     border-radius: 5px 0px 0px 5px;
     opacity: 0.9;
-    background-color: #ffffff;
-    color: #113962 !important;
+    background-color: var(--mc-bg-color);
+    color: var(--mc-primary) !important;
 }
 
 nav .lbbuttonsel2 {
     width: 100%;
     border-radius: 5px 0px 0px 5px;
     opacity: 1;
-    background-color: #ffffff;
-    color: #113962 !important;
+    background-color: var(--mc-bg-color);
+    color: var(--mc-primary) !important;
 }
 
 /*groups all buttons repeated code into one block*/
@@ -1956,7 +1940,7 @@ nav .lbbuttonsel2 {
     }
 
     .style3x.fullselect {
-        background-color: #003366;
+        background-color: var(--mc-primary);
     }
 
     .style3x.semiselect {
@@ -1966,7 +1950,7 @@ nav .lbbuttonsel2 {
 .style3sel {
     text-align: center;
     color: white;
-    background-color: #003366;
+    background-color: var(--mc-primary);
     font-weight: bold;
 }
 
@@ -3577,12 +3561,6 @@ body:not(.fullscreen) .notifiyBox {
         gap: 0;
     }
 
-    .masthead-titles-container {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 0;
-    }
-
     #masthead {
         background-size: 18rem 2.5rem !important;
         background-position: center left;
@@ -3653,10 +3631,6 @@ body:not(.fullscreen) .notifiyBox {
         margin-right: 40px;
     }
 
-    .notifiyBox:after {
-        margin-right: 40px;
-    }
-
     .notifiyBox:before {
         content: none;
     }
@@ -3664,14 +3638,6 @@ body:not(.fullscreen) .notifiyBox {
     body {
         min-width: 100vw !important;
     }
-
-
-    /* #container {
-        width: 100vw !important;
-        padding-left: 0 !important;
-        display: flex !important;
-        flex-direction: column !important;
-    } */
 }
 
 /* ── Phase 1: 576px breakpoint — small tablets / large phones ── */
@@ -3733,18 +3699,6 @@ body:not(.fullscreen) .notifiyBox {
     }
 }
 
-/* css fixes for select2 */
-/* .select2-container--bootstrap-5 .select2-selection--multiple .select2-selection__rendered {
-    display: inline;
-}
-    
-.select2-container--bootstrap-5 .select2-selection--multiple .select2-selection__rendered .select2-selection__choice {
-    display: inline-flex;
-}
-    
-.select2-container--bootstrap-5 .select2-selection--multiple .select2-search {
-    display: inline !important;
-} */
 /* User Dropdown Menu Styles */
 #userDropdown {
     display: flex;
