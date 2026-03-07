@@ -31,8 +31,9 @@ body {
 
 #container {
     background-color: #fff;
-    width: 960px;
-    min-width: 960px;
+    width: 100%;
+    max-width: 960px;
+    min-width: 0;
     max-height: 100vh;
     margin: 0 auto;
     border-top: 0;
@@ -105,7 +106,7 @@ body {
 .fulldesk #container {
     width: 100%;
     height: 100%;
-    min-width: 700px;
+    min-width: 0;
     min-height: 0px;
     border-right: 0px none #b7b7b7;
     border-left: 0px none #b7b7b7;
@@ -3639,6 +3640,66 @@ body:not(.fullscreen) .notifiyBox {
         flex-direction: column !important;
     } */
 }
+
+/* ── Phase 1: 576px breakpoint — small tablets / large phones ── */
+@media (max-width: 576px) {
+    #masthead {
+        padding: 0 0.5rem;
+        height: 56px;
+    }
+
+    #masthead .title {
+        font-size: 18px;
+    }
+
+    #masthead .title2 {
+        display: none;
+    }
+
+    .masthead-right {
+        gap: 0.25rem;
+    }
+
+    #dialog {
+        width: calc(100vw - 2rem) !important;
+        left: 1rem !important;
+        top: 80px !important;
+    }
+
+    .fullscreen #container {
+        grid-template-columns: 1fr !important;
+        grid-template-areas:
+            "header"
+            "nav"
+            "content"
+            "footer" !important;
+    }
+
+    #page_leftbar {
+        display: none !important;
+    }
+}
+
+/* ── Phase 1: 480px breakpoint — phones ── */
+@media (max-width: 480px) {
+    #userDropdownName {
+        display: none !important;
+    }
+
+    #masthead .title {
+        font-size: 16px;
+    }
+
+    .p2html_tbar span {
+        font-size: 11px;
+    }
+
+    #dialog {
+        width: calc(100vw - 1rem) !important;
+        left: 0.5rem !important;
+    }
+}
+
 /* css fixes for select2 */
 /* .select2-container--bootstrap-5 .select2-selection--multiple .select2-selection__rendered {
     display: inline;
