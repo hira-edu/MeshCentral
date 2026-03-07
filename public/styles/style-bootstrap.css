@@ -11,6 +11,38 @@
     --mc-spacing-xl: 2rem;     /* 32px */
     --mc-font-size-base: 0.875rem; /* 14px */
     --mc-font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+    /* ── Phase 3: Theme-aware color tokens ── */
+    --mc-text-color: black;
+    --mc-bg-color: #fff;
+    --mc-bg-secondary: #eee;
+    --mc-link-color: #036;
+    --mc-border-color: #b7b7b7;
+    --mc-toolbar-bg: lightgray;
+    --mc-input-bg: #fff;
+    --mc-input-text: black;
+    --mc-dialog-bg: #eee;
+    --mc-dialog-shadow: #666;
+    --mc-container-bg: #fff;
+    --mc-device-bar-bg: white;
+    --mc-device-bar-text: black;
+}
+
+/* ── Phase 3: Night mode color overrides ── */
+.night {
+    --mc-text-color: #bbb;
+    --mc-bg-color: #000;
+    --mc-bg-secondary: #222;
+    --mc-link-color: #69b;
+    --mc-border-color: #444;
+    --mc-toolbar-bg: #333;
+    --mc-input-bg: #222;
+    --mc-input-text: #ccc;
+    --mc-dialog-bg: #222;
+    --mc-dialog-shadow: #000;
+    --mc-container-bg: #000;
+    --mc-device-bar-bg: #111;
+    --mc-device-bar-text: #bbb;
 }
 
 :focus {
@@ -27,7 +59,7 @@ body {
     margin: 0;
     padding: 0;
     border: 0;
-    color: black;
+    color: var(--mc-text-color);
     font-size: var(--mc-font-size-base);
     font-family: var(--mc-font-family);
     background-color: #d3d9d6;
@@ -39,22 +71,18 @@ body {
 }
 
 #container {
-    background-color: #fff;
+    background-color: var(--mc-container-bg);
+    color: var(--mc-text-color);
     width: 100%;
     max-width: 960px;
     min-width: 0;
     max-height: 100vh;
     margin: 0 auto;
     border-top: 0;
-    border-right: 1px solid #b7b7b7;
+    border-right: 1px solid var(--mc-border-color);
     border-bottom: 0;
-    border-left: 1px solid #b7b7b7;
+    border-left: 1px solid var(--mc-border-color);
     padding: 0;
-}
-
-.night #container {
-    color: #bbb;
-    background-color: #000;
 }
 
 .fullscreen.login #container {
@@ -607,7 +635,7 @@ body {
 }
 
 .night #logincell a {
-    color: blue;
+    color: var(--mc-link-color);
 }
 
 #loginpanel, #createpanel, #resetpanel, #tokenpanel, #resettokenpanel, #resetpasswordpanel, #resetpasswordpanel, #checkemailpanel, #waitpushpanel {
@@ -618,7 +646,7 @@ body {
     width: 300px;
     padding: 16px;
     text-align: center;
-    color: black;
+    color: var(--mc-text-color);
 }
 
 #passwordPolicyCallout, #rpasswordPolicyCallout {
@@ -716,15 +744,15 @@ body {
 
 #dialog {
     z-index: 1000;
-    background-color: #EEE;
-    box-shadow: 0px 0px 15px #666;
+    background-color: var(--mc-dialog-bg);
+    box-shadow: 0px 0px 15px var(--mc-dialog-shadow);
     font-family: Arial,Helvetica,sans-serif;
     border-radius: 5px;
     position: fixed;
     top: 180px;
     left: calc((100% / 2) - 200px);
     width: 400px;
-    color: black;
+    color: var(--mc-text-color);
 }
 
 #dialogHeader {
@@ -742,7 +770,7 @@ body {
     padding: var(--mc-spacing-xs);
     margin-right: var(--mc-spacing-xs);
     cursor: pointer;
-    background-color: white;
+    background-color: var(--mc-bg-color);
     margin-left: auto;
 }
 
@@ -797,7 +825,7 @@ body {
 #d3serverfiles, #d2serverfiles {
     width: 100%;
     height: 150px;
-    background-color: white;
+    background-color: var(--mc-bg-color);
     padding: 2px;
     border: 1px solid gray;
     overflow-y: scroll;
@@ -885,26 +913,18 @@ body {
 .deviceBarCheckbox {
     width:22px;
     float:left;
-    background-color:white;
-}
-
-.night .deviceBarCheckbox {
-    background-color:black;
+    background-color: var(--mc-device-bar-bg);
 }
 
 #devs {
-    color:black;
+    color: var(--mc-device-bar-text);
 }
 
 .deviceBarIcon {
     float:left;
     height:18px;
     width:18px;
-    background-color:white
-}
-
-.night .deviceBarIcon {
-    background-color:black;
+    background-color: var(--mc-device-bar-bg);
 }
 
 #devListToolbarViewIcons {
@@ -1390,7 +1410,7 @@ NoMeshesPanel img {
 }
 
 #p10html2 table {
-    color: black;
+    color: var(--mc-text-color);
     background: var(--sub-menu-bg);
     border-color: #AAA;
     border-width: 1px;
@@ -2437,7 +2457,7 @@ nav .lbbuttonsel2 {
     height: 18px;
     float: left;
     margin-bottom: 2px;
-    color: black;
+    color: var(--mc-text-color);
 }
 
 .night .bar18 {
@@ -2823,7 +2843,7 @@ body:not(.fullscreen) .notifiyBox {
     top: 24px;
     bottom: 0px;
     width: 100%;
-    color:black;
+    color: var(--mc-text-color);
 }
 
 #DeskToolsServices {
@@ -2832,7 +2852,7 @@ body:not(.fullscreen) .notifiyBox {
     top: 24px;
     bottom: 0px;
     width: 100%;
-    color:black;
+    color: var(--mc-text-color);
 }
 
 .deskToolsBar {
@@ -3512,7 +3532,7 @@ body:not(.fullscreen) .notifiyBox {
 }
 
 .btn-close {
-    background-color: white !important;
+    background-color: var(--mc-bg-color) !important;
     opacity: 1 !important;
 }
 
