@@ -1,4 +1,10 @@
-﻿
+﻿/* ═══════════════════════════════════════════════════════════════════════════
+   MeshCentral UI — style-bootstrap.css
+   Modernized: Phase 1 (responsive), Phase 2 (spacing/flow), Phase 3 (dark mode),
+   Phase 4 (accessibility), Phase 7 (polish)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Design Tokens ── */
 :root {
     --sub-menu-bg: linear-gradient(180deg,#fff,#fff,#e9ecef);
     --sub-menu-color: #888;
@@ -372,8 +378,6 @@ body {
 #notificationBadge {
     font-size: 0.65rem !important;
     box-shadow: -0.1px 1px 2px #000000;
-    -webkit-box-shadow: -0.1px 1px 2px #000000;
-    -moz-box-shadow: -0.1px 1px 2px #000000;
 }
 
 .user-menu-container {
@@ -544,10 +548,7 @@ body {
 }
 
 .boxsize {
-    -ms-box-sizing:border-box;
-    -moz-box-sizing:border-box;
     box-sizing:border-box;
-    -webkit-box-sizing:border-box; 
 }
 
 .night #column_l {
@@ -2554,11 +2555,7 @@ nav .lbbuttonsel2 {
     text-align: left;
     background-color: #F0ECCD;
     border: 4px solid #666;
-    -webkit-border-radius: 10px;
-    -moz-border-radius: 10px;
     border-radius: 10px;
-    -webkit-box-shadow: 2px 2px 4px #888;
-    -moz-box-shadow: 2px 2px 4px #888;
     box-shadow: 2px 2px 4px #888;
     max-height: 200px;
 }
@@ -2605,8 +2602,6 @@ body:not(.fullscreen) .notifiyBox {
       
 #notificationBadge {
     box-shadow: -0.1px 1px 2px #000000;
-    -webkit-box-shadow: -0.1px 1px 2px #000000;
-    -moz-box-shadow: -0.1px 1px 2px #000000;
     top: 0.95rem;
     left: 1.6rem !important;
 }
