@@ -939,7 +939,7 @@
                         </div>
                         <div id=deskarea3 style="position:absolute;top:32px;width:100%;height:calc(100% - 64px);background-color:#000;text-align:center">
                             <div id=DeskParent style="height:100%">
-                                <canvas id=Desk width=640 height=200 style="width:100%;-ms-touch-action:none;margin-left:0px" oncontextmenu="return false" onmousedown=dmousedown(event) onmouseup=dmouseup(event) onmousemove=dmousemove(event) onmousewheel=dmousewheel(event)></canvas>
+                                <canvas id=Desk width=640 height=200 style="width:100%;touch-action:none;-ms-touch-action:none;margin-left:0px" oncontextmenu="return false" onmousedown=dmousedown(event) onmouseup=dmouseup(event) onmousemove=dmousemove(event) onmousewheel=dmousewheel(event)></canvas>
                             </div>
                             <div id=p11DeskConsoleMsg style="display:none;cursor:pointer;position:absolute;left:30px;top:17px;color:yellow;background-color:rgba(0,0,0,0.6);padding:10px;border-radius:5px;text-align:left" onclick=p11clearConsoleMsg()></div>
                             <div id=p11DeskSessionSelector style="display:none;position:absolute;left:30px;top:17px;right:30px;bottom:17px;overflow-y:auto"></div>
@@ -1245,6 +1245,19 @@
                                     <option value=2>PNG</option>
                                     <option value=3>TIFF</option>
                                     <option selected=selected value=4>WEBP</option>
+                                </select>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>
+                                Touch Input
+                            </td>
+                            <td style="width:100px">
+                                <select id="d7desktouchmode" style="float:right;width:200px" dir="rtl">
+                                    <option value="auto">Auto</option>
+                                    <option value="touchpad">Touchpad</option>
+                                    <option value="touchscreen">Touchscreen</option>
+                                    <option value="native">Native touch when available</option>
                                 </select>
                             </td>
                         </tr>
@@ -4574,7 +4587,12 @@
 
         var desktop;
         var desktopNode;
-        var desktopsettings = { encoding: 2, showfocus: false, showmouse: true, showcad: true, quality: 40, scaling: 1024, framerate: 50, autolock: false, agentencoding: 4 };
+        var desktopsettings = { encoding: 2, showfocus: false, showmouse: true, showcad: true, quality: 40, scaling: 1024, framerate: 50, autolock: false, agentencoding: 4, touchmode: 'auto' };
+        function normalizeDesktopTouchMode(mode) { return ((mode === 'touchpad') || (mode === 'touchscreen') || (mode === 'native')) ? mode : 'auto'; }
+        function applyDesktopTouchConfig(target) {
+            desktopsettings.touchmode = normalizeDesktopTouchMode(desktopsettings.touchmode);
+            if (target && target.setTouchConfig) { target.setTouchConfig({ mode: desktopsettings.touchmode }); }
+        }
         function setupDesktop() {
             // Setup the remote desktop
             if ((desktopNode != currentNode) && (desktop != null)) { desktop.Stop(); desktopNode = null; desktop = null; }
@@ -4703,6 +4721,7 @@
                     desktop.m.CompressionLevel = desktopsettings.quality; // Number from 1 to 100. 50 or less is best.
                     desktop.m.ScalingLevel = desktopsettings.scaling;
                     desktop.m.FrameRateTimer = desktopsettings.framerate;
+                    applyDesktopTouchConfig(desktop.m);
                     desktop.m.onDisplayinfo = deskDisplayInfo;
                     desktop.m.onScreenSizeChange = function (o, x, y) { if (fullscreen) { QS('deskarea3').width = (x * fullscreenzoom) + 'px'; QS('deskarea3').height = (y * fullscreenzoom) + 'px'; } deskAdjust(); }
                     desktop.Start(desktopNode._id);
@@ -4784,10 +4803,12 @@
             desktopsettings.framerate = d7framelimiter.value;
             desktopsettings.autolock = d7deskAutoLock.checked;
             desktopsettings.agentencoding = d7encoding.value;
+            desktopsettings.touchmode = normalizeDesktopTouchMode(d7desktouchmode.value);
             localStorage.setItem('desktopsettings', JSON.stringify(desktopsettings));
             applyDesktopSettings();
             if (desktop) {
                 if (desktop.contype == 1) {
+                    applyDesktopTouchConfig(desktop.m);
                     if (desktop.State != 0) { desktop.m.SendCompressionLevel(desktopsettings.agentencoding, desktopsettings.quality, desktopsettings.scaling, desktopsettings.framerate); }
                     desktop.sendCtrlMsg('{"ctrlChannel":"102938","type":"autolock","value":' + desktopsettings.autolock + '}');
                     desktop.m.SendRefresh();
@@ -4809,6 +4830,7 @@
             d7bitmapscaling.value = desktopsettings.scaling;
             if (desktopsettings.framerate) { d7framelimiter.value = desktopsettings.framerate; }
             if (desktopsettings.autolock != null) { d7deskAutoLock.checked = desktopsettings.autolock; }
+            d7desktouchmode.value = normalizeDesktopTouchMode(desktopsettings.touchmode);
         }
 
 
