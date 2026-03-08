@@ -896,7 +896,7 @@
                         <div id="p11scrolllock" style="display:inline-block;margin-left:1px;border-radius:5px;background-color:#A3FFB8;padding:2px">SCROLL</div>
                     </div>
                     <div id="devListToolbarViewIcons">
-                        <i class="fa-solid fa-xl fa-maximize fa-border" role="button" tabindex="0" aria-label="Toggle full screen" onclick=deskToggleFull(event) onkeydown="return deskToolbarKey(event, 'fullscreen')" title="Full Screen. Hold shift to browser full screen."></i>
+                        <i class="fa-solid fa-xl fa-maximize fa-border" role="button" onclick=deskToggleFull(event) title="Full Screen. Hold shift to browser full screen."></i>
                     </div>
                 </div>
                 <div id="p11warning" onclick="showFeaturesDlg()">
@@ -956,10 +956,10 @@
                             <input id="deskActionsSettings" type="button" class="btn btn-primary btn-sm me-1" value="Settings" title="Edit remote desktop settings" onkeypress="return false" onkeydown="return false" onclick="showDesktopSettings()" class="mR" />
                             <input id="deskFocusBtn" type="button" title="Toggle focus mode, when active only the region around the mouse is updated" onkeypress="return false" onkeydown="return false" value="Focus All" onclick="deskToggleFocus()" style="margin-right:3px;display:none" />
                             <div id="deskRecordIcon" class='deskareaicon' title="Server is recording this session" style="display:none;background-color:red;width:12px;height:12px;border-radius:6px;margin-top:5px"></div>
-                            <div class='deskareaicon' role="button" tabindex="0" aria-label="Rotate right" title="Rotate Right" onclick="drotate(1)" onkeydown="return deskToolbarKey(event, 'rotateright')"><i class="fa-solid fa-rotate-right"></i></div>
-                            <div class='deskareaicon' role="button" tabindex="0" aria-label="Rotate left" title="Rotate Left" onclick="drotate(-1)" onkeydown="return deskToolbarKey(event, 'rotateleft')"><i class="fa-solid fa-rotate-left"></i></div>
-                            <div class='deskareaicon' role="button" tabindex="0" aria-label="Toggle view mode" title="Toggle View Mode" onclick="toggleAspectRatio(1)" onkeydown="return deskToolbarKey(event, 'viewmode')">&#8690;</div>
-                            <div id="idx_deskFullBtn2" role="button" tabindex="0" aria-label="Exit full screen" onclick=deskToggleFull(event) onkeydown="return deskToolbarKey(event, 'fullscreen')" style="float:right">&nbsp;&#x2716;</div>
+                            <div class='deskareaicon' title="Rotate Right" onclick="drotate(1)"><i class="fa-solid fa-rotate-right"></i></div>
+                            <div class='deskareaicon' title="Rotate Left" onclick="drotate(-1)"><i class="fa-solid fa-rotate-left"></i></div>
+                            <div class='deskareaicon' title="Toggle View Mode" onclick="toggleAspectRatio(1)">&#8690;</div>
+                            <div id="idx_deskFullBtn2" onclick=deskToggleFull(event) style="float:right">&nbsp;&#x2716;</div>
                         </div>
                     </div>
                     <div id=deskarea3x>
@@ -968,7 +968,7 @@
                         <div id=DeskFocus oncontextmenu="return false" onmousedown=dmousedown(event)
                             onmouseup=dmouseup(event) onmousemove=dmousemove(event)></div>
                         <div id=DeskParent>
-                            <canvas id=Desk width=640 height=480 aria-label="Remote desktop surface" style="touch-action:none;-ms-touch-action:none" oncontextmenu="return false"
+                            <canvas id=Desk width=640 height=480 style="touch-action:none;-ms-touch-action:none" oncontextmenu="return false"
                                 onmousedown=dmousedown(event) onmouseup=dmouseup(event) onmousemove=dmousemove(event)
                                 onmousewheel=dmousewheel(event)></canvas>
                         </div>
@@ -1072,7 +1072,7 @@
                     </div>
                     <div class='fs-4 fw-bold'>Terminal - <span id=p12deviceName></span></div>
                     <div id="devListToolbarViewIcons2" class="ms-auto">
-                        <i class="fa-solid fa-xl fa-maximize fa-border" role="button" tabindex="0" aria-label="Toggle full screen" onclick=deskToggleFull(event) onkeydown="return deskToolbarKey(event, 'fullscreen')" title="Full Screen. Hold shift to browser full screen."></i>
+                        <i class="fa-solid fa-xl fa-maximize fa-border" role="button" onclick=deskToggleFull(event) title="Full Screen. Hold shift to browser full screen."></i>
                     </div>
                 </div>
                 <div id="p12warning" onclick=showFeaturesDlg()>
@@ -1131,7 +1131,7 @@
                                     <span id="termstatus" style="line-height:22px">Disconnected</span><span id="termtitle"></span>
                                 </div>
                                 <div class="d-flex align-items-center ms-auto">
-                                    <div id="idx_termFullBtn2" role="button" tabindex="0" aria-label="Exit full screen" onclick=deskToggleFull(event) onkeydown="return deskToolbarKey(event, 'fullscreen')" style="float:right">
+                                    <div id="idx_termFullBtn2" onclick=deskToggleFull(event) style="float:right">
                                         &nbsp;&#x2716;</div>
                                     <div id="termRecordIcon" class='deskareaicon'
                                         title="Server is recording this session"
@@ -1315,7 +1315,7 @@
                     </div>
                     <div class='fs-4 fw-bold'><span id=p14deviceNamePrefix>Intel&reg; AMT</span> - <span id=p14deviceName></span></div>
                     <div id="devListToolbarViewIcons" class="ms-auto">
-                        <i class="fa-solid fa-xl fa-maximize fa-border" role="button" tabindex="0" aria-label="Toggle full screen" onclick=deskToggleFull(event) onkeydown="return deskToolbarKey(event, 'fullscreen')" title="Full Screen. Hold shift to browser full screen."></i>
+                        <i class="fa-solid fa-xl fa-maximize fa-border" role="button" onclick=deskToggleFull(event) title="Full Screen. Hold shift to browser full screen."></i>
                     </div>
                 </div>
                 <iframe id=p14iframe src="{{{domainurl}}}commander.ashx"></iframe>
@@ -1863,14 +1863,13 @@
                                     <label for="d7encoding">Encoding</label>
                                 </div>
                                 <div class="form-floating mb-2">
-                                    <select id="d7desktouchmode" class="form-select" aria-describedby="d7desktouchhelp">
+                                    <select id="d7desktouchmode" class="form-select">
                                         <option value="auto">Auto</option>
                                         <option value="touchpad">Touchpad</option>
                                         <option value="touchscreen">Touchscreen</option>
                                         <option value="native">Native touch when available</option>
                                     </select>
                                     <label for="d7desktouchmode">Touch Input</label>
-                                    <div id="d7desktouchhelp" class="form-text">Touchpad keeps a local cursor. Touchscreen uses direct taps and enables local pan and pinch zoom when magnified.</div>
                                 </div>
                                 <fieldset id="d7desktopOtherSettings">
                                     <legend>Other Settings</legend>
@@ -2074,84 +2073,10 @@
         var desktop;
         var desktopsettings = { encoding: 2, showfocus: false, showmouse: true, showcad: true, quality: 40, scaling: 1024, framerate: 50, localkeymap: false, swapmouse: false, remotekeymap: false, autoclipboard: false, autolock: false, agentencoding: 4, touchmode: 'auto' };
         var multidesktopsettings = { quality: 20, scaling: 128, framerate: 1000, agentencoding: 4 };
-        var deskViewportScale = 1;
-        var deskViewportMinScale = 1;
-        var deskViewportMaxScale = 3;
         function normalizeDesktopTouchMode(mode) { return ((mode === 'touchpad') || (mode === 'touchscreen') || (mode === 'native')) ? mode : 'auto'; }
-        function clampDeskViewportScale(scale) {
-            scale = parseFloat(scale);
-            if ((isNaN(scale)) || (scale < deskViewportMinScale)) { scale = deskViewportMinScale; }
-            if (scale > deskViewportMaxScale) { scale = deskViewportMaxScale; }
-            return Math.round(scale * 100) / 100;
-        }
-        function resetDeskViewportScale() { deskViewportScale = 1; }
-        function getDeskViewportContainer() { return Q('DeskParent'); }
-        function clampDeskViewportScroll(container) {
-            if (container == null) return;
-            var maxLeft = Math.max(0, container.scrollWidth - container.clientWidth);
-            var maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
-            if (container.scrollLeft > maxLeft) { container.scrollLeft = maxLeft; }
-            if (container.scrollTop > maxTop) { container.scrollTop = maxTop; }
-            if (container.scrollLeft < 0) { container.scrollLeft = 0; }
-            if (container.scrollTop < 0) { container.scrollTop = 0; }
-        }
-        function getDeskViewportState() {
-            var container = getDeskViewportContainer(), deskCanvas = Q('Desk');
-            if ((container == null) || (deskCanvas == null) || (desktop == null)) return { enabled: false };
-            var scaledWidth = deskCanvas.clientWidth || deskCanvas.width;
-            var scaledHeight = deskCanvas.clientHeight || deskCanvas.height;
-            var canPan = (deskAspectRatio == 1) && ((deskViewportScale > 1.01) || (scaledWidth > (container.clientWidth + 1)) || (scaledHeight > (container.clientHeight + 1)));
-            return { enabled: true, currentScale: deskViewportScale, canZoom: true, canPan: canPan, singleFingerPan: canPan };
-        }
-        function panDeskViewportBy(deltaX, deltaY) {
-            var container = getDeskViewportContainer();
-            if ((container == null) || (getDeskViewportState().canPan !== true)) return false;
-            container.scrollLeft -= deltaX;
-            container.scrollTop -= deltaY;
-            clampDeskViewportScroll(container);
-            return true;
-        }
-        function zoomDeskViewportTo(scale, clientX, clientY) {
-            var container = getDeskViewportContainer(), deskCanvas = Q('Desk');
-            if ((container == null) || (deskCanvas == null)) return false;
-            var previousRect = deskCanvas.getBoundingClientRect();
-            var containerRect = container.getBoundingClientRect();
-            var focusOffsetX = (typeof clientX === 'number') ? (clientX - containerRect.left) : (container.clientWidth / 2);
-            var focusOffsetY = (typeof clientY === 'number') ? (clientY - containerRect.top) : (container.clientHeight / 2);
-            var anchorX = ((typeof clientX === 'number') ? (clientX - previousRect.left) : (previousRect.width / 2)) + container.scrollLeft;
-            var anchorY = ((typeof clientY === 'number') ? (clientY - previousRect.top) : (previousRect.height / 2)) + container.scrollTop;
-            scale = clampDeskViewportScale(scale);
-            if ((scale > 1.01) && (deskAspectRatio != 1)) { deskAspectRatio = 1; putstore('deskAspectRatio', deskAspectRatio); }
-            deskViewportScale = scale;
-            deskAdjust();
-            var nextCanvas = Q('Desk');
-            var widthRatio = (previousRect.width > 0) ? (anchorX / previousRect.width) : 0.5;
-            var heightRatio = (previousRect.height > 0) ? (anchorY / previousRect.height) : 0.5;
-            container.scrollLeft = ((nextCanvas.clientWidth || nextCanvas.width) * widthRatio) - focusOffsetX;
-            container.scrollTop = ((nextCanvas.clientHeight || nextCanvas.height) * heightRatio) - focusOffsetY;
-            clampDeskViewportScroll(container);
-            return true;
-        }
-        function deskToolbarKey(event, action) {
-            if ((event == null) || ((event.key != 'Enter') && (event.key != ' ') && (event.key != 'Spacebar'))) return true;
-            if (event.preventDefault) event.preventDefault();
-            if (event.stopPropagation) event.stopPropagation();
-            if (action == 'fullscreen') { deskToggleFull(event); }
-            else if (action == 'viewmode') { toggleAspectRatio(1); }
-            else if (action == 'rotateleft') { drotate(-1); }
-            else if (action == 'rotateright') { drotate(1); }
-            return false;
-        }
         function applyDesktopTouchConfig(target) {
             desktopsettings.touchmode = normalizeDesktopTouchMode(desktopsettings.touchmode);
             if (target && target.setTouchConfig) { target.setTouchConfig({ mode: desktopsettings.touchmode }); }
-            if (target && target.setTouchViewportController) {
-                target.setTouchViewportController({
-                    getState: getDeskViewportState,
-                    panBy: function (deltaX, deltaY) { return panDeskViewportBy(deltaX, deltaY); },
-                    zoomTo: function (scale, clientX, clientY) { return zoomDeskViewportTo(scale, clientX, clientY); }
-                });
-            }
         }
         var terminal;
         var files;
@@ -2699,7 +2624,6 @@
         // Toggle the web page to full screen
         function toggleAspectRatio(toggle) {
             if (toggle === 1) { deskAspectRatio = ((deskAspectRatio + 1) % 3); putstore('deskAspectRatio', deskAspectRatio); }
-            if (deskAspectRatio != 1) { resetDeskViewportScale(); }
             deskAdjust();
         }
 
@@ -10297,7 +10221,7 @@
                     delete multiDesktop[currentNode._id];
                 } else {
                     // Device is not already connected, just setup a blank canvas
-                    if (desktop == null) { QH('DeskParent', '<canvas id=Desk aria-label=\"Remote desktop surface\" style=\"touch-action:none;-ms-touch-action:none\" oncontextmenu=\"return false\" onmousedown=dmousedown(event) onmouseup=dmouseup(event) onmousemove=dmousemove(event)></canvas>'); }
+                    if (desktop == null) { QH('DeskParent', '<canvas id=Desk style="touch-action:none;-ms-touch-action:none" oncontextmenu="return false" onmousedown=dmousedown(event) onmouseup=dmouseup(event) onmousemove=dmousemove(event)></canvas>'); }
                     desktopNode = currentNode;
                 }
                 // Setup the mouse wheel
@@ -10980,7 +10904,7 @@
                 }
 
                 // If shift is pressed, enter browser full screen.
-                if (e && e.shiftKey == true) {
+                if (e.shiftKey == true) {
                     enterBrowserFullscreen(Q('body'));
                     browserfullscreen = true;
                 }
@@ -11030,9 +10954,9 @@
             } else if (deskAspectRatio == 1) {
                 // Zoomed mode
                 QS('Desk')['margin-top'] = '0px';
-                QS('Desk').height = Math.round(deskH * deskViewportScale) + 'px';
-                QS('Desk').width = Math.round(deskW * deskViewportScale) + 'px';
-                QS('DeskParent').overflow = ((Math.round(deskH * deskViewportScale) > parentH) || (Math.round(deskW * deskViewportScale) > parentW)) ? 'auto' : 'hidden';
+                QS('Desk').height = deskH + 'px';
+                QS('Desk').width = deskW + 'px';
+                QS('DeskParent').overflow = 'scroll';
             } else {
                 // Fixed aspect ratio
                 if ((parentH / parentW) > (deskH / deskW)) {
@@ -11057,7 +10981,6 @@
                 QS('Desk')['margin-top'] = null;
                 QS('DeskParent').overflow = 'hidden';
             }
-            clampDeskViewportScroll(Q('DeskParent'));
         }
 
         function mdeskAdjust(module, sw, sh, cv) {
