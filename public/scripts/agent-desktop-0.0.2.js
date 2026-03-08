@@ -31,10 +31,6 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.submenuoffset = 0;
     obj.touchtimer = null;
     obj.TouchArray = {};
-    obj.touchConfig = { mode: 'auto' };
-    obj.ResolvedTouchMode = 'auto';
-    obj.touchListenersAttached = false;
-    obj.touchGesture = null;
     obj.connectmode = 0; // 0 = HTTP, 1 = WebSocket, 2 = WebRTC
     obj.connectioncount = 0;
     obj.rotation = 0;
@@ -99,9 +95,6 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         obj.UnGrabKeyInput();
         obj.UnGrabMouseInput();
         obj.touchenabled = 0;
-        obj.clearTouchSendTimer();
-        obj.resetTouchGestureState(true);
-        obj.updateResolvedTouchMode();
         if (obj.onScreenSizeChange != null) { obj.onScreenSizeChange(obj, obj.ScreenWidth, obj.ScreenHeight, obj.CanvasId); }
         obj.Canvas.clearRect(0, 0, obj.CanvasId.width, obj.CanvasId.height);
     }
@@ -274,16 +267,12 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
                 //console.log('SetDisplayConfirmed');
                 break;
             case 14: // KVM_INIT_TOUCH
-                obj.touchenabled = ((cmdsize >= 6) ? ((view[4] << 8) + view[5]) : ((cmdsize >= 5) ? view[4] : 0));
+                obj.touchenabled = 1;
                 obj.TouchArray = {};
-                obj.clearTouchSendTimer();
-                obj.updateResolvedTouchMode();
                 if (obj.onTouchEnabledChanged != null) obj.onTouchEnabledChanged(obj.touchenabled);
                 break;
             case 15: // KVM_TOUCH
                 obj.TouchArray = {};
-                obj.clearTouchSendTimer();
-                obj.resetTouchGestureState(false);
                 break;
             case 17: // MNG_KVM_MESSAGE
                 var str = String.fromCharCode.apply(null, view.slice(4));
@@ -336,247 +325,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.MouseButton = { "NONE": 0x00, "LEFT": 0x02, "RIGHT": 0x08, "MIDDLE": 0x20 };
     obj.KeyAction = { "NONE": 0, "DOWN": 1, "UP": 2, "SCROLL": 3, "EXUP": 4, "EXDOWN": 5, "DBLCLICK": 6 };
     obj.InputType = { "KEY": 1, "MOUSE": 2, "CTRLALTDEL": 10, "TOUCH": 15, "KEYUNICODE": 85 };
-    obj.PointerFlags = { INRANGE: 0x00000002, INCONTACT: 0x00000004, DOWN: 0x00010000, UPDATE: 0x00020000, UP: 0x00040000 };
-    obj.TouchMode = { AUTO: 'auto', TOUCHPAD: 'touchpad', TOUCHSCREEN: 'touchscreen', NATIVE: 'native' };
     obj.Alternate = 0;
-    obj.touchGesture = {
-        activePointers: {},
-        pointerCount: 0,
-        sequenceMaxPointers: 0,
-        sequenceMoved: false,
-        tapEligible: false,
-        dragActive: false,
-        dragButton: obj.MouseButton.LEFT,
-        longPressHandled: false,
-        primaryPointerId: null,
-        sequenceStart: 0,
-        lastCenterX: 0,
-        lastCenterY: 0,
-        wheelRemainderY: 0,
-        cursorX: 0,
-        cursorY: 0,
-        cursorReady: false,
-        pendingTap: null,
-        pendingTapTimer: null,
-        longPressTimer: null
-    };
-
-    obj.clearTouchSendTimer = function () {
-        if (obj.touchtimer != null) { clearInterval(obj.touchtimer); obj.touchtimer = null; }
-    }
-
-    obj.isTouchDevice = function () {
-        if ((navigator.maxTouchPoints != null) && (navigator.maxTouchPoints > 0)) return true;
-        if (window.matchMedia) {
-            try { if (window.matchMedia('(pointer: coarse)').matches) return true; } catch (ex) { }
-        }
-        return (('ontouchstart' in window) || (obj.CanvasId.style.msTouchAction != null));
-    }
-
-    obj.normalizeTouchMode = function (mode) {
-        if (mode === obj.TouchMode.TOUCHPAD || mode === obj.TouchMode.TOUCHSCREEN || mode === obj.TouchMode.NATIVE) return mode;
-        return obj.TouchMode.AUTO;
-    }
-
-    obj.autoDetectTouchMode = function () {
-        var touchPoints = (navigator.maxTouchPoints != null) ? navigator.maxTouchPoints : 0;
-        var viewportWidth = (window.innerWidth != null) ? window.innerWidth : obj.CanvasId.clientWidth;
-        var viewportHeight = (window.innerHeight != null) ? window.innerHeight : obj.CanvasId.clientHeight;
-        var shortestSide = Math.min(viewportWidth || 0, viewportHeight || 0);
-        if ((touchPoints > 1) && (shortestSide > 0) && (shortestSide < 700)) return obj.TouchMode.TOUCHPAD;
-        return obj.TouchMode.TOUCHSCREEN;
-    }
-
-    obj.resolveTouchMode = function () {
-        var requestedMode = obj.normalizeTouchMode(obj.touchConfig.mode);
-        if (requestedMode === obj.TouchMode.NATIVE) {
-            return (obj.touchenabled === 1) ? obj.TouchMode.NATIVE : obj.autoDetectTouchMode();
-        }
-        if (requestedMode === obj.TouchMode.AUTO) return obj.autoDetectTouchMode();
-        return requestedMode;
-    }
-
-    obj.updateResolvedTouchMode = function () {
-        obj.ResolvedTouchMode = obj.resolveTouchMode();
-        if (obj.CanvasId != null && obj.CanvasId.style != null) {
-            obj.CanvasId.style.touchAction = 'none';
-            obj.CanvasId.style.msTouchAction = 'none';
-        }
-        return obj.ResolvedTouchMode;
-    }
-
-    obj.setTouchConfig = function (config) {
-        if (config == null) return obj.updateResolvedTouchMode();
-        if (typeof config.mode === 'string') obj.touchConfig.mode = obj.normalizeTouchMode(config.mode);
-        return obj.updateResolvedTouchMode();
-    }
-
-    obj.getTouchConfig = function () {
-        return { mode: obj.normalizeTouchMode(obj.touchConfig.mode), resolvedMode: obj.ResolvedTouchMode, nativeTouchState: obj.touchenabled };
-    }
-
-    obj.SendInteractionKeepAlive = function () {
-        if (obj.parent == null) return;
-        if (obj.parent.keepalive != null && obj.parent.keepalive.sendKeepAlive != null) { obj.parent.keepalive.sendKeepAlive(); return; }
-        if (obj.parent.sendKeepAlive != null) { obj.parent.sendKeepAlive(); }
-    }
-
-    obj.clampRemoteCoordinate = function (value, maxValue) {
-        value = Math.round(value);
-        if (value < 0) return 0;
-        if (value > maxValue) return maxValue;
-        return value;
-    }
-
-    obj.getCanvasScaleX = function () {
-        var clientWidth = obj.CanvasId.clientWidth || obj.Canvas.canvas.width || 1;
-        return (obj.Canvas.canvas.width / clientWidth);
-    }
-
-    obj.getCanvasScaleY = function () {
-        var clientHeight = obj.CanvasId.clientHeight || obj.Canvas.canvas.height || 1;
-        return (obj.Canvas.canvas.height / clientHeight);
-    }
-
-    obj.setGestureCursor = function (x, y) {
-        obj.touchGesture.cursorX = obj.clampRemoteCoordinate(x, Math.max(obj.Canvas.canvas.width - 1, 0));
-        obj.touchGesture.cursorY = obj.clampRemoteCoordinate(y, Math.max(obj.Canvas.canvas.height - 1, 0));
-        obj.touchGesture.cursorReady = true;
-    }
-
-    obj.ensureGestureCursor = function (x, y) {
-        if (obj.touchGesture.cursorReady !== true) obj.setGestureCursor(x, y);
-    }
-
-    obj.getCanvasClientPoint = function (event) {
-        if (event == null) return null;
-        if ((typeof event._remoteX === 'number') && (typeof event._remoteY === 'number')) {
-            return { remoteX: event._remoteX, remoteY: event._remoteY, clientX: event.clientX, clientY: event.clientY };
-        }
-        var clientX = event.clientX, clientY = event.clientY;
-        if ((typeof clientX !== 'number') && (typeof event.pageX === 'number')) clientX = event.pageX - window.pageXOffset;
-        if ((typeof clientY !== 'number') && (typeof event.pageY === 'number')) clientY = event.pageY - window.pageYOffset;
-        if ((typeof clientX !== 'number') || (typeof clientY !== 'number')) return null;
-        return { clientX: clientX, clientY: clientY };
-    }
-
-    obj.getRemotePointFromClient = function (clientX, clientY) {
-        var rect = obj.CanvasId.getBoundingClientRect();
-        var scaleX = obj.getCanvasScaleX();
-        var scaleY = obj.getCanvasScaleY();
-        var x = ((clientX - rect.left) * scaleX);
-        var y = ((clientY - rect.top) * scaleY);
-        return {
-            clientX: clientX,
-            clientY: clientY,
-            x: obj.clampRemoteCoordinate(x, Math.max(obj.Canvas.canvas.width - 1, 0)),
-            y: obj.clampRemoteCoordinate(y, Math.max(obj.Canvas.canvas.height - 1, 0))
-        };
-    }
-
-    obj.getRemotePointFromEvent = function (event) {
-        var p = obj.getCanvasClientPoint(event);
-        if (p == null) return null;
-        if ((typeof p.remoteX === 'number') && (typeof p.remoteY === 'number')) {
-            return {
-                clientX: p.clientX,
-                clientY: p.clientY,
-                x: obj.clampRemoteCoordinate(p.remoteX, Math.max(obj.Canvas.canvas.width - 1, 0)),
-                y: obj.clampRemoteCoordinate(p.remoteY, Math.max(obj.Canvas.canvas.height - 1, 0))
-            };
-        }
-        var remotePoint = obj.getRemotePointFromClient(p.clientX, p.clientY);
-        if (event.addx) remotePoint.x = obj.clampRemoteCoordinate(remotePoint.x + (event.addx * obj.getCanvasScaleX()), Math.max(obj.Canvas.canvas.width - 1, 0));
-        if (event.addy) remotePoint.y = obj.clampRemoteCoordinate(remotePoint.y + (event.addy * obj.getCanvasScaleY()), Math.max(obj.Canvas.canvas.height - 1, 0));
-        return remotePoint;
-    }
-
-    obj.clearPendingTapTimer = function () {
-        if (obj.touchGesture.pendingTapTimer != null) { clearTimeout(obj.touchGesture.pendingTapTimer); obj.touchGesture.pendingTapTimer = null; }
-        obj.touchGesture.pendingTap = null;
-    }
-
-    obj.clearLongPressTimer = function () {
-        if (obj.touchGesture.longPressTimer != null) { clearTimeout(obj.touchGesture.longPressTimer); obj.touchGesture.longPressTimer = null; }
-    }
-
-    obj.resetTouchGestureState = function (clearPendingTap) {
-        obj.clearLongPressTimer();
-        if (clearPendingTap === true) obj.clearPendingTapTimer();
-        obj.touchGesture.activePointers = {};
-        obj.touchGesture.pointerCount = 0;
-        obj.touchGesture.sequenceMaxPointers = 0;
-        obj.touchGesture.sequenceMoved = false;
-        obj.touchGesture.tapEligible = false;
-        obj.touchGesture.dragActive = false;
-        obj.touchGesture.dragButton = obj.MouseButton.LEFT;
-        obj.touchGesture.longPressHandled = false;
-        obj.touchGesture.primaryPointerId = null;
-        obj.touchGesture.sequenceStart = 0;
-        obj.touchGesture.lastCenterX = 0;
-        obj.touchGesture.lastCenterY = 0;
-        obj.touchGesture.wheelRemainderY = 0;
-    }
-
-    obj.SendMouseMsgEx = function (Action, X, Y, Button, Delta) {
-        if (obj.State != 3) return;
-        if ((typeof X !== 'number') || (typeof Y !== 'number')) return;
-        X = obj.clampRemoteCoordinate(X, Math.max(obj.Canvas.canvas.width - 1, 0));
-        Y = obj.clampRemoteCoordinate(Y, Math.max(obj.Canvas.canvas.height - 1, 0));
-        Button = Button || obj.MouseButton.NONE;
-        Delta = Delta || 0;
-
-        if (obj.SwapMouse === true) {
-            if (Button == obj.MouseButton.LEFT) { Button = obj.MouseButton.RIGHT; }
-            else if (Button == obj.MouseButton.RIGHT) { Button = obj.MouseButton.LEFT; }
-        }
-        if (obj.ReverseMouseWheel) { Delta = -1 * Delta; }
-
-        var MouseMsg = '';
-        if (Action == obj.KeyAction.DBLCLICK) {
-            MouseMsg = String.fromCharCode(0x00, obj.InputType.MOUSE, 0x00, 0x0A, 0x00, 0x88, ((X / 256) & 0xFF), (X & 0xFF), ((Y / 256) & 0xFF), (Y & 0xFF));
-        } else if (Action == obj.KeyAction.SCROLL) {
-            var deltaHigh = 0, deltaLow = 0;
-            if (Delta < 0) { deltaHigh = (255 - (Math.abs(Delta) >> 8)); deltaLow = (255 - (Math.abs(Delta) & 0xFF)); } else { deltaHigh = (Delta >> 8); deltaLow = (Delta & 0xFF); }
-            MouseMsg = String.fromCharCode(0x00, obj.InputType.MOUSE, 0x00, 0x0C, 0x00, 0x00, ((X / 256) & 0xFF), (X & 0xFF), ((Y / 256) & 0xFF), (Y & 0xFF), deltaHigh, deltaLow);
-        } else {
-            MouseMsg = String.fromCharCode(0x00, obj.InputType.MOUSE, 0x00, 0x0A, 0x00, ((Action == obj.KeyAction.DOWN) ? Button : ((Button * 2) & 0xFF)), ((X / 256) & 0xFF), (X & 0xFF), ((Y / 256) & 0xFF), (Y & 0xFF));
-        }
-
-        if (Action == obj.KeyAction.NONE) {
-            if (obj.Alternate == 0 || obj.ipad) { obj.send(MouseMsg); obj.Alternate = 1; } else { obj.Alternate = 0; }
-        } else {
-            obj.send(MouseMsg);
-        }
-        obj.SendInteractionKeepAlive();
-    }
-
-    obj.SendMouseButtonClick = function (Button, X, Y) {
-        obj.SendMouseMsgEx(obj.KeyAction.DOWN, X, Y, Button, 0);
-        obj.SendMouseMsgEx(obj.KeyAction.UP, X, Y, Button, 0);
-    }
-
-    obj.enqueueTap = function (Button, X, Y) {
-        if (Button !== obj.MouseButton.LEFT) {
-            obj.clearPendingTapTimer();
-            obj.SendMouseButtonClick(Button, X, Y);
-            return;
-        }
-        var pendingTap = obj.touchGesture.pendingTap;
-        if ((pendingTap != null) && ((Date.now() - pendingTap.time) < 280) && (Math.abs(pendingTap.x - X) < 32) && (Math.abs(pendingTap.y - Y) < 32)) {
-            obj.clearPendingTapTimer();
-            obj.SendMouseMsgEx(obj.KeyAction.DBLCLICK, X, Y, obj.MouseButton.NONE, 0);
-            return;
-        }
-        obj.clearPendingTapTimer();
-        obj.touchGesture.pendingTap = { button: Button, x: X, y: Y, time: Date.now() };
-        obj.touchGesture.pendingTapTimer = setTimeout(function () {
-            var tap = obj.touchGesture.pendingTap;
-            obj.touchGesture.pendingTap = null;
-            obj.touchGesture.pendingTapTimer = null;
-            if (tap != null) obj.SendMouseButtonClick(tap.button, tap.x, tap.y);
-        }, 220);
-    }
 
     var convertKeyCodeTable = {
         "Pause": 19,
@@ -814,20 +563,53 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.SendMouseMsg = function (Action, event) {
         if (obj.State != 3) return;
         if (Action != null && obj.Canvas != null) {
-            if (!event) { event = window.event; }
-            var point = obj.getRemotePointFromEvent(event);
-            if (point == null) return;
-            var Button = obj.MouseButton.NONE;
-            var Delta = 0;
-            if (Action == obj.KeyAction.UP || Action == obj.KeyAction.DOWN) {
-                if (event.which) { ((event.which == 1) ? (Button = obj.MouseButton.LEFT) : ((event.which == 2) ? (Button = obj.MouseButton.MIDDLE) : (Button = obj.MouseButton.RIGHT))); }
-                else if (typeof event.button == 'number') { ((event.button == 0) ? (Button = obj.MouseButton.LEFT) : ((event.button == 1) ? (Button = obj.MouseButton.MIDDLE) : (Button = obj.MouseButton.RIGHT))); }
-            } else if (Action == obj.KeyAction.SCROLL) {
-                if (typeof event.deltaY == 'number') { Delta = -Math.round(event.deltaY * 6); }
-                else if (event.detail) { Delta = (-1 * (event.detail * 120)); }
-                else if (event.wheelDelta) { Delta = (event.wheelDelta * 3); }
+            if (!event) { var event = window.event; }
+
+            var ScaleFactorHeight = (obj.Canvas.canvas.height / obj.CanvasId.clientHeight);
+            var ScaleFactorWidth = (obj.Canvas.canvas.width / obj.CanvasId.clientWidth);
+            var Offsets = obj.GetPositionOfControl(obj.Canvas.canvas);
+            var X = ((event.pageX - Offsets[0]) * ScaleFactorWidth);
+            var Y = ((event.pageY - Offsets[1]) * ScaleFactorHeight);
+            if (event.addx) { X += event.addx; }
+            if (event.addy) { Y += event.addy; }
+
+            if (X >= 0 && X <= obj.Canvas.canvas.width && Y >= 0 && Y <= obj.Canvas.canvas.height) {
+                var Button = 0;
+                var Delta = 0;
+                if (Action == obj.KeyAction.UP || Action == obj.KeyAction.DOWN) {
+                    if (event.which) { ((event.which == 1) ? (Button = obj.MouseButton.LEFT) : ((event.which == 2) ? (Button = obj.MouseButton.MIDDLE) : (Button = obj.MouseButton.RIGHT))); }
+                    else if (typeof event.button == 'number') { ((event.button == 0) ? (Button = obj.MouseButton.LEFT) : ((event.button == 1) ? (Button = obj.MouseButton.MIDDLE) : (Button = obj.MouseButton.RIGHT))); }
+                }
+                else if (Action == obj.KeyAction.SCROLL) {
+                    if (event.detail) { Delta = (-1 * (event.detail * 120)); } else if (event.wheelDelta) { Delta = (event.wheelDelta * 3); }
+                }
+
+                // Swap mouse buttons if needed
+                if (obj.SwapMouse === true) {
+                    if (Button == obj.MouseButton.LEFT) { Button = obj.MouseButton.RIGHT; }
+                    else if (Button == obj.MouseButton.RIGHT) { Button = obj.MouseButton.LEFT; }
+                }
+
+                // Reverse mouse wheel if needed
+                if (obj.ReverseMouseWheel) { Delta = -1 * Delta; }
+
+                var MouseMsg = "";
+                if (Action == obj.KeyAction.DBLCLICK) {
+                    MouseMsg = String.fromCharCode(0x00, obj.InputType.MOUSE, 0x00, 0x0A, 0x00, 0x88, ((X / 256) & 0xFF), (X & 0xFF), ((Y / 256) & 0xFF), (Y & 0xFF));
+                } else if (Action == obj.KeyAction.SCROLL) {
+                    var deltaHigh = 0, deltaLow = 0;
+                    if (Delta < 0) { deltaHigh = (255 - (Math.abs(Delta) >> 8)); deltaLow = (255 - (Math.abs(Delta) & 0xFF)); } else { deltaHigh = (Delta >> 8); deltaLow = (Delta & 0xFF); }
+                    MouseMsg = String.fromCharCode(0x00, obj.InputType.MOUSE, 0x00, 0x0C, 0x00, 0x00, ((X / 256) & 0xFF), (X & 0xFF), ((Y / 256) & 0xFF), (Y & 0xFF), deltaHigh, deltaLow);
+                } else {
+                    MouseMsg = String.fromCharCode(0x00, obj.InputType.MOUSE, 0x00, 0x0A, 0x00, ((Action == obj.KeyAction.DOWN) ? Button : ((Button * 2) & 0xFF)), ((X / 256) & 0xFF), (X & 0xFF), ((Y / 256) & 0xFF), (Y & 0xFF));
+                }
+
+                if (obj.Action == obj.KeyAction.NONE) {
+                    if (obj.Alternate == 0 || obj.ipad) { obj.send(MouseMsg); obj.Alternate = 1; } else { obj.Alternate = 0; }
+                } else {
+                    obj.send(MouseMsg);
+                }
             }
-            obj.SendMouseMsgEx(Action, point.x, point.y, Button, Delta);
         }
     }
 
@@ -918,278 +700,92 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.mousemove = function (e) { if (obj.stopInput == true) return false; return obj.xxMouseMove(e); }
     obj.mousewheel = function (e) { if (obj.stopInput == true) return false; return obj.xxMouseWheel(e); }
 
-    obj.getGesturePointerCount = function () {
-        var count = 0;
-        for (var i in obj.touchGesture.activePointers) { count++; }
-        obj.touchGesture.pointerCount = count;
-        return count;
-    }
-
-    obj.getGestureCenter = function () {
-        var totalX = 0, totalY = 0, count = 0;
-        for (var i in obj.touchGesture.activePointers) {
-            totalX += obj.touchGesture.activePointers[i].clientX;
-            totalY += obj.touchGesture.activePointers[i].clientY;
-            count++;
-        }
-        if (count === 0) return null;
-        return { clientX: (totalX / count), clientY: (totalY / count) };
-    }
-
-    obj.captureTouchPointer = function (event) {
-        if (obj.CanvasId.setPointerCapture == null || typeof event.pointerId !== 'number') return;
-        try { obj.CanvasId.setPointerCapture(event.pointerId); } catch (ex) { }
-    }
-
-    obj.releaseTouchPointerCapture = function (event) {
-        if (obj.CanvasId.releasePointerCapture == null || typeof event.pointerId !== 'number') return;
-        try { obj.CanvasId.releasePointerCapture(event.pointerId); } catch (ex) { }
-    }
-
-    obj.beginTouchLongPress = function (mode) {
-        obj.clearLongPressTimer();
-        obj.touchGesture.longPressTimer = setTimeout(function () {
-            var pointer = obj.touchGesture.activePointers[obj.touchGesture.primaryPointerId];
-            obj.touchGesture.longPressTimer = null;
-            if (pointer == null || obj.touchGesture.tapEligible !== true || obj.touchGesture.sequenceMaxPointers !== 1) return;
-            if (mode === obj.TouchMode.TOUCHPAD) {
-                obj.touchGesture.dragActive = true;
-                obj.touchGesture.dragButton = obj.MouseButton.LEFT;
-                obj.touchGesture.tapEligible = false;
-                obj.ensureGestureCursor(pointer.remoteX, pointer.remoteY);
-                obj.SendMouseMsgEx(obj.KeyAction.DOWN, obj.touchGesture.cursorX, obj.touchGesture.cursorY, obj.MouseButton.LEFT, 0);
-            } else if (mode === obj.TouchMode.TOUCHSCREEN) {
-                obj.touchGesture.longPressHandled = true;
-                obj.touchGesture.tapEligible = false;
-                obj.SendMouseButtonClick(obj.MouseButton.RIGHT, pointer.remoteX, pointer.remoteY);
-            }
-        }, 420);
-    }
-
-    obj.handleNativeTouchPointer = function (event, phase) {
-        var point = obj.getRemotePointFromEvent(event);
-        if (point == null) return obj.haltEvent(event);
-        var id = ((typeof event.pointerId === 'number') ? event.pointerId : 0) % 256;
-        if (phase === 'down') {
-            obj.TouchArray[id] = { x: point.x, y: point.y, f: 1 };
-            obj.SendTouchMsg2(id, obj.PointerFlags.DOWN | obj.PointerFlags.INRANGE | obj.PointerFlags.INCONTACT);
-        } else if (phase === 'move') {
-            if (!obj.TouchArray[id]) obj.TouchArray[id] = { x: point.x, y: point.y, f: 3 };
-            obj.TouchArray[id].x = point.x;
-            obj.TouchArray[id].y = point.y;
-            obj.SendTouchMsg2(id, obj.PointerFlags.UPDATE | obj.PointerFlags.INRANGE | obj.PointerFlags.INCONTACT);
-        } else {
-            if (obj.TouchArray[id]) {
-                obj.TouchArray[id].x = point.x;
-                obj.TouchArray[id].y = point.y;
-                obj.TouchArray[id].f = 2;
-            }
-            obj.SendTouchMsg2(id, obj.PointerFlags.UP);
-        }
-        return obj.haltEvent(event);
-    }
-
-    obj.handleTouchPointerEvent = function (event, phase) {
-        if (event == null || obj.stopInput === true || obj.State != 3) return true;
-        if ((event.pointerType === 'mouse') || (event.pointerType === 4)) return true;
-        var mode = obj.updateResolvedTouchMode();
-        if (mode === obj.TouchMode.NATIVE) return obj.handleNativeTouchPointer(event, phase);
-
-        var point = obj.getRemotePointFromEvent(event);
-        if (point == null) return true;
-        var pointerId = (typeof event.pointerId === 'number') ? event.pointerId : 0;
-        var pointer = obj.touchGesture.activePointers[pointerId];
-
-        if (phase === 'down') {
-            obj.captureTouchPointer(event);
-            if (obj.touchGesture.pointerCount === 0) obj.resetTouchGestureState(false);
-            pointer = {
-                pointerId: pointerId,
-                startClientX: point.clientX,
-                startClientY: point.clientY,
-                clientX: point.clientX,
-                clientY: point.clientY,
-                startRemoteX: point.x,
-                startRemoteY: point.y,
-                remoteX: point.x,
-                remoteY: point.y
-            };
-            obj.touchGesture.activePointers[pointerId] = pointer;
-            obj.getGesturePointerCount();
-            obj.touchGesture.sequenceMaxPointers = Math.max(obj.touchGesture.sequenceMaxPointers, obj.touchGesture.pointerCount);
-            if (obj.touchGesture.pointerCount === 1) {
-                obj.touchGesture.sequenceStart = Date.now();
-                obj.touchGesture.sequenceMoved = false;
-                obj.touchGesture.tapEligible = true;
-                obj.touchGesture.dragActive = false;
-                obj.touchGesture.dragButton = obj.MouseButton.LEFT;
-                obj.touchGesture.longPressHandled = false;
-                obj.touchGesture.primaryPointerId = pointerId;
-                obj.touchGesture.lastCenterX = point.clientX;
-                obj.touchGesture.lastCenterY = point.clientY;
-                obj.touchGesture.wheelRemainderY = 0;
-                obj.ensureGestureCursor(point.x, point.y);
-                obj.beginTouchLongPress(mode);
-            } else {
-                obj.clearLongPressTimer();
-                if (obj.touchGesture.dragActive === true) {
-                    obj.SendMouseMsgEx(obj.KeyAction.UP, obj.touchGesture.cursorX, obj.touchGesture.cursorY, obj.touchGesture.dragButton, 0);
-                    obj.touchGesture.dragActive = false;
-                }
-                var center = obj.getGestureCenter();
-                if (center != null) { obj.touchGesture.lastCenterX = center.clientX; obj.touchGesture.lastCenterY = center.clientY; }
-            }
-            return obj.haltEvent(event);
-        }
-
-        if (pointer == null) return obj.haltEvent(event);
-        pointer.clientX = point.clientX;
-        pointer.clientY = point.clientY;
-        pointer.remoteX = point.x;
-        pointer.remoteY = point.y;
-
-        if (phase === 'move') {
-            var moved = ((Math.abs(point.clientX - pointer.startClientX) > 12) || (Math.abs(point.clientY - pointer.startClientY) > 12));
-            if (moved) {
-                obj.touchGesture.tapEligible = false;
-                obj.touchGesture.sequenceMoved = true;
-                if (!(mode === obj.TouchMode.TOUCHPAD && obj.touchGesture.dragActive === true)) obj.clearLongPressTimer();
-            }
-
-            if (obj.touchGesture.pointerCount === 1) {
-                if (mode === obj.TouchMode.TOUCHPAD) {
-                    obj.ensureGestureCursor(pointer.startRemoteX, pointer.startRemoteY);
-                    var scaleX = obj.getCanvasScaleX();
-                    var scaleY = obj.getCanvasScaleY();
-                    obj.setGestureCursor(obj.touchGesture.cursorX + ((point.clientX - obj.touchGesture.lastCenterX) * scaleX), obj.touchGesture.cursorY + ((point.clientY - obj.touchGesture.lastCenterY) * scaleY));
-                    obj.touchGesture.lastCenterX = point.clientX;
-                    obj.touchGesture.lastCenterY = point.clientY;
-                    obj.SendMouseMsgEx(obj.KeyAction.NONE, obj.touchGesture.cursorX, obj.touchGesture.cursorY, obj.MouseButton.NONE, 0);
-                } else {
-                    obj.setGestureCursor(point.x, point.y);
-                    if (obj.touchGesture.longPressHandled !== true && obj.touchGesture.dragActive !== true && moved) {
-                        obj.touchGesture.dragActive = true;
-                        obj.touchGesture.dragButton = obj.MouseButton.LEFT;
-                        obj.touchGesture.tapEligible = false;
-                        obj.SendMouseMsgEx(obj.KeyAction.DOWN, pointer.startRemoteX, pointer.startRemoteY, obj.MouseButton.LEFT, 0);
-                    }
-                    if (obj.touchGesture.dragActive === true) {
-                        obj.SendMouseMsgEx(obj.KeyAction.NONE, point.x, point.y, obj.MouseButton.NONE, 0);
-                    }
-                }
-            } else if (mode === obj.TouchMode.TOUCHPAD && obj.touchGesture.pointerCount === 2) {
-                var gestureCenter = obj.getGestureCenter();
-                if (gestureCenter != null) {
-                    obj.touchGesture.tapEligible = false;
-                    obj.touchGesture.sequenceMoved = true;
-                    obj.touchGesture.wheelRemainderY += ((gestureCenter.clientY - obj.touchGesture.lastCenterY) * 12);
-                    obj.touchGesture.lastCenterX = gestureCenter.clientX;
-                    obj.touchGesture.lastCenterY = gestureCenter.clientY;
-                    while (Math.abs(obj.touchGesture.wheelRemainderY) >= 120) {
-                        var wheelStep = (obj.touchGesture.wheelRemainderY > 0) ? 120 : -120;
-                        obj.SendMouseMsgEx(obj.KeyAction.SCROLL, obj.touchGesture.cursorX, obj.touchGesture.cursorY, obj.MouseButton.NONE, wheelStep);
-                        obj.touchGesture.wheelRemainderY -= wheelStep;
-                    }
-                }
-            }
-            return obj.haltEvent(event);
-        }
-
-        obj.clearLongPressTimer();
-        if (mode !== obj.TouchMode.TOUCHPAD) obj.setGestureCursor(point.x, point.y);
-        delete obj.touchGesture.activePointers[pointerId];
-        obj.getGesturePointerCount();
-        if (obj.touchGesture.primaryPointerId === pointerId) {
-            obj.touchGesture.primaryPointerId = null;
-            for (var nextPointerId in obj.touchGesture.activePointers) { obj.touchGesture.primaryPointerId = nextPointerId; break; }
-        }
-
-        if (obj.touchGesture.pointerCount === 0) {
-            if (obj.touchGesture.dragActive === true) {
-                obj.SendMouseMsgEx(obj.KeyAction.UP, obj.touchGesture.cursorX, obj.touchGesture.cursorY, obj.touchGesture.dragButton, 0);
-                obj.touchGesture.dragActive = false;
-            } else if (phase !== 'cancel' && obj.touchGesture.longPressHandled !== true && obj.touchGesture.tapEligible === true && ((Date.now() - obj.touchGesture.sequenceStart) < 450)) {
-                var tapX = (mode === obj.TouchMode.TOUCHPAD) ? obj.touchGesture.cursorX : pointer.remoteX;
-                var tapY = (mode === obj.TouchMode.TOUCHPAD) ? obj.touchGesture.cursorY : pointer.remoteY;
-                if (obj.touchGesture.sequenceMaxPointers === 1) { obj.enqueueTap(obj.MouseButton.LEFT, tapX, tapY); }
-                else if (obj.touchGesture.sequenceMaxPointers === 2) { obj.enqueueTap(obj.MouseButton.RIGHT, tapX, tapY); }
-                else if (obj.touchGesture.sequenceMaxPointers >= 3) { obj.enqueueTap(obj.MouseButton.MIDDLE, tapX, tapY); }
-            }
-            obj.resetTouchGestureState(false);
-        } else {
-            var remainingCenter = obj.getGestureCenter();
-            if (remainingCenter != null) {
-                obj.touchGesture.lastCenterX = remainingCenter.clientX;
-                obj.touchGesture.lastCenterY = remainingCenter.clientY;
-            }
-        }
-        obj.releaseTouchPointerCapture(event);
-        return obj.haltEvent(event);
-    }
-
     obj.xxMsTouchEvent = function (evt) {
-        var phase = 'move';
-        if (evt.type === 'MSPointerDown' || evt.type === 'pointerdown') phase = 'down';
-        else if (evt.type === 'pointercancel') phase = 'cancel';
-        else if (evt.type === 'MSPointerUp' || evt.type === 'pointerup') phase = 'up';
-        return obj.handleTouchPointerEvent((evt.originalEvent ? evt.originalEvent : evt), phase);
+        if (evt.originalEvent.pointerType == 4) return; // If this is a mouse pointer, ignore this event. Touch & pen are ok.
+        if (evt.preventDefault) evt.preventDefault();
+        if (evt.stopPropagation) evt.stopPropagation();
+        if (evt.type == 'MSPointerDown' || evt.type == 'MSPointerMove' || evt.type == 'MSPointerUp') {
+            var flags = 0;
+            var id = evt.originalEvent.pointerId % 256;
+            var X = evt.offsetX * (Canvas.canvas.width / obj.CanvasId.clientWidth);
+            var Y = evt.offsetY * (Canvas.canvas.height / obj.CanvasId.clientHeight);
+
+            if (evt.type == 'MSPointerDown') flags = 0x00010000 | 0x00000002 | 0x00000004; // POINTER_FLAG_DOWN
+            else if (evt.type == 'MSPointerMove') {
+                //if (obj.TouchArray[id] && MuchTheSame(obj.TouchArray[id].x, X) && MuchTheSame(obj.TouchArray[id].y, Y)) return;
+                flags = 0x00020000 | 0x00000002 | 0x00000004; // POINTER_FLAG_UPDATE
+            }
+            else if (evt.type == 'MSPointerUp') flags = 0x00040000; // POINTER_FLAG_UP
+
+            if (!obj.TouchArray[id]) obj.TouchArray[id] = { x: X, y : Y };
+            obj.SendTouchMsg2(id, flags)
+            if (evt.type == 'MSPointerUp') delete obj.TouchArray[id];
+        } else {
+            alert(evt.type);
+        }
+        return true;
     }
 
     obj.xxTouchStart = function (e) {
-        var source = (e.originalEvent ? e.originalEvent : e);
-        if (source.changedTouches == null) return true;
-        for (var i = 0; i < source.changedTouches.length; i++) {
-            var touch = source.changedTouches[i];
-            obj.handleTouchPointerEvent({ pointerId: touch.identifier, pointerType: 'touch', clientX: touch.clientX, clientY: touch.clientY, preventDefault: e.preventDefault ? e.preventDefault.bind(e) : null, stopPropagation: e.stopPropagation ? e.stopPropagation.bind(e) : null }, 'down');
+        if (obj.State != 3) return;
+        if (e.preventDefault) e.preventDefault();
+        if (obj.touchenabled == 0 || obj.touchenabled == 1) {
+            if (e.originalEvent.touches.length > 1) return;
+            var t = e.originalEvent.touches[0];
+            e.which = 1;
+            obj.LastX = e.pageX = t.pageX;
+            obj.LastY = e.pageY = t.pageY;
+            obj.SendMouseMsg(KeyAction.DOWN, e);
+        } else {
+            var Offsets = obj.GetPositionOfControl(Canvas.canvas);
+            for (var i in e.originalEvent.changedTouches) {
+                if (!e.originalEvent.changedTouches[i].identifier) continue;
+                var id = e.originalEvent.changedTouches[i].identifier % 256;
+                if (!obj.TouchArray[id]) { obj.TouchArray[id] = { x: (e.originalEvent.touches[i].pageX - Offsets[0]) * (Canvas.canvas.width / obj.CanvasId.clientWidth), y: (e.originalEvent.touches[i].pageY - Offsets[1]) * (Canvas.canvas.height / obj.CanvasId.clientHeight), f: 1 }; }
+            }
+            if (Object.keys(obj.TouchArray).length > 0 && touchtimer == null) { obj.touchtimer = setInterval(function () { obj.SendTouchMsg2(256, 0); }, 50); }
         }
-        return obj.haltEvent(e);
     }
 
     obj.xxTouchMove = function (e) {
-        var source = (e.originalEvent ? e.originalEvent : e);
-        if (source.changedTouches == null) return true;
-        for (var i = 0; i < source.changedTouches.length; i++) {
-            var touch = source.changedTouches[i];
-            obj.handleTouchPointerEvent({ pointerId: touch.identifier, pointerType: 'touch', clientX: touch.clientX, clientY: touch.clientY, preventDefault: e.preventDefault ? e.preventDefault.bind(e) : null, stopPropagation: e.stopPropagation ? e.stopPropagation.bind(e) : null }, 'move');
+        if (obj.State != 3) return;
+        if (e.preventDefault) e.preventDefault();
+        if (obj.touchenabled == 0 || obj.touchenabled == 1) {
+            if (e.originalEvent.touches.length > 1) return;
+            var t = e.originalEvent.touches[0];
+            e.which = 1;
+            obj.LastX = e.pageX = t.pageX;
+            obj.LastY = e.pageY = t.pageY;
+            obj.SendMouseMsg(obj.KeyAction.NONE, e);
+        } else {
+            var Offsets = obj.GetPositionOfControl(Canvas.canvas);
+            for (var i in e.originalEvent.changedTouches) {
+                if (!e.originalEvent.changedTouches[i].identifier) continue;
+                var id = e.originalEvent.changedTouches[i].identifier % 256;
+                if (obj.TouchArray[id]) {
+                    obj.TouchArray[id].x = (e.originalEvent.touches[i].pageX - Offsets[0]) * (obj.Canvas.canvas.width / obj.CanvasId.clientWidth);
+                    obj.TouchArray[id].y = (e.originalEvent.touches[i].pageY - Offsets[1]) * (obj.Canvas.canvas.height / obj.CanvasId.clientHeight);
+                }
+            }
         }
-        return obj.haltEvent(e);
     }
 
     obj.xxTouchEnd = function (e) {
-        var source = (e.originalEvent ? e.originalEvent : e);
-        if (source.changedTouches == null) return true;
-        for (var i = 0; i < source.changedTouches.length; i++) {
-            var touch = source.changedTouches[i];
-            obj.handleTouchPointerEvent({ pointerId: touch.identifier, pointerType: 'touch', clientX: touch.clientX, clientY: touch.clientY, preventDefault: e.preventDefault ? e.preventDefault.bind(e) : null, stopPropagation: e.stopPropagation ? e.stopPropagation.bind(e) : null }, 'up');
-        }
-        return obj.haltEvent(e);
-    }
-
-    obj.xxTouchCancel = function (e) {
-        var source = (e.originalEvent ? e.originalEvent : e);
-        if (source.changedTouches == null) return true;
-        for (var i = 0; i < source.changedTouches.length; i++) {
-            var touch = source.changedTouches[i];
-            obj.handleTouchPointerEvent({ pointerId: touch.identifier, pointerType: 'touch', clientX: touch.clientX, clientY: touch.clientY, preventDefault: e.preventDefault ? e.preventDefault.bind(e) : null, stopPropagation: e.stopPropagation ? e.stopPropagation.bind(e) : null }, 'cancel');
-        }
-        return obj.haltEvent(e);
-    }
-
-    obj.attachTouchInputListeners = function () {
-        if (obj.touchListenersAttached === true || obj.CanvasId == null) return;
-        if (window.PointerEvent) {
-            obj.CanvasId.addEventListener('pointerdown', obj.xxMsTouchEvent, false);
-            obj.CanvasId.addEventListener('pointermove', obj.xxMsTouchEvent, false);
-            obj.CanvasId.addEventListener('pointerup', obj.xxMsTouchEvent, false);
-            obj.CanvasId.addEventListener('pointercancel', obj.xxMsTouchEvent, false);
+        if (obj.State != 3) return;
+        if (e.preventDefault) e.preventDefault();
+        if (obj.touchenabled == 0 || obj.touchenabled == 1) {
+            if (e.originalEvent.touches.length > 1) return;
+            e.which = 1;
+            e.pageX = LastX;
+            e.pageY = LastY;
+            obj.SendMouseMsg(KeyAction.UP, e);
         } else {
-            obj.CanvasId.addEventListener('touchstart', obj.xxTouchStart, false);
-            obj.CanvasId.addEventListener('touchmove', obj.xxTouchMove, false);
-            obj.CanvasId.addEventListener('touchend', obj.xxTouchEnd, false);
-            obj.CanvasId.addEventListener('touchcancel', obj.xxTouchCancel, false);
+            for (var i in e.originalEvent.changedTouches) {
+                if (!e.originalEvent.changedTouches[i].identifier) continue;
+                var id = e.originalEvent.changedTouches[i].identifier % 256;
+                if (obj.TouchArray[id]) obj.TouchArray[id].f = 2;
+            }
         }
-        obj.touchListenersAttached = true;
-        obj.updateResolvedTouchMode();
     }
 
     obj.GrabMouseInput = function () {
@@ -1365,6 +961,5 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.getIEVersion = function () { var r = -1; if (navigator.appName == 'Microsoft Internet Explorer') { var ua = navigator.userAgent; var re = new RegExp("MSIE ([0-9]{1,}[.0-9]{0,})"); if (re.exec(ua) != null) r = parseFloat(RegExp.$1); } return r; }
     obj.haltEvent = function (e) { if (e.preventDefault) e.preventDefault(); if (e.stopPropagation) e.stopPropagation(); return false; }
 
-    obj.attachTouchInputListeners();
     return obj;
 }
