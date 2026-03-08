@@ -909,15 +909,15 @@
                         <div id=p10html2></div>
                         <div id=p10html3 style="margin-left:8px"></div>
                     </div>
-                    <img id="deskkeybutton1" src="images/mobile-desk-exit.png" class="deskButton" style="top:10px;display:none" onclick="exitButton()" />
-                    <img id="deskkeybutton3a" src="images/mobile-desk-menu-open.png" class="deskButton" style="top:60px;display:none" onclick="toggleMenu(false)" />
-                    <img id="deskkeybutton3b" src="images/mobile-desk-menu-close.png" class="deskButton" style="top:60px;display:none" onclick="toggleMenu(true)" />
-                    <img id="deskkeybutton4a" src="images/mobile-desk-mouse-left.png" class="deskButton" style="top:110px;display:none" onclick="deskChangeMouseButton(0)" />
-                    <img id="deskkeybutton4b" src="images/mobile-desk-mouse-right.png" class="deskButton" style="top:110px;display:none" onclick="deskChangeMouseButton(1)" />
-                    <img id="deskkeybutton5a" src="images/mobile-desk-scale-out.png" class="deskButton" style="top:160px;display:none" onclick="deskChangeFullscreenZoom()" />
-                    <img id="deskkeybutton5b" src="images/mobile-desk-scale-in.png" class="deskButton" style="top:160px;display:none" onclick="deskChangeFullscreenZoom()" />
-                    <img id="deskkeybutton2a" src="images/mobile-desk-keyboard-open.png" class="deskButton" style="top:210px;display:none" onclick="toggleKeyboard()" />
-                    <img id="deskkeybutton2b" src="images/mobile-desk-keyboard-close.png" class="deskButton" style="top:210px;display:none" onclick="toggleKeyboard()" />
+                    <img id="deskkeybutton1" src="images/mobile-desk-exit.png" class="deskButton" role="button" tabindex="0" aria-label="Exit session" style="top:10px;display:none" onclick="exitButton()" onkeydown="return deskToolbarKey(event, 'exit')" />
+                    <img id="deskkeybutton3a" src="images/mobile-desk-menu-open.png" class="deskButton" role="button" tabindex="0" aria-label="Open shortcuts" style="top:60px;display:none" onclick="toggleMenu(false)" onkeydown="return deskToolbarKey(event, 'menu-open')" />
+                    <img id="deskkeybutton3b" src="images/mobile-desk-menu-close.png" class="deskButton" role="button" tabindex="0" aria-label="Close shortcuts" style="top:60px;display:none" onclick="toggleMenu(true)" onkeydown="return deskToolbarKey(event, 'menu-close')" />
+                    <img id="deskkeybutton4a" src="images/mobile-desk-mouse-left.png" class="deskButton" role="button" tabindex="0" aria-label="Use left mouse button" style="top:110px;display:none" onclick="deskChangeMouseButton(0)" onkeydown="return deskToolbarKey(event, 'mouse-left')" />
+                    <img id="deskkeybutton4b" src="images/mobile-desk-mouse-right.png" class="deskButton" role="button" tabindex="0" aria-label="Use right mouse button" style="top:110px;display:none" onclick="deskChangeMouseButton(1)" onkeydown="return deskToolbarKey(event, 'mouse-right')" />
+                    <img id="deskkeybutton5a" src="images/mobile-desk-scale-out.png" class="deskButton" role="button" tabindex="0" aria-label="Zoom out remote view" style="top:160px;display:none" onclick="deskChangeFullscreenZoom()" onkeydown="return deskToolbarKey(event, 'zoom-toggle')" />
+                    <img id="deskkeybutton5b" src="images/mobile-desk-scale-in.png" class="deskButton" role="button" tabindex="0" aria-label="Zoom in remote view" style="top:160px;display:none" onclick="deskChangeFullscreenZoom()" onkeydown="return deskToolbarKey(event, 'zoom-toggle')" />
+                    <img id="deskkeybutton2a" src="images/mobile-desk-keyboard-open.png" class="deskButton" role="button" tabindex="0" aria-label="Open keyboard" style="top:210px;display:none" onclick="toggleKeyboard()" onkeydown="return deskToolbarKey(event, 'keyboard-toggle')" />
+                    <img id="deskkeybutton2b" src="images/mobile-desk-keyboard-close.png" class="deskButton" role="button" tabindex="0" aria-label="Close keyboard" style="top:210px;display:none" onclick="toggleKeyboard()" onkeydown="return deskToolbarKey(event, 'keyboard-toggle')" />
                     <div style="position:absolute;top:0;left:0;z-index:200;opacity:0;width:1px;height:1px">
                         <input id="softKeyboard" autocapitalize="off" autocomplete="off" type="text" inputmode="text" spellcheck="false" style="z-index:200;opacity:0;width:1px;height:1px" onfocus="keyboardFocusChange()" onblur="keyboardFocusChange()" />
                     </div>
@@ -939,7 +939,7 @@
                         </div>
                         <div id=deskarea3 style="position:absolute;top:32px;width:100%;height:calc(100% - 64px);background-color:#000;text-align:center">
                             <div id=DeskParent style="height:100%">
-                                <canvas id=Desk width=640 height=200 style="width:100%;touch-action:none;-ms-touch-action:none;margin-left:0px" oncontextmenu="return false" onmousedown=dmousedown(event) onmouseup=dmouseup(event) onmousemove=dmousemove(event) onmousewheel=dmousewheel(event)></canvas>
+                                <canvas id=Desk width=640 height=200 aria-label="Remote desktop surface" style="width:100%;touch-action:none;-ms-touch-action:none;margin-left:0px" oncontextmenu="return false" onmousedown=dmousedown(event) onmouseup=dmouseup(event) onmousemove=dmousemove(event) onmousewheel=dmousewheel(event)></canvas>
                             </div>
                             <div id=p11DeskConsoleMsg style="display:none;cursor:pointer;position:absolute;left:30px;top:17px;color:yellow;background-color:rgba(0,0,0,0.6);padding:10px;border-radius:5px;text-align:left" onclick=p11clearConsoleMsg()></div>
                             <div id=p11DeskSessionSelector style="display:none;position:absolute;left:30px;top:17px;right:30px;bottom:17px;overflow-y:auto"></div>
@@ -1250,16 +1250,19 @@
                         </tr>
                         <tr>
                             <td>
-                                Touch Input
+                                <label for="d7desktouchmode">Touch Input</label>
                             </td>
                             <td style="width:100px">
-                                <select id="d7desktouchmode" style="float:right;width:200px" dir="rtl">
+                                <select id="d7desktouchmode" style="float:right;width:200px" dir="rtl" aria-describedby="d7desktouchhelp">
                                     <option value="auto">Auto</option>
                                     <option value="touchpad">Touchpad</option>
                                     <option value="touchscreen">Touchscreen</option>
                                     <option value="native">Native touch when available</option>
                                 </select>
                             </td>
+                        </tr>
+                        <tr>
+                            <td colspan="2"><div id="d7desktouchhelp">Touchpad keeps a local cursor. Touchscreen uses direct taps and enables local pan and pinch zoom in full screen.</div></td>
                         </tr>
                         <tr>
                             <td></td>
@@ -4589,9 +4592,89 @@
         var desktopNode;
         var desktopsettings = { encoding: 2, showfocus: false, showmouse: true, showcad: true, quality: 40, scaling: 1024, framerate: 50, autolock: false, agentencoding: 4, touchmode: 'auto' };
         function normalizeDesktopTouchMode(mode) { return ((mode === 'touchpad') || (mode === 'touchscreen') || (mode === 'native')) ? mode : 'auto'; }
+        function clampMobileDeskViewportZoom(scale) {
+            scale = parseFloat(scale);
+            if ((isNaN(scale)) || (scale < fullscreenzoommin)) { scale = fullscreenzoommin; }
+            if (scale > fullscreenzoommax) { scale = fullscreenzoommax; }
+            return Math.round(scale * 100) / 100;
+        }
+        function getMobileDeskViewportContainer() { return fullscreen ? Q('p10desktop') : Q('DeskParent'); }
+        function clampMobileDeskViewportScroll(container) {
+            if (container == null) return;
+            var maxLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+            var maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+            if (container.scrollLeft > maxLeft) { container.scrollLeft = maxLeft; }
+            if (container.scrollTop > maxTop) { container.scrollTop = maxTop; }
+            if (container.scrollLeft < 0) { container.scrollLeft = 0; }
+            if (container.scrollTop < 0) { container.scrollTop = 0; }
+        }
+        function updateMobileDeskZoomButtons() {
+            QV('deskkeybutton5a', fullscreen && (fullscreenzoom > 1.01));
+            QV('deskkeybutton5b', fullscreen && (fullscreenzoom <= 1.01));
+        }
+        function syncMobileDeskViewportSize() {
+            if ((desktop == null) || (fullscreen !== true) || (currentDevicePanel != 1)) return;
+            QS('deskarea3').width = (desktop.m.ScreenWidth * fullscreenzoom) + 'px';
+            QS('deskarea3').height = (desktop.m.ScreenHeight * fullscreenzoom) + 'px';
+        }
+        function getMobileDeskViewportState() {
+            if ((desktop == null) || (fullscreen !== true) || (currentDevicePanel != 1)) return { enabled: false };
+            var canPan = (fullscreenzoom > 1.01);
+            return { enabled: true, currentScale: fullscreenzoom, canZoom: true, canPan: canPan, singleFingerPan: canPan };
+        }
+        function panMobileDeskViewportBy(deltaX, deltaY) {
+            var container = getMobileDeskViewportContainer();
+            if ((container == null) || (getMobileDeskViewportState().canPan !== true)) return false;
+            container.scrollLeft -= deltaX;
+            container.scrollTop -= deltaY;
+            clampMobileDeskViewportScroll(container);
+            return true;
+        }
+        function zoomMobileDesktopViewportTo(scale, clientX, clientY) {
+            if ((desktop == null) || (fullscreen !== true) || (currentDevicePanel != 1)) return false;
+            var container = Q('p10desktop'), content = Q('deskarea3');
+            if ((container == null) || (content == null)) return false;
+            var previousRect = content.getBoundingClientRect();
+            var containerRect = container.getBoundingClientRect();
+            var focusOffsetX = (typeof clientX === 'number') ? (clientX - containerRect.left) : (container.clientWidth / 2);
+            var focusOffsetY = (typeof clientY === 'number') ? (clientY - containerRect.top) : (container.clientHeight / 2);
+            var anchorX = ((typeof clientX === 'number') ? (clientX - previousRect.left) : (previousRect.width / 2)) + container.scrollLeft;
+            var anchorY = ((typeof clientY === 'number') ? (clientY - previousRect.top) : (previousRect.height / 2)) + container.scrollTop;
+            fullscreenzoom = clampMobileDeskViewportZoom(scale);
+            syncMobileDeskViewportSize();
+            deskAdjust();
+            var nextContent = Q('deskarea3');
+            var widthRatio = (previousRect.width > 0) ? (anchorX / previousRect.width) : 0.5;
+            var heightRatio = (previousRect.height > 0) ? (anchorY / previousRect.height) : 0.5;
+            container.scrollLeft = ((nextContent.clientWidth || desktop.m.ScreenWidth) * widthRatio) - focusOffsetX;
+            container.scrollTop = ((nextContent.clientHeight || desktop.m.ScreenHeight) * heightRatio) - focusOffsetY;
+            clampMobileDeskViewportScroll(container);
+            updateMobileDeskZoomButtons();
+            return true;
+        }
+        function deskToolbarKey(event, action) {
+            if ((event == null) || ((event.key != 'Enter') && (event.key != ' ') && (event.key != 'Spacebar'))) return true;
+            if (event.preventDefault) event.preventDefault();
+            if (event.stopPropagation) event.stopPropagation();
+            if (action == 'exit') { exitButton(); }
+            else if (action == 'menu-open') { toggleMenu(false); }
+            else if (action == 'menu-close') { toggleMenu(true); }
+            else if (action == 'mouse-left') { deskChangeMouseButton(0); }
+            else if (action == 'mouse-right') { deskChangeMouseButton(1); }
+            else if (action == 'zoom-toggle') { deskChangeFullscreenZoom(); }
+            else if (action == 'keyboard-toggle') { toggleKeyboard(); }
+            return false;
+        }
         function applyDesktopTouchConfig(target) {
             desktopsettings.touchmode = normalizeDesktopTouchMode(desktopsettings.touchmode);
             if (target && target.setTouchConfig) { target.setTouchConfig({ mode: desktopsettings.touchmode }); }
+            if (target && target.setTouchViewportController) {
+                target.setTouchViewportController({
+                    getState: getMobileDeskViewportState,
+                    panBy: function (deltaX, deltaY) { return panMobileDeskViewportBy(deltaX, deltaY); },
+                    zoomTo: function (scale, clientX, clientY) { return zoomMobileDesktopViewportTo(scale, clientX, clientY); }
+                });
+            }
         }
         function setupDesktop() {
             // Setup the remote desktop
@@ -4686,7 +4769,7 @@
                     desktop.m.bpp = (desktopsettings.encoding == 1 || desktopsettings.encoding == 3) ? 1 : 2;
                     desktop.m.useZRLE = (desktopsettings.encoding < 3);
                     desktop.m.showmouse = true;
-                    desktop.m.onScreenSizeChange = function (o, x, y) { if (fullscreen) { QS('deskarea3').width = (x * fullscreenzoom) + 'px'; QS('deskarea3').height = (y * fullscreenzoom) + 'px'; } deskAdjust(); }
+                    desktop.m.onScreenSizeChange = function () { if (fullscreen) { syncMobileDeskViewportSize(); } deskAdjust(); }
                     // Use TLS if TLS is set
                     if (desktopNode.conn==4 && desktopNode.intelamt!=null && desktopNode.intelamt.tls==1) {
                         desktop.Start(desktopNode._id, 16995, '*', '*', 1);
@@ -4723,7 +4806,7 @@
                     desktop.m.FrameRateTimer = desktopsettings.framerate;
                     applyDesktopTouchConfig(desktop.m);
                     desktop.m.onDisplayinfo = deskDisplayInfo;
-                    desktop.m.onScreenSizeChange = function (o, x, y) { if (fullscreen) { QS('deskarea3').width = (x * fullscreenzoom) + 'px'; QS('deskarea3').height = (y * fullscreenzoom) + 'px'; } deskAdjust(); }
+                    desktop.m.onScreenSizeChange = function () { if (fullscreen) { syncMobileDeskViewportSize(); } deskAdjust(); }
                     desktop.Start(desktopNode._id);
                     desktop.contype = 1;
                 } else if (contype == 3) {
@@ -5055,12 +5138,8 @@
             if (xxdialogMode) return;
             if (currentDevicePanel == 1) {
                 if (desktop == null) return;
-                if (fullscreenzoom == 1) { fullscreenzoom = 0.5; } else { fullscreenzoom = 1; }
-                QV('deskkeybutton5a', fullscreen && (fullscreenzoom == 1));
-                QV('deskkeybutton5b', fullscreen && (fullscreenzoom != 1));
-                QS('deskarea3').width = (desktop.m.ScreenWidth * fullscreenzoom) + 'px';
-                QS('deskarea3').height = (desktop.m.ScreenHeight * fullscreenzoom) + 'px';
-                deskAdjust();
+                if (fullscreen !== true) return;
+                zoomMobileDesktopViewportTo((fullscreenzoom <= 1.01) ? 2 : 1);
             }
             if (currentDevicePanel == 5) {
                 if (terminal == null) return;
@@ -5070,6 +5149,8 @@
 
         var fullscreen = false;
         var fullscreenzoom = 1;
+        var fullscreenzoommin = 1;
+        var fullscreenzoommax = 3;
         function deskToggleFull() {
             fullscreen = !fullscreen;
             QV('mastheadx', !fullscreen);
@@ -5102,8 +5183,7 @@
                 QV('deskkeybutton3b', false);
                 QV('deskkeybutton4a', fullscreen && inputAllowed && (!desktop.m.SwapMouse));
                 QV('deskkeybutton4b', fullscreen && inputAllowed && (desktop.m.SwapMouse));
-                QV('deskkeybutton5a', fullscreen && (fullscreenzoom == 1));
-                QV('deskkeybutton5b', fullscreen && (fullscreenzoom != 1));
+                updateMobileDeskZoomButtons();
             }
             if (currentDevicePanel == 5) {
                 // Move right buttons to terminal position
@@ -5117,7 +5197,7 @@
                 QV('deskkeybutton4a', false);
                 QV('deskkeybutton4b', false);
                 QV('deskkeybutton5a', false);
-                QV('deskkeybutton5a', false);
+                QV('deskkeybutton5b', false);
                 //QV('deskkeybutton5a', xterm.getOption('fontSize') == 15);
                 //QV('deskkeybutton5b', xterm.getOption('fontSize') != 15);
             }
@@ -5130,8 +5210,8 @@
                     QS('p10desktop').top = '0px';
                     QS('p10desktop').overflow = 'scroll';
                     QS('deskarea3').top = '0px';
-                    QS('deskarea3').width = (desktop.m.ScreenWidth * fullscreenzoom) + 'px';
-                    QS('deskarea3').height = (desktop.m.ScreenHeight * fullscreenzoom) + 'px';
+                    fullscreenzoom = clampMobileDeskViewportZoom(fullscreenzoom);
+                    syncMobileDeskViewportSize();
                     QS('deskarea3')['padding-right'] = '55px';
                 }
                 if (currentDevicePanel == 5) {
@@ -5146,6 +5226,7 @@
                 QS('body')['background-color'] = '#000';
                 QS('p10')['background-color'] = '#000';
             } else {
+                fullscreenzoom = 1;
                 QS('DeskParent').height = '100%';
                 QS('page_content').top = '50px';
                 QS('page_content').bottom = '32px';
@@ -5175,6 +5256,7 @@
                 QS('body')['background-color'] = nightMode ? '#000' : '#FFF';
                 QS('p10')['background-color'] = null;
             }
+            updateMobileDeskZoomButtons();
             if (currentDevicePanel == 1) { deskAdjust(); }
         }
 
@@ -5211,6 +5293,8 @@
                 QS('Desk')['margin-top'] = x + 'px';
                 QS('Desk')['margin-bottom'] = x + 'px';
             }
+            clampMobileDeskViewportScroll(getMobileDeskViewportContainer());
+            updateMobileDeskZoomButtons();
         }
 
         function sendSpecialKeys() {

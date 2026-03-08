@@ -35,6 +35,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.ResolvedTouchMode = 'auto';
     obj.touchListenersAttached = false;
     obj.touchGesture = null;
+    obj.touchViewportController = null;
     obj.connectmode = 0; // 0 = HTTP, 1 = WebSocket, 2 = WebRTC
     obj.connectioncount = 0;
     obj.rotation = 0;
@@ -358,7 +359,22 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         cursorReady: false,
         pendingTap: null,
         pendingTapTimer: null,
-        longPressTimer: null
+        longPressTimer: null,
+        viewportGestureMode: null,
+        viewportStartDistance: 0,
+        viewportStartScale: 1,
+        viewportLastCenterX: 0,
+        viewportLastCenterY: 0
+    };
+    obj.touchGestureThresholds = {
+        move: 14,
+        doubleTapTime: 320,
+        doubleTapDistance: 32,
+        tapCommitDelay: 260,
+        tapMaxDuration: 500,
+        longPressMs: 480,
+        pinchScaleDelta: 0.05,
+        multiFingerPanMove: 8
     };
 
     obj.clearTouchSendTimer = function () {
@@ -413,6 +429,35 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
 
     obj.getTouchConfig = function () {
         return { mode: obj.normalizeTouchMode(obj.touchConfig.mode), resolvedMode: obj.ResolvedTouchMode, nativeTouchState: obj.touchenabled };
+    }
+
+    obj.setTouchViewportController = function (controller) {
+        obj.touchViewportController = controller || null;
+    }
+
+    obj.getTouchViewportState = function () {
+        if (obj.touchViewportController == null || obj.touchViewportController.getState == null) return null;
+        try {
+            var state = obj.touchViewportController.getState();
+            if (state && state.enabled !== false) return state;
+        } catch (ex) { }
+        return null;
+    }
+
+    obj.panTouchViewport = function (deltaX, deltaY, state) {
+        if (obj.touchViewportController == null || obj.touchViewportController.panBy == null) return false;
+        try { return (obj.touchViewportController.panBy(deltaX, deltaY, state) === true); } catch (ex) { }
+        return false;
+    }
+
+    obj.zoomTouchViewport = function (scale, clientX, clientY, state) {
+        if (obj.touchViewportController == null || obj.touchViewportController.zoomTo == null) return false;
+        try { return (obj.touchViewportController.zoomTo(scale, clientX, clientY, state) === true); } catch (ex) { }
+        return false;
+    }
+
+    obj.shouldUseSingleFingerViewportPan = function (mode, viewportState) {
+        return (mode === obj.TouchMode.TOUCHSCREEN) && viewportState && viewportState.canPan === true && viewportState.singleFingerPan === true;
     }
 
     obj.SendInteractionKeepAlive = function () {
@@ -516,9 +561,14 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         obj.touchGesture.lastCenterX = 0;
         obj.touchGesture.lastCenterY = 0;
         obj.touchGesture.wheelRemainderY = 0;
+        obj.touchGesture.viewportGestureMode = null;
+        obj.touchGesture.viewportStartDistance = 0;
+        obj.touchGesture.viewportStartScale = 1;
+        obj.touchGesture.viewportLastCenterX = 0;
+        obj.touchGesture.viewportLastCenterY = 0;
     }
 
-    obj.SendMouseMsgEx = function (Action, X, Y, Button, Delta) {
+    obj.SendMouseMsgEx = function (Action, X, Y, Button, Delta, forceSend) {
         if (obj.State != 3) return;
         if ((typeof X !== 'number') || (typeof Y !== 'number')) return;
         X = obj.clampRemoteCoordinate(X, Math.max(obj.Canvas.canvas.width - 1, 0));
@@ -543,7 +593,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
             MouseMsg = String.fromCharCode(0x00, obj.InputType.MOUSE, 0x00, 0x0A, 0x00, ((Action == obj.KeyAction.DOWN) ? Button : ((Button * 2) & 0xFF)), ((X / 256) & 0xFF), (X & 0xFF), ((Y / 256) & 0xFF), (Y & 0xFF));
         }
 
-        if (Action == obj.KeyAction.NONE) {
+        if (Action == obj.KeyAction.NONE && forceSend !== true) {
             if (obj.Alternate == 0 || obj.ipad) { obj.send(MouseMsg); obj.Alternate = 1; } else { obj.Alternate = 0; }
         } else {
             obj.send(MouseMsg);
@@ -563,7 +613,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
             return;
         }
         var pendingTap = obj.touchGesture.pendingTap;
-        if ((pendingTap != null) && ((Date.now() - pendingTap.time) < 280) && (Math.abs(pendingTap.x - X) < 32) && (Math.abs(pendingTap.y - Y) < 32)) {
+        if ((pendingTap != null) && ((Date.now() - pendingTap.time) < obj.touchGestureThresholds.doubleTapTime) && (Math.abs(pendingTap.x - X) < obj.touchGestureThresholds.doubleTapDistance) && (Math.abs(pendingTap.y - Y) < obj.touchGestureThresholds.doubleTapDistance)) {
             obj.clearPendingTapTimer();
             obj.SendMouseMsgEx(obj.KeyAction.DBLCLICK, X, Y, obj.MouseButton.NONE, 0);
             return;
@@ -575,7 +625,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
             obj.touchGesture.pendingTap = null;
             obj.touchGesture.pendingTapTimer = null;
             if (tap != null) obj.SendMouseButtonClick(tap.button, tap.x, tap.y);
-        }, 220);
+        }, obj.touchGestureThresholds.tapCommitDelay);
     }
 
     var convertKeyCodeTable = {
@@ -936,6 +986,17 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         return { clientX: (totalX / count), clientY: (totalY / count) };
     }
 
+    obj.getGestureDistance = function () {
+        var keys = Object.keys(obj.touchGesture.activePointers);
+        if (keys.length < 2) return 0;
+        var pointerA = obj.touchGesture.activePointers[keys[0]];
+        var pointerB = obj.touchGesture.activePointers[keys[1]];
+        if (pointerA == null || pointerB == null) return 0;
+        var deltaX = pointerA.clientX - pointerB.clientX;
+        var deltaY = pointerA.clientY - pointerB.clientY;
+        return Math.sqrt((deltaX * deltaX) + (deltaY * deltaY));
+    }
+
     obj.captureTouchPointer = function (event) {
         if (obj.CanvasId.setPointerCapture == null || typeof event.pointerId !== 'number') return;
         try { obj.CanvasId.setPointerCapture(event.pointerId); } catch (ex) { }
@@ -963,7 +1024,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
                 obj.touchGesture.tapEligible = false;
                 obj.SendMouseButtonClick(obj.MouseButton.RIGHT, pointer.remoteX, pointer.remoteY);
             }
-        }, 420);
+        }, obj.touchGestureThresholds.longPressMs);
     }
 
     obj.handleNativeTouchPointer = function (event, phase) {
@@ -994,6 +1055,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         if ((event.pointerType === 'mouse') || (event.pointerType === 4)) return true;
         var mode = obj.updateResolvedTouchMode();
         if (mode === obj.TouchMode.NATIVE) return obj.handleNativeTouchPointer(event, phase);
+        var viewportState = obj.getTouchViewportState();
 
         var point = obj.getRemotePointFromEvent(event);
         if (point == null) return true;
@@ -1029,7 +1091,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
                 obj.touchGesture.lastCenterY = point.clientY;
                 obj.touchGesture.wheelRemainderY = 0;
                 obj.ensureGestureCursor(point.x, point.y);
-                obj.beginTouchLongPress(mode);
+                if (!obj.shouldUseSingleFingerViewportPan(mode, viewportState)) { obj.beginTouchLongPress(mode); }
             } else {
                 obj.clearLongPressTimer();
                 if (obj.touchGesture.dragActive === true) {
@@ -1037,7 +1099,15 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
                     obj.touchGesture.dragActive = false;
                 }
                 var center = obj.getGestureCenter();
-                if (center != null) { obj.touchGesture.lastCenterX = center.clientX; obj.touchGesture.lastCenterY = center.clientY; }
+                if (center != null) {
+                    obj.touchGesture.lastCenterX = center.clientX;
+                    obj.touchGesture.lastCenterY = center.clientY;
+                    obj.touchGesture.viewportLastCenterX = center.clientX;
+                    obj.touchGesture.viewportLastCenterY = center.clientY;
+                }
+                obj.touchGesture.viewportGestureMode = null;
+                obj.touchGesture.viewportStartDistance = obj.getGestureDistance();
+                obj.touchGesture.viewportStartScale = (viewportState && typeof viewportState.currentScale === 'number') ? viewportState.currentScale : 1;
             }
             return obj.haltEvent(event);
         }
@@ -1049,11 +1119,46 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         pointer.remoteY = point.y;
 
         if (phase === 'move') {
-            var moved = ((Math.abs(point.clientX - pointer.startClientX) > 12) || (Math.abs(point.clientY - pointer.startClientY) > 12));
+            var moved = ((Math.abs(point.clientX - pointer.startClientX) > obj.touchGestureThresholds.move) || (Math.abs(point.clientY - pointer.startClientY) > obj.touchGestureThresholds.move));
             if (moved) {
                 obj.touchGesture.tapEligible = false;
                 obj.touchGesture.sequenceMoved = true;
                 if (!(mode === obj.TouchMode.TOUCHPAD && obj.touchGesture.dragActive === true)) obj.clearLongPressTimer();
+            }
+
+            viewportState = obj.getTouchViewportState();
+
+            if ((obj.touchGesture.pointerCount === 1) && obj.shouldUseSingleFingerViewportPan(mode, viewportState) && moved) {
+                if (obj.panTouchViewport(point.clientX - obj.touchGesture.lastCenterX, point.clientY - obj.touchGesture.lastCenterY, viewportState) === true) {
+                    obj.touchGesture.lastCenterX = point.clientX;
+                    obj.touchGesture.lastCenterY = point.clientY;
+                    return obj.haltEvent(event);
+                }
+            }
+
+            if ((obj.touchGesture.pointerCount === 2) && viewportState && (viewportState.canZoom === true || viewportState.canPan === true)) {
+                var viewportCenter = obj.getGestureCenter();
+                var viewportDistance = obj.getGestureDistance();
+                if ((viewportCenter != null) && (viewportDistance > 0)) {
+                    var scaleRatio = 1;
+                    if (obj.touchGesture.viewportStartDistance > 0) { scaleRatio = (viewportDistance / obj.touchGesture.viewportStartDistance); }
+                    var centerMoved = ((Math.abs(viewportCenter.clientX - obj.touchGesture.viewportLastCenterX) > obj.touchGestureThresholds.multiFingerPanMove) || (Math.abs(viewportCenter.clientY - obj.touchGesture.viewportLastCenterY) > obj.touchGestureThresholds.multiFingerPanMove));
+                    if ((Math.abs(scaleRatio - 1) > obj.touchGestureThresholds.pinchScaleDelta) && (viewportState.canZoom === true)) {
+                        obj.touchGesture.viewportGestureMode = 'zoom';
+                    } else if ((obj.touchGesture.viewportGestureMode == null) && centerMoved && (viewportState.canPan === true)) {
+                        obj.touchGesture.viewportGestureMode = 'pan';
+                    }
+                    obj.touchGesture.tapEligible = false;
+                    obj.touchGesture.sequenceMoved = true;
+                    if ((obj.touchGesture.viewportGestureMode === 'zoom') && (viewportState.canZoom === true)) {
+                        obj.zoomTouchViewport((obj.touchGesture.viewportStartScale * scaleRatio), viewportCenter.clientX, viewportCenter.clientY, viewportState);
+                    } else if ((viewportState.canPan === true) && (centerMoved || obj.touchGesture.viewportGestureMode === 'pan')) {
+                        obj.panTouchViewport((viewportCenter.clientX - obj.touchGesture.viewportLastCenterX), (viewportCenter.clientY - obj.touchGesture.viewportLastCenterY), viewportState);
+                    }
+                    obj.touchGesture.viewportLastCenterX = viewportCenter.clientX;
+                    obj.touchGesture.viewportLastCenterY = viewportCenter.clientY;
+                    return obj.haltEvent(event);
+                }
             }
 
             if (obj.touchGesture.pointerCount === 1) {
@@ -1064,7 +1169,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
                     obj.setGestureCursor(obj.touchGesture.cursorX + ((point.clientX - obj.touchGesture.lastCenterX) * scaleX), obj.touchGesture.cursorY + ((point.clientY - obj.touchGesture.lastCenterY) * scaleY));
                     obj.touchGesture.lastCenterX = point.clientX;
                     obj.touchGesture.lastCenterY = point.clientY;
-                    obj.SendMouseMsgEx(obj.KeyAction.NONE, obj.touchGesture.cursorX, obj.touchGesture.cursorY, obj.MouseButton.NONE, 0);
+                    obj.SendMouseMsgEx(obj.KeyAction.NONE, obj.touchGesture.cursorX, obj.touchGesture.cursorY, obj.MouseButton.NONE, 0, true);
                 } else {
                     obj.setGestureCursor(point.x, point.y);
                     if (obj.touchGesture.longPressHandled !== true && obj.touchGesture.dragActive !== true && moved) {
@@ -1074,7 +1179,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
                         obj.SendMouseMsgEx(obj.KeyAction.DOWN, pointer.startRemoteX, pointer.startRemoteY, obj.MouseButton.LEFT, 0);
                     }
                     if (obj.touchGesture.dragActive === true) {
-                        obj.SendMouseMsgEx(obj.KeyAction.NONE, point.x, point.y, obj.MouseButton.NONE, 0);
+                        obj.SendMouseMsgEx(obj.KeyAction.NONE, point.x, point.y, obj.MouseButton.NONE, 0, true);
                     }
                 }
             } else if (mode === obj.TouchMode.TOUCHPAD && obj.touchGesture.pointerCount === 2) {
@@ -1108,7 +1213,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
             if (obj.touchGesture.dragActive === true) {
                 obj.SendMouseMsgEx(obj.KeyAction.UP, obj.touchGesture.cursorX, obj.touchGesture.cursorY, obj.touchGesture.dragButton, 0);
                 obj.touchGesture.dragActive = false;
-            } else if (phase !== 'cancel' && obj.touchGesture.longPressHandled !== true && obj.touchGesture.tapEligible === true && ((Date.now() - obj.touchGesture.sequenceStart) < 450)) {
+            } else if (phase !== 'cancel' && obj.touchGesture.longPressHandled !== true && obj.touchGesture.tapEligible === true && ((Date.now() - obj.touchGesture.sequenceStart) < obj.touchGestureThresholds.tapMaxDuration)) {
                 var tapX = (mode === obj.TouchMode.TOUCHPAD) ? obj.touchGesture.cursorX : pointer.remoteX;
                 var tapY = (mode === obj.TouchMode.TOUCHPAD) ? obj.touchGesture.cursorY : pointer.remoteY;
                 if (obj.touchGesture.sequenceMaxPointers === 1) { obj.enqueueTap(obj.MouseButton.LEFT, tapX, tapY); }
