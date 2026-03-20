@@ -1,74 +1,11 @@
-﻿/* ═══════════════════════════════════════════════════════════════════════════
-   MeshCentral UI — style-bootstrap.css
-   Modernized: Phase 1 (responsive), Phase 2 (spacing/flow), Phase 3 (dark mode),
-   Phase 4 (accessibility), Phase 7 (polish)
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-/* ── Design Tokens ── */
+﻿
 :root {
     --sub-menu-bg: linear-gradient(180deg,#fff,#fff,#e9ecef);
     --sub-menu-color: #888;
-
-    /* ── Phase 2: Spacing & typography tokens ── */
-    --mc-spacing-xs: 0.25rem;  /* 4px */
-    --mc-spacing-sm: 0.5rem;   /* 8px */
-    --mc-spacing-md: 1rem;     /* 16px */
-    --mc-spacing-lg: 1.5rem;   /* 24px */
-    --mc-spacing-xl: 2rem;     /* 32px */
-    --mc-font-size-base: 0.875rem; /* 14px */
-    --mc-font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-
-    /* ── Phase 3: Theme-aware color tokens ── */
-    --mc-text-color: black;
-    --mc-bg-color: #fff;
-    --mc-bg-secondary: #eee;
-    --mc-link-color: #036;
-    --mc-border-color: #b7b7b7;
-    --mc-toolbar-bg: lightgray;
-    --mc-input-bg: #fff;
-    --mc-input-text: black;
-    --mc-dialog-bg: #eee;
-    --mc-dialog-shadow: #666;
-    --mc-container-bg: #fff;
-    --mc-device-bar-bg: white;
-    --mc-device-bar-text: black;
-    --mc-primary: #036;
-    --mc-sidebar-bg: linear-gradient(to bottom, #104893 0%, #113962 100%);
-    --mc-highlight-bg: #FDFFBE;
-    --mc-table-header-bg: #EEE;
-    --mc-table-alt-bg: #F5F5F5;
 }
 
-/* ── Phase 3: Night mode color overrides ── */
-.night {
-    --mc-text-color: #bbb;
-    --mc-bg-color: #000;
-    --mc-bg-secondary: #222;
-    --mc-link-color: #69b;
-    --mc-border-color: #444;
-    --mc-toolbar-bg: #333;
-    --mc-input-bg: #222;
-    --mc-input-text: #ccc;
-    --mc-dialog-bg: #222;
-    --mc-dialog-shadow: #000;
-    --mc-container-bg: #000;
-    --mc-device-bar-bg: #111;
-    --mc-device-bar-text: #bbb;
-    --mc-primary: #069;
-    --mc-sidebar-bg: linear-gradient(to bottom, #1a3a5c 0%, #0d2137 100%);
-    --mc-highlight-bg: #3a3a1a;
-    --mc-table-header-bg: #333;
-    --mc-table-alt-bg: #1a1a1a;
-}
-
-/* ── Phase 4: Accessible focus — visible outline for keyboard users only ── */
 :focus {
     outline: 0;
-}
-
-:focus-visible {
-    outline: 2px solid #036;
-    outline-offset: 2px;
 }
 
 
@@ -81,9 +18,9 @@ body {
     margin: 0;
     padding: 0;
     border: 0;
-    color: var(--mc-text-color);
-    font-size: var(--mc-font-size-base);
-    font-family: var(--mc-font-family);
+    color: black;
+    font-size: 13px;
+    font-family: "Trebuchet MS", Arial, Helvetica, sans-serif;
     background-color: #d3d9d6;
     /* overflow-y: hidden; */
 }
@@ -93,18 +30,21 @@ body {
 }
 
 #container {
-    background-color: var(--mc-container-bg);
-    color: var(--mc-text-color);
-    width: 100%;
-    max-width: 960px;
-    min-width: 0;
+    background-color: #fff;
+    width: 960px;
+    min-width: 960px;
     max-height: 100vh;
     margin: 0 auto;
     border-top: 0;
-    border-right: 1px solid var(--mc-border-color);
+    border-right: 1px solid #b7b7b7;
     border-bottom: 0;
-    border-left: 1px solid var(--mc-border-color);
+    border-left: 1px solid #b7b7b7;
     padding: 0;
+}
+
+.night #container {
+    color: #bbb;
+    background-color: #000;
 }
 
 .fullscreen.login #container {
@@ -143,9 +83,9 @@ body {
     width: 100%;
     min-width: 100%;
     min-height: 0px;
-    border-right: none;
-    border-left: none;
-    height: 100%;
+    border-right: 0px none #b7b7b7;
+    border-left: 0px none #b7b7b7;
+    height: calc(100% - 0px);
     position: relative;
     display: -ms-grid;
     display: grid;
@@ -165,10 +105,10 @@ body {
 .fulldesk #container {
     width: 100%;
     height: 100%;
-    min-width: 0;
+    min-width: 700px;
     min-height: 0px;
-    border-right: none;
-    border-left: none;
+    border-right: 0px none #b7b7b7;
+    border-left: 0px none #b7b7b7;
     position: unset;
     position: relative;
     display: -ms-grid !important;
@@ -183,7 +123,7 @@ body {
 
 .AgentInviteMasthead {
     background:url(logo.png) 0px 0px;
-    background-color: var(--mc-primary);
+    background-color:#036;
     background-repeat:no-repeat;height:66px;width:100%;overflow:hidden;
 }
 
@@ -194,7 +134,7 @@ body {
     width: auto;
     margin: 0;
     padding: 0 1rem;
-    background-color: var(--mc-primary);
+    background-color: #036;
     background-image: url(../logo.png);
     background-position: 0 0;
     background-repeat: no-repeat;
@@ -210,6 +150,31 @@ body {
 .idle-timeout-notify {
     color: yellow;
 }
+.masthead-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.masthead-right {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex: 0 0 auto;
+}
+
+.notification-icon {
+    cursor: pointer;
+}
+
+.user-menu-container {
+    display: flex;
+    align-items: center;
+}
+
 .fullscreen #masthead {
     width: 100%;
     grid-area: header;
@@ -363,6 +328,8 @@ body {
 #notificationBadge {
     font-size: 0.65rem !important;
     box-shadow: -0.1px 1px 2px #000000;
+    -webkit-box-shadow: -0.1px 1px 2px #000000;
+    -moz-box-shadow: -0.1px 1px 2px #000000;
 }
 
 .user-menu-container {
@@ -381,7 +348,8 @@ body {
     /* height: calc(100vh - 66px); */
     width: 70px;
     z-index: 1000;
-    background: var(--mc-sidebar-bg);
+    background: #113962;
+    background: linear-gradient(to bottom, #104893 0%,#113962 100%);
     color: white;
     overflow-y: hidden;
     overflow-x: hidden;
@@ -532,7 +500,10 @@ body {
 }
 
 .boxsize {
+    -ms-box-sizing:border-box;
+    -moz-box-sizing:border-box;
     box-sizing:border-box;
+    -webkit-box-sizing:border-box; 
 }
 
 .night #column_l {
@@ -626,7 +597,7 @@ body {
 }
 
 .night #logincell a {
-    color: var(--mc-link-color);
+    color: blue;
 }
 
 #loginpanel, #createpanel, #resetpanel, #tokenpanel, #resettokenpanel, #resetpasswordpanel, #resetpasswordpanel, #checkemailpanel, #waitpushpanel {
@@ -637,7 +608,7 @@ body {
     width: 300px;
     padding: 16px;
     text-align: center;
-    color: var(--mc-text-color);
+    color: black;
 }
 
 #passwordPolicyCallout, #rpasswordPolicyCallout {
@@ -656,14 +627,11 @@ body {
 }
 
 #footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
     position: fixed;
     bottom: 0;
     left: 0;
     width: 100%;
-    background-color: var(--mc-primary);
+    background-color: #113962;
     padding: 5px 0;
     text-align: center;
     z-index: 1000;
@@ -699,16 +667,15 @@ body {
 
 .footer1 {
     text-align: left;
-    padding: var(--mc-spacing-md);
+    float: left;
+    padding: 10px;
     color: white;
-    flex: 0 0 auto;
 }
 
 .footer2 {
-    padding: var(--mc-spacing-md);
+    padding: 10px;
     text-align: right;
     color: white;
-    flex: 1 1 auto;
 }
 
 #masthead img {
@@ -739,22 +706,20 @@ body {
 
 #dialog {
     z-index: 1000;
-    background-color: var(--mc-dialog-bg);
-    box-shadow: 0px 0px 15px var(--mc-dialog-shadow);
+    background-color: #EEE;
+    box-shadow: 0px 0px 15px #666;
     font-family: Arial,Helvetica,sans-serif;
     border-radius: 5px;
     position: fixed;
     top: 180px;
     left: calc((100% / 2) - 200px);
     width: 400px;
-    color: var(--mc-text-color);
+    color: black;
 }
 
 #dialogHeader {
-    display: flex;
-    align-items: center;
     width: 100%;
-    background-color: var(--mc-primary);
+    background-color: #003366;
     color: #FFF;
     border-radius: 5px 5px 0 0;
     margin-bottom: 6px;
@@ -762,16 +727,15 @@ body {
 }
 
 #id_dialogclose {
-    padding: var(--mc-spacing-xs);
-    margin-right: var(--mc-spacing-xs);
+    float: right;
+    padding: 3px;
+    margin-right: 3px;
     cursor: pointer;
-    background-color: var(--mc-bg-color);
-    margin-left: auto;
+    background-color: white; 
 }
 
 #id_dialogtitle {
-    padding: var(--mc-spacing-sm);
-    flex: 1 1 auto;
+    padding: 5px;
 }
 
 #dialogBody {
@@ -820,7 +784,7 @@ body {
 #d3serverfiles, #d2serverfiles {
     width: 100%;
     height: 150px;
-    background-color: var(--mc-bg-color);
+    background-color: white;
     padding: 2px;
     border: 1px solid gray;
     overflow-y: scroll;
@@ -845,28 +809,28 @@ body {
 }
 
 #idx_dlgButtonBar {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    gap: var(--mc-spacing-sm);
-    padding: var(--mc-spacing-md);
-    margin-bottom: var(--mc-spacing-xs);
+    padding: 10px;
+    margin-bottom: 5px;
+    margin-right: 10px;
+    overflow: auto;
 }
 
 #idx_dlgCancelButton, #idx_dlgCancelButton2 {
+    float: right;
     min-width: 80px;
-    order: 2;
+    margin-left: 5px;
 }
 
 #idx_dlgOkButton, #idx_dlgOkButton2 {
+    float: right;
     min-width: 80px;
-    order: 3;
+    margin-left: 5px;
 }
 
 #idx_dlgDeleteButton {
+    float: left;
     min-width: 80px;
-    margin-right: auto;
-    order: 1;
+    margin-left: 5px;
 }
 
 #ua_fileaccessquota {
@@ -908,18 +872,26 @@ body {
 .deviceBarCheckbox {
     width:22px;
     float:left;
-    background-color: var(--mc-device-bar-bg);
+    background-color:white;
+}
+
+.night .deviceBarCheckbox {
+    background-color:black;
 }
 
 #devs {
-    color: var(--mc-device-bar-text);
+    color:black;
 }
 
 .deviceBarIcon {
     float:left;
     height:18px;
     width:18px;
-    background-color: var(--mc-device-bar-bg);
+    background-color:white
+}
+
+.night .deviceBarIcon {
+    background-color:black;
 }
 
 #devListToolbarViewIcons {
@@ -943,7 +915,11 @@ body {
 }
 
 #SearchInput.search, #KvmSearchInput.search {
-    background-color: var(--mc-highlight-bg);
+    background-color: #FDFFBE;
+}
+
+.night #SearchInput.search, .night #KvmSearchInput.search {
+    background-color: grey;
 }
 
 #devListToolbarView, #devListToolbarSort, #devListToolbarSize, #devListToolbarSettings {
@@ -1179,7 +1155,7 @@ NoMeshesPanel img {
 
 #xmapSearchResultsBck {
     width: 100%;
-    background-color: var(--mc-primary);
+    background-color: #003366;
     color: #FFF;
     border-radius: 5px 5px 0 0;
 }
@@ -1401,7 +1377,7 @@ NoMeshesPanel img {
 }
 
 #p10html2 table {
-    color: var(--mc-text-color);
+    color: black;
     background: var(--sub-menu-bg);
     border-color: #AAA;
     border-width: 1px;
@@ -1721,16 +1697,16 @@ nav .lbbuttonsel {
     width: 100%;
     border-radius: 5px 0px 0px 5px;
     opacity: 0.9;
-    background-color: var(--mc-bg-color);
-    color: var(--mc-primary) !important;
+    background-color: #ffffff;
+    color: #113962 !important;
 }
 
 nav .lbbuttonsel2 {
     width: 100%;
     border-radius: 5px 0px 0px 5px;
     opacity: 1;
-    background-color: var(--mc-bg-color);
-    color: var(--mc-primary) !important;
+    background-color: #ffffff;
+    color: #113962 !important;
 }
 
 /*groups all buttons repeated code into one block*/
@@ -1940,7 +1916,7 @@ nav .lbbuttonsel2 {
     }
 
     .style3x.fullselect {
-        background-color: var(--mc-primary);
+        background-color: #003366;
     }
 
     .style3x.semiselect {
@@ -1950,7 +1926,7 @@ nav .lbbuttonsel2 {
 .style3sel {
     text-align: center;
     color: white;
-    background-color: var(--mc-primary);
+    background-color: #003366;
     font-weight: bold;
 }
 
@@ -2448,7 +2424,7 @@ nav .lbbuttonsel2 {
     height: 18px;
     float: left;
     margin-bottom: 2px;
-    color: var(--mc-text-color);
+    color: black;
 }
 
 .night .bar18 {
@@ -2539,7 +2515,11 @@ nav .lbbuttonsel2 {
     text-align: left;
     background-color: #F0ECCD;
     border: 4px solid #666;
+    -webkit-border-radius: 10px;
+    -moz-border-radius: 10px;
     border-radius: 10px;
+    -webkit-box-shadow: 2px 2px 4px #888;
+    -moz-box-shadow: 2px 2px 4px #888;
     box-shadow: 2px 2px 4px #888;
     max-height: 200px;
 }
@@ -2586,6 +2566,8 @@ body:not(.fullscreen) .notifiyBox {
       
 #notificationBadge {
     box-shadow: -0.1px 1px 2px #000000;
+    -webkit-box-shadow: -0.1px 1px 2px #000000;
+    -moz-box-shadow: -0.1px 1px 2px #000000;
     top: 0.95rem;
     left: 1.6rem !important;
 }
@@ -2828,7 +2810,7 @@ body:not(.fullscreen) .notifiyBox {
     top: 24px;
     bottom: 0px;
     width: 100%;
-    color: var(--mc-text-color);
+    color:black;
 }
 
 #DeskToolsServices {
@@ -2837,7 +2819,7 @@ body:not(.fullscreen) .notifiyBox {
     top: 24px;
     bottom: 0px;
     width: 100%;
-    color: var(--mc-text-color);
+    color:black;
 }
 
 .deskToolsBar {
@@ -3517,7 +3499,7 @@ body:not(.fullscreen) .notifiyBox {
 }
 
 .btn-close {
-    background-color: var(--mc-bg-color) !important;
+    background-color: white !important;
     opacity: 1 !important;
 }
 
@@ -3553,6 +3535,12 @@ body:not(.fullscreen) .notifiyBox {
     .masthead-left {
         gap: 0.5rem;
         max-width: calc(100% - 120px);
+    }
+
+    .masthead-titles-container {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0;
     }
 
     .masthead-titles-container {
@@ -3631,6 +3619,10 @@ body:not(.fullscreen) .notifiyBox {
         margin-right: 40px;
     }
 
+    .notifiyBox:after {
+        margin-right: 40px;
+    }
+
     .notifiyBox:before {
         content: none;
     }
@@ -3638,67 +3630,27 @@ body:not(.fullscreen) .notifiyBox {
     body {
         min-width: 100vw !important;
     }
+
+
+    /* #container {
+        width: 100vw !important;
+        padding-left: 0 !important;
+        display: flex !important;
+        flex-direction: column !important;
+    } */
 }
-
-/* ── Phase 1: 576px breakpoint — small tablets / large phones ── */
-@media (max-width: 576px) {
-    #masthead {
-        padding: 0 0.5rem;
-        height: 56px;
-    }
-
-    #masthead .title {
-        font-size: 18px;
-    }
-
-    #masthead .title2 {
-        display: none;
-    }
-
-    .masthead-right {
-        gap: 0.25rem;
-    }
-
-    #dialog {
-        width: calc(100vw - 2rem) !important;
-        left: 1rem !important;
-        top: 80px !important;
-    }
-
-    .fullscreen #container {
-        grid-template-columns: 1fr !important;
-        grid-template-areas:
-            "header"
-            "nav"
-            "content"
-            "footer" !important;
-    }
-
-    #page_leftbar {
-        display: none !important;
-    }
+/* css fixes for select2 */
+/* .select2-container--bootstrap-5 .select2-selection--multiple .select2-selection__rendered {
+    display: inline;
 }
-
-/* ── Phase 1: 480px breakpoint — phones ── */
-@media (max-width: 480px) {
-    #userDropdownName {
-        display: none !important;
-    }
-
-    #masthead .title {
-        font-size: 16px;
-    }
-
-    .p2html_tbar span {
-        font-size: 11px;
-    }
-
-    #dialog {
-        width: calc(100vw - 1rem) !important;
-        left: 0.5rem !important;
-    }
+    
+.select2-container--bootstrap-5 .select2-selection--multiple .select2-selection__rendered .select2-selection__choice {
+    display: inline-flex;
 }
-
+    
+.select2-container--bootstrap-5 .select2-selection--multiple .select2-search {
+    display: inline !important;
+} */
 /* User Dropdown Menu Styles */
 #userDropdown {
     display: flex;

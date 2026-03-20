@@ -3,7 +3,7 @@
 <head>
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta content="text/html; charset=utf-8" http-equiv="Content-Type" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="user-scalable=1.0,initial-scale=1.0,minimum-scale=1.0,maximum-scale=1.0" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="format-detection" content="telephone=no" />
     <meta name="robots" content="noindex,nofollow" />
@@ -16,14 +16,14 @@
     <title>Agent Installation</title>
     <style>
         .tab {
-            display: flex;
-            flex-wrap: wrap;
+            overflow: hidden;
             border: 1px solid #ccc;
             background-color: #f1f1f1;
         }
 
         .tab button {
             background-color: inherit;
+            float: left;
             border: none;
             outline: none;
             cursor: pointer;
@@ -44,16 +44,6 @@
             padding: 6px 12px;
             border: 1px solid #ccc;
             border-top: none;
-            background-color: #fff;
-            color: #000;
-        }
-
-        /* Responsive: wrap tabs on small screens */
-        @media (max-width: 576px) {
-            .tab button {
-                padding: 10px 12px;
-                font-size: 13px;
-            }
         }
     </style>
 </head>
@@ -61,12 +51,12 @@
     <div id="container">
         <!-- Begin Masthead -->
         <div id="masthead" class="noselect AgentInviteMasthead">
-            <div style="display:inline-flex;align-items:center;text-shadow:1px 1px 2px #000">{{{titlehtml}}}</div>
-            <div style="display:inline-flex;align-items:center;height:66px;color:#c8c8c8;padding-left:14px;padding-top:7px">
-                <strong><span style="font-size:46px;font-family:Arial,Helvetica,sans-serif;text-shadow:1px 1px 2px #000">{{{title1}}}</span></strong>
+            <div style="float:left;text-shadow: 1px 1px 2px #000">{{{titlehtml}}}</div>
+            <div style="float:left; height: 66px; color:#c8c8c8; padding-left:14px; padding-top:7px">
+                <strong><font style="font-size:46px; font-family: Arial, Helvetica, sans-serif;text-shadow: 1px 1px 2px #000">{{{title1}}}</font></strong>
             </div>
-            <div style="display:inline-flex;align-items:center;height:66px;color:#c8c8c8;padding-left:5px;padding-top:14px">
-                <strong><span style="font-size:14px;font-family:Arial,Helvetica,sans-serif;text-shadow:1px 1px 2px #000">{{{title2}}}</span></strong>
+            <div style="float:left; height: 66px; color:#c8c8c8; padding-left:5px; padding-top:14px">
+                <strong><font style="font-size:14px; font-family: Arial, Helvetica, sans-serif;text-shadow: 1px 1px 2px #000">{{{title2}}}</font></strong>
             </div>
             <p id="logoutControl" style="color:white;font-size:11px;margin: 10px 10px 0;">{{{logoutControl}}}</p>
         </div>
@@ -103,7 +93,7 @@
                     <button id="tassistab" class="tablinks" onclick="openTab(event, 'assistab')">Assistant</button>
                 </div>
 
-                <div id="wintab64" class="tabcontent" style="">
+                <div id="wintab64" class="tabcontent" style="background-color:white;color:black">
                     <h3>Microsoft&trade; Windows 64bit</h3>
                     <p><a id="win64url">Download the software here</a>, run it and press "Install" or "Connect".</p>
                     <div style="text-align:center">
@@ -111,7 +101,7 @@
                     </div>
                 </div>
 
-                <div id="wintab32" class="tabcontent" style="">
+                <div id="wintab32" class="tabcontent" style="background-color:white;color:black">
                     <h3>Microsoft&trade; Windows 32bit</h3>
                     <p><a id="win32url">Download the software here</a>, run it and press "Install" or "Connect".</p>
                     <div style="text-align:center">
@@ -119,7 +109,7 @@
                     </div>
                 </div>
 
-                <div id="wintabarm64" class="tabcontent" style="">
+                <div id="wintabarm64" class="tabcontent" style="background-color:white;color:black">
                     <h3>Microsoft&trade; Windows ARM 64bit</h3>
                     <p><a id="winarm64url">Download the software here</a>, run it and press "Install" or "Connect".</p>
                     <div style="text-align:center">
@@ -127,7 +117,7 @@
                     </div>
                 </div>
 
-                <div id="linuxtab" class="tabcontent" style="">
+                <div id="linuxtab" class="tabcontent" style="background-color:white;color:black">
                     <h3>Linux</h3>
                     <p>To install, cut and paste the following command in a root terminal.</p>
                     <div id="linuxinstall" style="font-family:courier,'courier new',monospace;margin-left:30px"></div>
@@ -138,9 +128,9 @@
                     <br /><br />
                 </div>
 
-                <div id="linuxbinarytab" class="tabcontent" style=""></div>
+                <div id="linuxbinarytab" class="tabcontent" style="background-color:white;color:black"></div>
 
-                <div id="macostab64" class="tabcontent" style="">
+                <div id="macostab64" class="tabcontent" style="background-color:white;color:black">
                     <h3>Apple&trade; MacOS x86-64bit</h3>
                     <p><a id="macos64url">Download the installer here</a>, right click on it or press "control" and click on the file. Then select "Open" and follow the instructions.</p>
                     <div style="text-align:center">
@@ -148,7 +138,7 @@
                     </div>
                 </div>
 
-                <div id="macostabarm64" class="tabcontent" style="">
+                <div id="macostabarm64" class="tabcontent" style="background-color:white;color:black">
                     <h3>Apple&trade; MacOS ARM 64bit</h3>
                     <p><a id="macosarm64url">Download the installer here</a>, right click on it or press "control" and click on the file. Then select "Open" and follow the instructions.</p>
                     <div style="text-align:center">
@@ -156,7 +146,7 @@
                     </div>
                 </div>
 
-                <div id="macostab" class="tabcontent" style="">
+                <div id="macostab" class="tabcontent" style="background-color:white;color:black">
                     <h3>Apple&trade; MacOS Universal</h3>
                     <p><a id="macosurl">Download the installer here</a>, right click on it or press "control" and click on the file. Then select "Open" and follow the instructions.</p>
                     <div style="text-align:center">
@@ -164,7 +154,7 @@
                     </div>
                 </div>
 
-                <div id="androtab" class="tabcontent" style="">
+                <div id="androtab" class="tabcontent" style="background-color:white;color:black">
                     <h3>Android</h3>
                     <div id=agins_qrcode style=min-height:220px;min-width:220px;float:right>
                         <a id=android_qrimage2 href="{{{magenturl}}}" rel="noreferrer noopener" target=_blank>
@@ -188,7 +178,7 @@
                     </div>
                 </div>
 
-                <div id="assistab" class="tabcontent" style="">
+                <div id="assistab" class="tabcontent" style="background-color:white;color:black">
                     <h3>Assistant</h3>
                     <div style="min-height:220px">
                         <img src="images/assistant-200.png" srcset="images/assistant-400.png 2x" style="float:right;margin-left:8px" width="148" height="200" />

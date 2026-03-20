@@ -4,7 +4,7 @@
     <title>{{{title}}} - Messenger</title>
     <meta http-equiv=X-UA-Compatible content="IE=edge">
     <meta content="text/html;charset=utf-8" http-equiv=Content-Type>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="user-scalable=1.0,initial-scale=1.0,minimum-scale=1.0,maximum-scale=1.0" />
     <meta name=format-detection content="telephone=no">
     <meta name="robots" content="noindex,nofollow">
     <link type="text/css" href="styles/style.css" media="screen" rel="stylesheet" title="CSS" />
@@ -35,10 +35,20 @@
             <div id="typingIndicator" style="display:none;margin-left:5px;clear:both"><img src="images/3dots-24.gif" srcset="images/3dots-48.gif 2x" /></div>
         </div>
     </div>
-    <div id="xbottom" style="position:absolute;left:0;right:0;bottom:0px;height:36px;background-color:#036;font-size:18px;display:flex;align-items:center">
-        <input id="xouttext" type="text" style="box-sizing:border-box;flex:1 1 auto;font-size:18px" onfocus=onUserInputFocus(1) onblur=onUserInputFocus(0) onkeyup="updateLocalOutText()" />
-        <input type="button" id="sendButton" value="Send" style="box-sizing:border-box;flex:0 0 auto;font-size:18px" onclick="xsend(event)" />
-        <input type="button" id="clearButton" value="Clear" style="box-sizing:border-box;flex:0 0 auto;font-size:18px" onclick="displayClear()" />
+    <div id="xbottom" style="position:absolute;left:0;right:0;bottom:0px;height:36px;background-color:#036;font-size:18px">
+        <table style="width:100%">
+            <tr>
+                <td>
+                    <input id="xouttext" type="text" style="box-sizing:border-box;width:100%;font-size:18px" onfocus=onUserInputFocus(1) onblur=onUserInputFocus(0) onkeyup="updateLocalOutText()" />
+                </td>
+                <td style="width:1px">
+                    <input type="button" id="sendButton" value="Send" style="box-sizing: border-box;float:right;font-size:18px" onclick="xsend(event)" />
+                </td>
+                <td style="width:1px">
+                    <input type="button" id="clearButton" value="Clear" style="box-sizing: border-box;float:right;font-size:18px" onclick="displayClear()" />
+                </td>
+            </tr>
+        </table>
     </div>
     <div id="remoteVideo" style="position:absolute;right:24px;top:45px;width:320px;height:calc(240px + 30px);background-color:gray;border-radius:12px 12px 12px 12px;box-shadow:3px 3px 10px gray;display:none">
         <div style="position:absolute;right:0;left:0;top:2.5px;text-align:center">Remote</div>
