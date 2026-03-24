@@ -27,12 +27,15 @@ import hashlib
 import json
 import os
 import shutil
+import socket
+import ssl
 import subprocess
 import sys
 import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 # Fix Windows console encoding
 if sys.platform == "win32":
@@ -43,6 +46,14 @@ if sys.platform == "win32":
 
 SERVER = "meshcentral"  # SSH config alias (resolves to 167.88.44.65)
 SERVER_IP = "167.88.44.65"
+SSH_CONFIG_PATH = os.environ.get("MESHCENTRAL_SSH_CONFIG")
+SSH_OPTIONS = [
+    "-o", "BatchMode=yes",
+    "-o", "ConnectTimeout=8",
+    "-o", "ConnectionAttempts=1",
+    "-o", "ServerAliveInterval=15",
+    "-o", "ServerAliveCountMax=2",
+]
 
 # Remote paths
 MC_BASE = "/opt/meshcentral"
@@ -56,6 +67,13 @@ SERVICE_NAME = "meshcentral"
 # Local repo root (MeshCentral clone mirrors server module structure)
 LOCAL_REPO = Path(__file__).parent.resolve()
 LOCAL_SERVER = LOCAL_REPO  # Repo root IS the working copy
+LOCAL_CONFIG_PATH = LOCAL_SERVER / "meshcentral-data" / "config.json"
+DEFAULT_DOMAIN_ID = ""
+PROVISIONING_FILES = (
+    "agents/MeshService64.msh",
+    "meshcentral-data/signedagents/MeshService64.msh",
+)
+LOCAL_WEBSERVER_CERT_PATH = LOCAL_SERVER / "meshcentral-data" / "webserver-cert-public.crt"
 
 # File mapping: local relative path (in repo) → remote absolute path (on server)
 # Add entries here as you customize more server files
@@ -88,6 +106,7 @@ FILE_MAP = {
 
     # MeshCentral startup core assembly logic
     "meshcentral.js": f"{MC_MODULE}/meshcentral.js",
+    "webserver.js": f"{MC_MODULE}/webserver.js",
 
     # Server modules
     "meshdevicefile.js": f"{MC_MODULE}/meshdevicefile.js",
@@ -95,14 +114,36 @@ FILE_MAP = {
 
     # Config (stored in meshcentral-data/ locally for reference)
     "meshcentral-data/config.json": MC_CONFIG,
+    "agents/MeshService64.msh": f"{MC_MODULE}/agents/MeshService64.msh",
+    "meshcentral-data/signedagents/MeshService64.msh": f"{MC_DATA}/signedagents/MeshService64.msh",
 }
 
 # ─── SSH/SCP Helpers ──────────────────────────────────────────────────────────
 
 
+def build_remote_cmd(binary):
+    """Build an SSH-family command honoring an optional external SSH config file."""
+    cmd = [binary]
+    if SSH_CONFIG_PATH:
+        cmd.extend(["-F", SSH_CONFIG_PATH])
+    cmd.extend(SSH_OPTIONS)
+    return cmd
+
+
+def probe_ssh_route(timeout=20):
+    """Check whether the configured SSH route can reach the remote host."""
+    result = subprocess.run(
+        [*build_remote_cmd("ssh"), SERVER, "exit 0"],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    return result.returncode == 0, result
+
+
 def ssh_cmd(command, capture=True, check=True, timeout=60):
     """Execute a command on the remote server."""
-    full_cmd = ["ssh", SERVER, command]
+    full_cmd = [*build_remote_cmd("ssh"), SERVER, command]
     result = subprocess.run(full_cmd, capture_output=capture, text=True, timeout=timeout)
     if check and result.returncode != 0:
         print(f"[ERROR] Remote command failed (exit {result.returncode}):")
@@ -116,7 +157,7 @@ def ssh_cmd(command, capture=True, check=True, timeout=60):
 def scp_up(local_path, remote_path):
     """Upload a file."""
     result = subprocess.run(
-        ["scp", str(local_path), f"{SERVER}:{remote_path}"],
+        [*build_remote_cmd("scp"), str(local_path), f"{SERVER}:{remote_path}"],
         capture_output=True, text=True, timeout=120,
     )
     if result.returncode != 0:
@@ -131,7 +172,7 @@ def scp_down(remote_path, local_path):
     """Download a file."""
     Path(local_path).parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
-        ["scp", f"{SERVER}:{remote_path}", str(local_path)],
+        [*build_remote_cmd("scp"), f"{SERVER}:{remote_path}", str(local_path)],
         capture_output=True, text=True, timeout=120,
     )
     if result.returncode != 0:
@@ -181,13 +222,530 @@ def unified_diff(local_path, remote_tmp_path):
     )
 
 
+def load_local_config():
+    """Load the local MeshCentral config file."""
+    if not LOCAL_CONFIG_PATH.exists():
+        print(f"[ERROR] Local config not found: {LOCAL_CONFIG_PATH}")
+        return None
+    with open(LOCAL_CONFIG_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_local_config(config):
+    """Write the local MeshCentral config file with deterministic formatting."""
+    LOCAL_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(LOCAL_CONFIG_PATH, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(config, f, indent=2)
+        f.write("\n")
+
+
+def build_agent_route(domain_id):
+    """Return the agent route path for a MeshCentral domain."""
+    return f"{domain_id}/agent.ashx" if domain_id else "agent.ashx"
+
+
+def get_domain_config(config, domain_id=DEFAULT_DOMAIN_ID):
+    """Fetch a domain configuration block."""
+    return config.get("domains", {}).get(domain_id, {})
+
+
+def get_web_alias_host(config, domain_id=DEFAULT_DOMAIN_ID):
+    """Resolve the public web hostname used by agents."""
+    domain = get_domain_config(config, domain_id)
+    domain_url = domain.get("url")
+    if isinstance(domain_url, str) and domain_url:
+        parsed = urlparse(domain_url)
+        if parsed.hostname:
+            return parsed.hostname
+    settings = config.get("settings", {})
+    return settings.get("cert")
+
+
+def normalize_https_url(value):
+    """Normalize an HTTPS URL or hostname into a stable URL string."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    if "://" not in value:
+        value = "https://" + value
+    parsed = urlparse(value)
+    netloc = parsed.netloc or parsed.path
+    if not netloc:
+        return None
+    path = parsed.path if parsed.netloc else ""
+    if not path:
+        path = "/"
+    elif not path.endswith("/"):
+        path += "/"
+    return urlunparse((parsed.scheme or "https", netloc, path, "", "", ""))
+
+
+def get_domain_certurl(config, domain_id=DEFAULT_DOMAIN_ID):
+    """Return the configured proxy certificate URL for a domain, if any."""
+    domain = get_domain_config(config, domain_id)
+    for key in ("certurl", "certUrl"):
+        normalized = normalize_https_url(domain.get(key))
+        if normalized:
+            return normalized
+    return None
+
+
+def get_domain_certurl_key_state(config, domain_id=DEFAULT_DOMAIN_ID):
+    """Return canonical and legacy certurl key usage for a domain."""
+    domain = get_domain_config(config, domain_id)
+    canonical_raw = domain.get("certurl")
+    legacy_raw = domain.get("certUrl")
+    return {
+        "canonical": normalize_https_url(canonical_raw),
+        "legacy": normalize_https_url(legacy_raw),
+        "has_canonical": isinstance(canonical_raw, str) and bool(canonical_raw.strip()),
+        "has_legacy": isinstance(legacy_raw, str) and bool(legacy_raw.strip()),
+    }
+
+
+def get_expected_certurl(config, domain_id=DEFAULT_DOMAIN_ID):
+    """Return the public certificate URL agents are expected to see."""
+    domain = get_domain_config(config, domain_id)
+    normalized = normalize_https_url(domain.get("url"))
+    if normalized:
+        return normalized
+    return normalize_https_url(get_web_alias_host(config, domain_id))
+
+
+def build_wss_url(host, port, path):
+    """Build a websocket endpoint URL."""
+    if not host or port is None:
+        return None
+    return f"wss://{host}:{int(port)}/{path}"
+
+
+def unique_preserve_order(values, *skip_values):
+    """Return a deduplicated list while preserving order."""
+    skips = {v for v in skip_values if v}
+    seen = set()
+    result = []
+    for value in values:
+        if not value or value in skips or value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
+def compute_agent_endpoints(config, domain_id=DEFAULT_DOMAIN_ID):
+    """Compute primary and fallback agent endpoints from local config."""
+    settings = config.get("settings", {})
+    route = build_agent_route(domain_id)
+    web_host = get_web_alias_host(config, domain_id)
+    web_port = settings.get("aliasPort", settings.get("port"))
+    agent_host = settings.get("agentAliasDNS") or web_host
+    agent_port = settings.get("agentAliasPort", settings.get("agentPort", web_port))
+    relay_port = settings.get("relayAliasPort", settings.get("relayPort"))
+
+    primary = build_wss_url(agent_host, agent_port, route)
+    web_fallback = build_wss_url(web_host, web_port, route)
+    relay_fallback = build_wss_url(agent_host, relay_port, route)
+    fallbacks = unique_preserve_order([web_fallback, relay_fallback], primary)
+
+    return {
+        "primary": primary,
+        "fallbacks": fallbacks,
+        "all": unique_preserve_order([primary, *fallbacks]),
+    }
+
+
+def parse_endpoint_list(value):
+    """Parse a MeshAgent fallback endpoint list."""
+    if not value:
+        return []
+    return [item.strip() for item in value.split("|") if item.strip()]
+
+
+def sync_domain_agent_config(config, domain_id=DEFAULT_DOMAIN_ID):
+    """Normalize the agent fallbackEndpoints entry in config.json."""
+    domain = get_domain_config(config, domain_id)
+    if not domain:
+        return False
+
+    agent_config = list(domain.get("agentConfig", []))
+    fallback_index = None
+    normalized_lines = []
+
+    for line in agent_config:
+        if isinstance(line, str) and line.startswith("fallbackEndpoints="):
+            if fallback_index is None:
+                fallback_index = len(normalized_lines)
+            continue
+        normalized_lines.append(line)
+
+    endpoints = compute_agent_endpoints(config, domain_id)
+    merged_fallbacks = list(endpoints["fallbacks"])
+
+    if merged_fallbacks:
+        if fallback_index is None:
+            fallback_index = len(normalized_lines)
+        normalized_lines.insert(fallback_index, "fallbackEndpoints=" + "|".join(merged_fallbacks))
+
+    changed = normalized_lines != agent_config
+    if changed:
+        domain["agentConfig"] = normalized_lines
+    return changed
+
+
+def sync_msh_file(path, primary_endpoint, fallback_endpoints, write=False):
+    """Keep a checked-in .msh provisioning artifact aligned with local config."""
+    if not path.exists():
+        return False
+
+    original_text = path.read_text(encoding="utf-8", errors="replace")
+    original_lines = original_text.splitlines()
+    lines = list(original_lines)
+    meshserver_index = None
+    fallback_index = None
+
+    for index, line in enumerate(lines):
+        if line.startswith("MeshServer="):
+            meshserver_index = index
+        elif line.startswith("fallbackEndpoints="):
+            if fallback_index is None:
+                fallback_index = index
+
+    updated_lines = []
+    for line in lines:
+        if line.startswith("fallbackEndpoints="):
+            continue
+        updated_lines.append(line)
+
+    if meshserver_index is not None:
+        for index, line in enumerate(updated_lines):
+            if line.startswith("MeshServer="):
+                updated_lines[index] = f"MeshServer={primary_endpoint}"
+                break
+
+    merged_fallbacks = list(fallback_endpoints)
+
+    if merged_fallbacks:
+        if fallback_index is not None:
+            insert_at = min(fallback_index, len(updated_lines))
+        else:
+            insert_at = None
+            for index, line in enumerate(updated_lines):
+                if line.startswith("MeshServer="):
+                    insert_at = index + 1
+                    break
+            if insert_at is None:
+                insert_at = len(updated_lines)
+        updated_lines.insert(insert_at, "fallbackEndpoints=" + "|".join(merged_fallbacks))
+
+    changed = updated_lines != original_lines
+    if changed and write:
+        updated_text = "\n".join(updated_lines) + "\n"
+        path.write_text(updated_text, encoding="utf-8", newline="\n")
+    return changed
+
+
+def sync_provisioning_artifacts(write=False):
+    """Sync config and checked-in provisioning artifacts from a single source of truth."""
+    config = load_local_config()
+    if config is None:
+        return [], None
+
+    changed_files = []
+    if sync_domain_agent_config(config):
+        changed_files.append("meshcentral-data/config.json")
+        if write:
+            save_local_config(config)
+
+    endpoints = compute_agent_endpoints(config)
+    for rel_path in PROVISIONING_FILES:
+        if sync_msh_file(LOCAL_SERVER / rel_path, endpoints["primary"], endpoints["fallbacks"], write=write):
+            changed_files.append(rel_path)
+
+    return changed_files, endpoints
+
+
+def describe_endpoint(endpoint):
+    """Return host and port for a websocket endpoint."""
+    parsed = urlparse(endpoint)
+    return parsed.hostname, parsed.port or 443
+
+
+def probe_tcp(host, port, timeout=3):
+    """Check if a TCP endpoint is reachable from this machine."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True, "reachable"
+    except OSError as exc:
+        return False, str(exc)
+
+
+def extract_certificate_fingerprint(path):
+    """Return the SHA1 fingerprint of a local certificate file."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    raw = path.read_bytes()
+    if b"-----BEGIN CERTIFICATE-----" in raw:
+        text = raw.decode("utf-8", errors="replace")
+        begin = text.find("-----BEGIN CERTIFICATE-----")
+        end = text.find("-----END CERTIFICATE-----")
+        if begin >= 0 and end >= 0:
+            pem = text[begin:end + len("-----END CERTIFICATE-----")]
+            raw = ssl.PEM_cert_to_DER_cert(pem)
+    return hashlib.sha1(raw).hexdigest().upper()
+
+
+def probe_tls_certificate(url, timeout=5):
+    """Fetch the certificate currently presented by a public HTTPS endpoint."""
+    normalized = normalize_https_url(url)
+    if normalized is None:
+        return None
+    parsed = urlparse(normalized)
+    host = parsed.hostname
+    port = parsed.port or 443
+    context = ssl.create_default_context()
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            with context.wrap_socket(sock, server_hostname=host) as tls_sock:
+                cert = tls_sock.getpeercert()
+                cert_der = tls_sock.getpeercert(binary_form=True)
+    except OSError as exc:
+        return {"url": normalized, "error": str(exc)}
+
+    subject = dict(item for entry in cert.get("subject", ()) for item in entry)
+    issuer = dict(item for entry in cert.get("issuer", ()) for item in entry)
+    return {
+        "url": normalized,
+        "host": host,
+        "port": port,
+        "subject_cn": subject.get("commonName"),
+        "issuer_cn": issuer.get("commonName"),
+        "not_after": cert.get("notAfter"),
+        "sha1": hashlib.sha1(cert_der).hexdigest().upper(),
+    }
+
+
+def audit_proxy_certificate_config(config, domain_id=DEFAULT_DOMAIN_ID):
+    """Audit the proxy certificate configuration needed for tlsOffload agents."""
+    settings = (config or {}).get("settings", {})
+    tls_offload = settings.get("tlsOffload")
+    certurl_keys = get_domain_certurl_key_state(config, domain_id)
+    report = {
+        "enabled": bool(tls_offload),
+        "tls_offload": tls_offload,
+        "certurl": certurl_keys["canonical"] or certurl_keys["legacy"],
+        "canonical_certurl": certurl_keys["canonical"],
+        "legacy_certurl": certurl_keys["legacy"],
+        "has_legacy_certurl_key": certurl_keys["has_legacy"],
+        "recommended_certurl": get_expected_certurl(config, domain_id),
+        "errors": [],
+        "warnings": [],
+        "public_cert": None,
+        "local_web_cert_sha1": extract_certificate_fingerprint(LOCAL_WEBSERVER_CERT_PATH),
+    }
+    if not report["enabled"]:
+        return report
+
+    if certurl_keys["has_legacy"] and not certurl_keys["has_canonical"]:
+        report["errors"].append(
+            "domains[''].certUrl is mis-cased. MeshCentral only reads domains[''].certurl."
+        )
+    elif certurl_keys["has_legacy"] and certurl_keys["has_canonical"]:
+        if certurl_keys["legacy"] != certurl_keys["canonical"]:
+            report["errors"].append(
+                "domains[''].certurl and domains[''].certUrl are both set with different values. "
+                "Remove the legacy certUrl entry."
+            )
+        else:
+            report["warnings"].append(
+                "Legacy domains[''].certUrl is still present. Remove it to avoid future drift."
+            )
+
+    if report["certurl"] is None:
+        report["errors"].append(
+            "tlsOffload is enabled but domains[''].certurl is missing. "
+            "Agents behind the public TLS front door can fail web-certificate validation."
+        )
+    elif report["recommended_certurl"] and (report["certurl"] != report["recommended_certurl"]):
+        report["warnings"].append(
+            "Configured certurl does not match the public domain URL. "
+            "Verify it presents the same certificate agents see."
+        )
+
+    probe_url = report["certurl"] or report["recommended_certurl"]
+    if probe_url:
+        public_cert = probe_tls_certificate(probe_url)
+        report["public_cert"] = public_cert
+        if public_cert and public_cert.get("error"):
+            report["warnings"].append(
+                f"Unable to probe the proxy certificate at {probe_url}: {public_cert['error']}"
+            )
+        elif public_cert and report["local_web_cert_sha1"] and (public_cert["sha1"] != report["local_web_cert_sha1"]):
+            if report["certurl"] is None:
+                report["errors"].append(
+                    "The public TLS certificate fingerprint differs from the local "
+                    "meshcentral-data/webserver-cert-public.crt fingerprint. "
+                    "Without certurl, agents can be held on BadWebCertHash."
+                )
+            else:
+                report["warnings"].append(
+                    "The public TLS certificate fingerprint differs from the local "
+                    "meshcentral-data/webserver-cert-public.crt fingerprint. "
+                    "This can be intentional when the local default certificate is preserved "
+                    "for direct-agent compatibility; certurl must remain correct so MeshCentral "
+                    "still tracks the public certificate agents see on the proxied ingress."
+                )
+
+    return report
+
+
+def print_proxy_certificate_report(report):
+    """Print the current proxy certificate audit result."""
+    print(f"\n{'─' * 60}")
+    print("  Proxy Certificate Audit:")
+    if not report["enabled"]:
+        print("    tlsOffload: disabled")
+        return
+
+    print(f"    tlsOffload: {report['tls_offload']}")
+    print(f"    certurl:    {report['certurl'] or '(missing)'}")
+    if report["recommended_certurl"]:
+        print(f"    expected:   {report['recommended_certurl']}")
+
+    public_cert = report.get("public_cert")
+    if public_cert:
+        if public_cert.get("error"):
+            print(f"    publicCert: probe failed ({public_cert['error']})")
+        else:
+            print(
+                "    publicCert: "
+                f"CN={public_cert.get('subject_cn') or '?'}; "
+                f"Issuer={public_cert.get('issuer_cn') or '?'}; "
+                f"SHA1={public_cert.get('sha1') or '?'}"
+            )
+    if report.get("local_web_cert_sha1"):
+        print(f"    localCert:  SHA1={report['local_web_cert_sha1']}")
+
+    for error in report["errors"]:
+        print(f"    [ERROR] {error}")
+    for warning in report["warnings"]:
+        print(f"    [WARN ] {warning}")
+
+
+def ensure_server_reachable(action):
+    """Fail fast when the deployment host cannot reach the server over SSH."""
+    ok, probe_result = probe_ssh_route(timeout=20)
+    if ok:
+        return True
+    print(f"[ERROR] Cannot reach {SERVER} using the configured SSH route; {action} cannot continue.")
+    if SSH_CONFIG_PATH:
+        print(f"        SSH config: {SSH_CONFIG_PATH}")
+    elif SERVER_IP:
+        print(f"        Direct host: {SERVER_IP}:22")
+    stderr = (probe_result.stderr or "").strip()
+    if stderr:
+        print(f"        {stderr}")
+    return False
+
+
+def print_agent_endpoint_report(endpoints):
+    """Print the primary and fallback agent endpoints derived from local config."""
+    if not endpoints:
+        return
+    print(f"\n{'─' * 60}")
+    print("  Agent Endpoints (local config):")
+    print(f"    Primary:   {endpoints['primary']}")
+    if endpoints["fallbacks"]:
+        for index, endpoint in enumerate(endpoints["fallbacks"], start=1):
+            print(f"    Fallback {index}: {endpoint}")
+    else:
+        print("    Fallbacks: (none)")
+
+
+def print_public_probe_report(endpoints):
+    """Print public TCP reachability for the configured agent endpoints."""
+    if not endpoints:
+        return
+    print(f"\n{'─' * 60}")
+    print("  Public Reachability (from this workstation):")
+    for endpoint in endpoints["all"]:
+        host, port = describe_endpoint(endpoint)
+        ok, detail = probe_tcp(host, port, timeout=3)
+        indicator = "+" if ok else "!"
+        print(f"  [{indicator}] {host}:{port:<5d} {detail}")
+
+
+def build_health_checks(config):
+    """Build health checks that match the configured deployment topology."""
+    settings = (config or {}).get("settings", {})
+    checks = [
+        ("Service active", f"systemctl is-active {SERVICE_NAME}"),
+        ("MeshCentral version", f"node -e \"console.log(require('{MC_MODULE}/package.json').version)\""),
+    ]
+
+    web_port = settings.get("port")
+    if isinstance(web_port, int) and (web_port > 0):
+        checks.append((f"Port {web_port} (web)", f"ss -tlnp | grep ':{web_port} ' | head -1"))
+
+    redir_port = settings.get("redirPort")
+    if isinstance(redir_port, int) and (redir_port > 0):
+        checks.append((f"Port {redir_port} (redir)", f"ss -tlnp | grep ':{redir_port} ' | head -1"))
+
+    agent_port = settings.get("agentPort")
+    if isinstance(agent_port, int) and (agent_port > 0):
+        checks.append((f"Port {agent_port} (agent)", f"ss -tlnp | grep ':{agent_port} ' | head -1"))
+
+    relay_port = settings.get("relayPort")
+    if isinstance(relay_port, int) and (relay_port > 0) and (settings.get("relayDNS") is None):
+        checks.append((f"Port {relay_port} (relay)", f"ss -tlnp | grep ':{relay_port} ' | head -1"))
+
+    if settings.get("tlsOffload"):
+        checks.extend([
+            ("Caddy active", "systemctl is-active caddy"),
+            ("Port 443 (edge)", "ss -tlnp | grep ':443 ' | head -1"),
+        ])
+    elif config.get("letsencrypt") is not None:
+        checks.append(("Let's Encrypt certs", f"ls -la {MC_DATA}/letsencrypt-certs/*.pem 2>/dev/null | wc -l"))
+
+    checks.extend([
+        ("Node process", "pgrep -a node | grep meshcentral | head -1"),
+        ("MongoDB", "mongosh --eval 'db.stats().collections' meshcentral --quiet 2>/dev/null || mongo --eval 'db.stats().collections' meshcentral --quiet 2>/dev/null || echo 'client not found'"),
+        ("Disk", "df -h / | tail -1"),
+        ("Memory", "free -h | grep Mem"),
+        ("Custom.js present", f"test -f {MC_WEB}/public/scripts/custom.js && echo YES || echo NO"),
+        ("Recent errors (5m)", f"journalctl -u {SERVICE_NAME} --no-pager --since '5 min ago' --priority=err 2>/dev/null | wc -l"),
+    ])
+    return checks
+
+
 # ─── Commands ─────────────────────────────────────────────────────────────────
 
 def cmd_status(args):
     """Show server status and MeshCentral version."""
+    config = load_local_config() or {}
+    drift, endpoints = sync_provisioning_artifacts(write=False)
+    proxy_report = audit_proxy_certificate_config(config)
     print("=" * 60)
     print("  MeshCentral Server Status")
     print("=" * 60)
+
+    if drift:
+        print("  Local provisioning drift detected:")
+        for rel_path in drift:
+            print(f"    {rel_path}")
+        print("  Run 'deploy-server.py push' to sync the config and .msh artifacts.")
+        print()
+
+    print_agent_endpoint_report(endpoints)
+    print_proxy_certificate_report(proxy_report)
+
+    server_reachable = ensure_server_reachable("status")
+    if not server_reachable:
+        print_public_probe_report(endpoints)
+        print()
+        return
 
     info = ssh_cmd("""
         echo "Host: $(hostname)"
@@ -224,11 +782,16 @@ def cmd_status(args):
             print(f"    {bname}")
     else:
         print("    (none)")
+
+    print_public_probe_report(endpoints)
     print()
 
 
 def cmd_pull(args):
     """Pull current server files to local working copy."""
+    if not ensure_server_reachable("pull"):
+        return False
+
     print("Pulling server files to local working copy...\n")
 
     for local_rel, remote in FILE_MAP.items():
@@ -245,6 +808,16 @@ def cmd_pull(args):
 
 def cmd_diff(args):
     """Show diff between local working copy and server files."""
+    drift, _ = sync_provisioning_artifacts(write=False)
+    if drift:
+        print("Local provisioning drift detected before diff:")
+        for rel_path in drift:
+            print(f"  [DRIFT] {rel_path}")
+        print()
+
+    if not ensure_server_reachable("diff"):
+        return False
+
     print("Comparing local vs server...\n")
 
     any_diff = False
@@ -286,15 +859,39 @@ def cmd_diff(args):
 
 def cmd_push(args):
     """Push local changes to server with backup and restart."""
+    config = load_local_config() or {}
+    synced_files, endpoints = sync_provisioning_artifacts(write=not args.dry_run)
+    proxy_report = audit_proxy_certificate_config(config)
     print("=" * 60)
     print("  Push MeshCentral Changes")
     print("=" * 60)
 
+    if synced_files:
+        print("\nProvisioning synced from local config:")
+        for rel_path in synced_files:
+            print(f"  {rel_path}")
+
+    print_agent_endpoint_report(endpoints)
+    print_proxy_certificate_report(proxy_report)
+
+    if proxy_report["errors"]:
+        print("\n[ERROR] Refusing to push while local proxy certificate validation is broken.")
+        return False
+
+    if not ensure_server_reachable("push"):
+        print_public_probe_report(endpoints)
+        return False
+
     # Determine which files to push
     files_to_push = []
+    requested_files = list(args.file or [])
+    for rel_path in synced_files:
+        if rel_path not in requested_files:
+            requested_files.append(rel_path)
+
     if args.file:
         # Push specific file(s)
-        for f in args.file:
+        for f in requested_files:
             if f in FILE_MAP:
                 local_path = LOCAL_SERVER / f
                 if local_path.exists():
@@ -370,19 +967,39 @@ def cmd_push(args):
     status = ssh_cmd(f"systemctl is-active {SERVICE_NAME}", check=False)
     if status and "active" in status:
         print(f"    Service: {status}")
+        print_public_probe_report(endpoints)
         print("\n[SUCCESS] Push complete!")
     else:
         print(f"    [WARNING] Service: {status}")
         print("    Check: deploy-server.py logs 50")
+        print_public_probe_report(endpoints)
 
     return True
 
 
 def cmd_update(args):
     """Update MeshCentral via npm on the server."""
+    config = load_local_config() or {}
+    synced_files, endpoints = sync_provisioning_artifacts(write=True)
+    proxy_report = audit_proxy_certificate_config(config)
     print("=" * 60)
     print("  MeshCentral npm Update")
     print("=" * 60)
+
+    if synced_files:
+        print("\nProvisioning synced from local config:")
+        for rel_path in synced_files:
+            print(f"  {rel_path}")
+
+    print_proxy_certificate_report(proxy_report)
+
+    if proxy_report["errors"]:
+        print("\n[ERROR] Refusing to update while local proxy certificate validation is broken.")
+        return False
+
+    if not ensure_server_reachable("update"):
+        print_public_probe_report(endpoints)
+        return False
 
     # Current version
     current = ssh_cmd(
@@ -470,13 +1087,18 @@ def cmd_update(args):
     print(f"  Service: {status}")
 
     if status and "active" in status:
+        print_public_probe_report(endpoints)
         print("\n[SUCCESS] Update complete!")
     else:
+        print_public_probe_report(endpoints)
         print("\n[WARNING] Service may not have started. Check logs.")
 
 
 def cmd_rollback(args):
     """Restore server files from backup."""
+    if not ensure_server_reachable("rollback"):
+        return False
+
     print("=" * 60)
     print("  Server Rollback")
     print("=" * 60)
@@ -536,7 +1158,10 @@ def cmd_rollback(args):
 def cmd_config(args):
     """View or edit MeshCentral config."""
     if args.action == "edit":
-        local_config = LOCAL_SERVER / "config" / "config.json"
+        if not ensure_server_reachable("config edit"):
+            return False
+
+        local_config = LOCAL_CONFIG_PATH
 
         # Pull latest
         print("Pulling latest config...")
@@ -564,20 +1189,36 @@ def cmd_config(args):
             print(f"[ERROR] Invalid JSON: {e}")
             return False
 
+        synced_files, endpoints = sync_provisioning_artifacts(write=True)
+        if synced_files:
+            print("Synced provisioning artifacts:")
+            for rel_path in synced_files:
+                print(f"  {rel_path}")
+
         # Backup and push
         ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         ssh_cmd(f"cp {MC_CONFIG} {MC_CONFIG}.bak.{ts}")
-        print("Uploading config...")
-        scp_up(local_config, MC_CONFIG)
+        print("Uploading config and provisioning artifacts...")
+        for rel_path in ["meshcentral-data/config.json", *PROVISIONING_FILES]:
+            local_path = LOCAL_SERVER / rel_path
+            remote_path = FILE_MAP[rel_path]
+            remote_dir = "/".join(remote_path.split("/")[:-1])
+            ssh_cmd(f"mkdir -p {remote_dir}")
+            if not scp_up(local_path, remote_path):
+                return False
+            ssh_cmd(f"chown meshcentral:meshcentral {remote_path} 2>/dev/null || true")
 
         resp = input("Restart MeshCentral? [y/N] ")
         if resp.lower() == "y":
             ssh_cmd(f"systemctl restart {SERVICE_NAME}")
             time.sleep(3)
             print(f"Service: {ssh_cmd(f'systemctl is-active {SERVICE_NAME}', check=False)}")
+            print_public_probe_report(endpoints)
 
         print("[DONE] Config updated.")
     else:
+        if not ensure_server_reachable("config view"):
+            return False
         config = ssh_cmd(f"cat {MC_CONFIG}")
         if config:
             try:
@@ -588,6 +1229,8 @@ def cmd_config(args):
 
 def cmd_logs(args):
     """Tail MeshCentral service logs."""
+    if not ensure_server_reachable("logs"):
+        return False
     n = args.lines or 50
     print(f"Last {n} lines:\n")
     logs = ssh_cmd(
@@ -601,24 +1244,30 @@ def cmd_logs(args):
 
 def cmd_health(args):
     """Full server health check."""
+    config = load_local_config() or {}
+    drift, endpoints = sync_provisioning_artifacts(write=False)
+    proxy_report = audit_proxy_certificate_config(config)
     print("=" * 60)
     print("  MeshCentral Health Check")
     print("=" * 60)
 
-    checks = [
-        ("Service active", f"systemctl is-active {SERVICE_NAME}"),
-        ("MeshCentral version", f"node -e \"console.log(require('{MC_MODULE}/package.json').version)\""),
-        ("Port 4430 (web)", "ss -tlnp | grep 4430 | head -1"),
-        ("Port 4445 (agent)", "ss -tlnp | grep 4445 | head -1"),
-        ("Port 4446 (relay)", "ss -tlnp | grep 4446 | head -1"),
-        ("Node process", "pgrep -a node | grep meshcentral | head -1"),
-        ("MongoDB", "mongosh --eval 'db.stats().collections' meshcentral --quiet 2>/dev/null || mongo --eval 'db.stats().collections' meshcentral --quiet 2>/dev/null || echo 'client not found'"),
-        ("Let's Encrypt certs", f"ls -la {MC_DATA}/letsencrypt-certs/*.pem 2>/dev/null | wc -l"),
-        ("Disk", "df -h / | tail -1"),
-        ("Memory", "free -h | grep Mem"),
-        ("Custom.js present", f"test -f {MC_WEB}/public/scripts/custom.js && echo YES || echo NO"),
-        ("Recent errors (5m)", f"journalctl -u {SERVICE_NAME} --no-pager --since '5 min ago' --priority=err 2>/dev/null | wc -l"),
-    ]
+    if drift:
+        print("  Local provisioning drift detected:")
+        for rel_path in drift:
+            print(f"    {rel_path}")
+        print()
+
+    print_agent_endpoint_report(endpoints)
+    print_proxy_certificate_report(proxy_report)
+    print_public_probe_report(endpoints)
+
+    if not ensure_server_reachable("health"):
+        print(f"\n{'─' * 60}")
+        print("  Remote health checks skipped: SSH is unreachable.")
+        print()
+        return False
+
+    checks = build_health_checks(config)
 
     all_ok = True
     for label, cmd in checks:
@@ -637,6 +1286,8 @@ def cmd_health(args):
 
 def cmd_ssh(args):
     """Run an arbitrary command on the server."""
+    if not ensure_server_reachable("ssh"):
+        return False
     command = " ".join(args.command)
     if not command:
         print("Usage: deploy-server.py ssh <command>")
