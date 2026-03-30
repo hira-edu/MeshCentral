@@ -1110,6 +1110,153 @@ function parseArgs(argv) {
     return results;
 }
 
+var umhControlPipeName = '\\\\.\\pipe\\{95c1a2e0-f84e-4c8a-9c32}-control';
+var umhControlResponseLimit = 512 * 1024;
+var umhControlOpMap = {
+    status: 'status',
+    listprocesses: 'listProcesses',
+    inject: 'inject',
+    injectall: 'injectAll',
+    telemetry: 'telemetry',
+    repair: 'repair',
+    setflags: 'setFlags',
+    disable: 'disable',
+    disableall: 'disableAll',
+    getconfig: 'getConfig',
+    setconfig: 'setConfig',
+    getpolicy: 'getPolicy',
+    setpolicy: 'setPolicy',
+    lockdownbypass: 'lockdownBypass',
+    examsoftbypass: 'examsoftBypass'
+};
+
+function umhNormalizeControlOp(value) {
+    if (typeof value != 'string' || value.length == 0) { return null; }
+    return value.toLowerCase().split('-').join('').split('_').join('');
+}
+
+function umhControlUsage() {
+    return 'Usage: umhctl [op] [--pid <pid>] [--action <value>] [--method <value>] [--technique <value>] [--json "<json>"]\r\nOps: status, listProcesses, inject, injectAll, telemetry, repair, setFlags, disable, disableAll, getConfig, setConfig, getPolicy, setPolicy, lockdownBypass, examsoftBypass';
+}
+
+function umhBuildControlRequest(args) {
+    var req = null;
+    if (args.json != null) {
+        if (typeof args.json != 'string') { return { ok: false, error: 'umhctl --json must be a string value.' }; }
+        try { req = JSON.parse(args.json); } catch (ex) { return { ok: false, error: 'umhctl --json is not valid JSON.' }; }
+    } else if ((args['_'].length > 0) && (('' + args['_'][0]).toLowerCase() == 'raw')) {
+        if (args['_'].length < 2) { return { ok: false, error: 'umhctl raw requires a JSON payload.' }; }
+        try { req = JSON.parse(args['_'][1]); } catch (ex) { return { ok: false, error: 'umhctl raw payload is not valid JSON.' }; }
+    } else {
+        var opToken = (args['_'].length > 0) ? args['_'][0] : 'listProcesses';
+        var opKey = umhNormalizeControlOp(opToken);
+        var canonicalOp = (opKey != null) ? umhControlOpMap[opKey] : null;
+        if (canonicalOp == null) { return { ok: false, error: 'umhctl invalid op: ' + opToken }; }
+        req = { op: canonicalOp };
+    }
+
+    if (typeof req != 'object' || req == null) { return { ok: false, error: 'umhctl request must be a JSON object.' }; }
+    if (typeof req.op != 'string' || req.op.length == 0) { return { ok: false, error: 'umhctl request is missing an "op" field.' }; }
+
+    var normalizedReqOp = umhNormalizeControlOp(req.op);
+    var canonicalReqOp = (normalizedReqOp != null) ? umhControlOpMap[normalizedReqOp] : null;
+    if (canonicalReqOp == null) { return { ok: false, error: 'umhctl unsupported op: ' + req.op }; }
+    req.op = canonicalReqOp;
+
+    if (args.pid != null && req.pid == null) {
+        var pid = parseInt(args.pid);
+        if (isNaN(pid) || pid <= 0) { return { ok: false, error: 'umhctl --pid must be a positive integer.' }; }
+        req.pid = pid;
+    }
+    if (args.action != null && req.action == null) { req.action = '' + args.action; }
+    if (args.method != null && req.method == null) { req.method = '' + args.method; }
+    if (args.technique != null && req.technique == null) { req.technique = '' + args.technique; }
+    if (args.dll != null && req.dll == null) { req.dll = '' + args.dll; }
+    if (args.content != null && req.content == null) { req.content = '' + args.content; }
+    if (args.policy != null && req.policy == null) { req.policy = '' + args.policy; }
+    if (args.token != null && req.token == null) { req.token = '' + args.token; }
+    if (args.flags != null && req.flags == null) {
+        if (typeof args.flags == 'string') {
+            try { req.flags = JSON.parse(args.flags); } catch (ex) { return { ok: false, error: 'umhctl --flags must be valid JSON.' }; }
+        } else {
+            req.flags = args.flags;
+        }
+    }
+
+    return { ok: true, request: req };
+}
+
+function umhSendControlRequest(request, sessionid) {
+    var payload = JSON.stringify(request) + '\n';
+    if (payload.length > umhControlResponseLimit) {
+        sendConsoleText('UMH control request is too large.', sessionid);
+        return;
+    }
+
+    var socket = null;
+    var finished = false;
+    var responseText = '';
+    var timeout = null;
+
+    function finish(message) {
+        if (finished) { return; }
+        finished = true;
+        if (timeout != null) { clearTimeout(timeout); timeout = null; }
+        if (socket != null) {
+            try { socket.destroy(); } catch (ex) { }
+        }
+        if (message != null) { sendConsoleText(message, sessionid); }
+    }
+
+    function flushResponse() {
+        if (responseText.length == 0) {
+            finish('UMH control request completed with an empty response.');
+            return;
+        }
+        try {
+            var parsed = JSON.parse(responseText);
+            finish('UMH control response:\r\n' + JSON.stringify(parsed, null, 2));
+        } catch (ex) {
+            finish('UMH control response (raw):\r\n' + responseText);
+        }
+    }
+
+    try {
+        socket = net.createConnection(umhControlPipeName);
+    } catch (ex) {
+        finish('UMH control request failed to open named pipe: ' + ex);
+        return;
+    }
+
+    timeout = setTimeout(function () {
+        finish('UMH control request timed out waiting for response.');
+    }, 15000);
+
+    socket.on('connect', function () {
+        try {
+            socket.end(payload);
+        } catch (ex) {
+            finish('UMH control request write failed: ' + ex);
+        }
+    });
+    socket.on('data', function (chunk) {
+        if (finished) { return; }
+        responseText += chunk.toString();
+        if (responseText.length > umhControlResponseLimit) {
+            finish('UMH control response exceeded size limit.');
+        }
+    });
+    socket.on('end', function () {
+        if (!finished) { flushResponse(); }
+    });
+    socket.on('close', function (hadError) {
+        if (!finished && hadError !== true) { flushResponse(); }
+    });
+    socket.on('error', function (err) {
+        finish('UMH control request failed: ' + err);
+    });
+}
+
 // Get server target url with a custom path
 function getServerTargetUrl(path) {
     var x = mesh.ServerUrl;
@@ -4190,7 +4337,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
             case 'help': { // Displays available commands
                 var fin = '', f = '', availcommands = 'domain,translations,agentupdate,errorlog,msh,timerinfo,coreinfo,coreinfoupdate,coredump,service,fdsnapshot,fdcount,startupoptions,';
                 availcommands += 'alert,agentsize,versions,help,info,osinfo,args,print,type,dbkeys,dbget,dbset,dbcompact,eval,parseuri,httpget,wslist,plugin,wsconnect,wssend,wsclose,notify,';
-                availcommands += 'ls,ps,kill,netinfo,location,power,wakeonlan,setdebug,smbios,rawsmbios,toast,lock,users,openurl,getscript,getclip,setclip,log,cpuinfo,sysinfo';
+                availcommands += 'ls,ps,kill,netinfo,location,power,wakeonlan,setdebug,smbios,rawsmbios,toast,lock,users,openurl,getscript,getclip,setclip,log,cpuinfo,sysinfo,umhctl';
                 availcommands += 'apf,scanwifi,wallpaper,agentmsg,task,uninstallagent,display,openfile';
                 if (require('os').dns != null) { availcommands += ',dnsinfo'; }
                 try { require('linux-dhcp'); availcommands += ',dhcp'; } catch (ex) { }
@@ -4700,6 +4847,19 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                     }
                     if (process.platform == 'win32') { s.close(); }
                 }
+                break;
+            case 'umhctl':
+                if (process.platform != 'win32') {
+                    response = 'umhctl is only supported on Windows.';
+                    break;
+                }
+                var umhReq = umhBuildControlRequest(args);
+                if (!umhReq.ok) {
+                    response = umhReq.error + '\r\n' + umhControlUsage();
+                    break;
+                }
+                umhSendControlRequest(umhReq.request, sessionid);
+                response = 'UMH control request dispatched: ' + JSON.stringify(umhReq.request);
                 break;
             case 'zip':
                 if (args['_'].length == 0) {

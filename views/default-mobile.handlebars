@@ -32,6 +32,7 @@
     <script type="text/javascript" src="scripts/zlib-adler32{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/zlib-crc32{{{min}}}.js"></script>
     <script keeplink=1 type="text/javascript" src="scripts/filesaver.min.js"></script>
+    <script type="text/javascript" src="scripts/custom.js"></script>
     {{{customJSTags}}}
     <meta name="msapplication-TileColor" content="#00aba9">
     <meta name="theme-color" content="#ffffff">
@@ -1102,6 +1103,11 @@
                                                 </select>
                                             </td>
                                             <td style="width:1%"><input id="id_p15consoleClear" type="button" class="bottombutton" value="Clear" onclick="p15consoleClear()" /></td>
+                                        </tr>
+                                        <tr id="p15umhrow">
+                                            <td colspan=3 style="padding-top:4px">
+                                                <div id="p15umhpanel" style="width:100%"></div>
+                                            </td>
                                         </tr>
                                     </table>
                                 </td>
@@ -6842,9 +6848,127 @@
 
         var consoleNode;
         var consoleServerText = '';
+        var p15umhConsoleBridge = null;
+        var p15umhRequestQueue = Promise.resolve();
+        function p15umhSameNode(a, b) {
+            if (a == null || b == null || a === 'server' || b === 'server') return (a === b);
+            if (a === b) return true;
+            if ((a._id != null) && (b._id != null)) return (a._id === b._id);
+            return false;
+        }
+        function p15umhValidationError(msg) {
+            var panel = Q('p15umhpanel');
+            if ((window.MeshCentralUmhControlUi != null) && (typeof window.MeshCentralUmhControlUi.showPanelNotice == 'function') && panel) {
+                if (window.MeshCentralUmhControlUi.showPanelNotice(panel, msg, '#B00020')) return;
+            }
+        }
+
+        function p15umhEnsureConsoleBridge() {
+            if (p15umhConsoleBridge != null) return p15umhConsoleBridge;
+            if (typeof p15consoleReceive != 'function') return null;
+            var original = p15consoleReceive;
+            var listeners = [];
+            p15consoleReceive = function () {
+                var r = original.apply(this, arguments);
+                var copy = listeners.slice(0), i;
+                for (i = 0; i < copy.length; i++) { try { copy[i].apply(null, arguments); } catch (ex) { } }
+                return r;
+            };
+            p15umhConsoleBridge = {
+                subscribe: function (fn) {
+                    listeners.push(fn);
+                    return function () {
+                        var i = listeners.indexOf(fn);
+                        if (i >= 0) listeners.splice(i, 1);
+                    };
+                }
+            };
+            return p15umhConsoleBridge;
+        }
+
+        function p15umhRequest(cmd, type) {
+            var run = function () {
+                return new Promise(function (resolve, reject) {
+                    var bridge = p15umhEnsureConsoleBridge();
+                    var parser = ((window.MeshCentralUmhControlUi != null) && (typeof window.MeshCentralUmhControlUi.parseConsolePayload == 'function')) ? window.MeshCentralUmhControlUi.parseConsolePayload : null;
+                    var requestId = ((window.MeshCentralUmhControlUi != null) && (typeof window.MeshCentralUmhControlUi.buildRequestId == 'function') && /^\s*umhctl\b/i.test(String(cmd || ''))) ? window.MeshCentralUmhControlUi.buildRequestId() : null;
+                    var dispatchCmd = (requestId != null && window.MeshCentralUmhControlUi != null && typeof window.MeshCentralUmhControlUi.appendRequestId == 'function') ? window.MeshCentralUmhControlUi.appendRequestId(cmd, requestId) : cmd;
+                    var node = consoleNode;
+                    var nodeId = (node && node._id) ? String(node._id) : null;
+                    var input = Q('p15consoleText');
+                    var outputSel = Q('p15outputselect');
+                    var lines = [];
+                    var done = false;
+                    var hardTimer = null;
+                    var stop = null;
+                    var timeoutMs = (/^\s*umhctl\s+uiSnapshot\b/i).test(String(dispatchCmd || '')) ? 95000 : 60000;
+                    function cleanup() {
+                        if (stop) { try { stop(); } catch (ex) { } stop = null; }
+                        if (hardTimer) { clearTimeout(hardTimer); hardTimer = null; }
+                    }
+                    function finish(err) {
+                        if (done) return;
+                        done = true;
+                        cleanup();
+                        if (err) { reject(err); } else { resolve(lines.join('\n')); }
+                    }
+                    if ((type != null) && (type !== 4)) { reject(new Error('Only agent console requests are supported.')); return; }
+                    if ((bridge == null) || (typeof p15consoleSend != 'function')) { reject(new Error('UMH console bridge is unavailable.')); return; }
+                    if ((node == null) || (node === 'server')) { reject(new Error('Device console is not active.')); return; }
+                    if ((node.conn & 1) == 0) { reject(new Error('Agent is offline.')); return; }
+                    if (input == null) { reject(new Error('Console input is unavailable.')); return; }
+                    stop = bridge.subscribe(function (rxNode, data, source) {
+                        var parsed = null;
+                        var rxNodeId = (rxNode && rxNode._id) ? String(rxNode._id) : null;
+                        if (done || source === 'MQTT' || (typeof data != 'string')) return;
+                        if ((rxNode !== node) && (!nodeId || !rxNodeId || (rxNodeId !== nodeId))) return;
+                        lines.push(data);
+                        if (parser) { parsed = parser(lines.join('\n'), requestId); }
+                        if (parsed && (parsed.isTerminal === true)) { finish(null); return; }
+                    });
+                    hardTimer = setTimeout(function () { finish(new Error('Timed out waiting for UMH response.')); }, timeoutMs);
+                    try {
+                        if (outputSel) outputSel.value = 1;
+                        setupConsole();
+                        input.value = dispatchCmd;
+                        p15consoleSend();
+                    } catch (ex2) {
+                        finish(ex2);
+                    }
+                });
+            };
+            p15umhRequestQueue = p15umhRequestQueue.then(run, run);
+            return p15umhRequestQueue;
+        }
+
+        function p15umhRenderPanel() {
+            var container = Q('p15umhpanel');
+            if (!container || !window.MeshCentralUmhControlUi) return;
+            if (container.getAttribute('data-umh-built') == '1') return;
+            window.MeshCentralUmhControlUi.renderConsolePanel(container, {
+                request: p15umhRequest,
+                onCommand: function (cmd) {
+                    if (consoleNode == null) return;
+                    if ((consoleNode.conn & 1) == 0) { p15umhValidationError('Agent is offline.'); return; }
+                    Q('p15outputselect').value = 1;
+                    setupConsole();
+                    Q('p15consoleText').value = cmd;
+                    p15consoleSend();
+                }
+            });
+            container.setAttribute('data-umh-built', '1');
+        }
+
+        function p15umhSetEnabled(active) {
+            var container = Q('p15umhpanel');
+            if (container) {
+                container.style.pointerEvents = active ? '' : 'none';
+                container.style.opacity = active ? '1' : '0.55';
+            }
+        }
         function setupConsole() {
             // Setup the console
-            var samenode = (consoleNode == currentNode);
+            var samenode = p15umhSameNode(consoleNode, currentNode);
             consoleNode = currentNode;
 
             var mesh = meshes[consoleNode.meshid];
@@ -6861,6 +6985,8 @@
                 QH('p15statetext', onlineText);
                 QE('p15uploadCore', ((consoleNode.conn & 1) != 0));
                 QV('p15outputselecttd', ((consoleNode.conn & 16) != 0) || ((currentNode.pmt == 1) && ((features2 & 2) != 0)));
+                QV('p15umhrow', true);
+                p15umhRenderPanel();
                 QV('p15outputselect2', ((consoleNode.conn & 16) != 0)); // MQTT channel
                 QV('p15outputselect3', ((currentNode.pmt == 1) && ((features2 & 2) != 0))); // Push Notification channel
 
@@ -6873,11 +6999,14 @@
                 if (((consoleNode.conn & 16) != 0) && (c == 2)) { active = true; } // MQTT
                 if (((currentNode.pmt == 1) && ((features2 & 2) != 0)) && (c == 3)) { active = true; } // Push
                 QE('p15consoleText', active);
+                p15umhSetEnabled(((consoleNode.conn & 1) != 0));
             } else {
                 QH('p15statetext', "Access Denied");
                 QE('p15consoleText', false);
                 QE('p15uploadCore', false);
                 QV('p15outputselecttd', false);
+                QV('p15umhrow', false);
+                p15umhSetEnabled(false);
             }
             QV('devListToolbarViewIcons3', ((consoleNode.conn & 1) != 0));
         }
@@ -6939,7 +7068,7 @@
                 // Agent console data
                 if (source == 'MQTT') { data = '<div style=color:red>' + "MQTT" + '&gt; ' + EscapeHtml(data) + '<br/></div>'; } else { data = '<div>' + EscapeHtml(data) + '</div>' }
                 if (node.consoleText == null) { node.consoleText = data; } else { node.consoleText += data; }
-                if (consoleNode == node) {
+                if (p15umhSameNode(consoleNode, node)) {
                     Q('p15agentConsoleText').innerHTML += data;
                     Q('p15agentConsoleText').scrollTop = Q('p15agentConsoleText').scrollHeight;
                 }
