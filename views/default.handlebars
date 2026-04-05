@@ -51,7 +51,6 @@
     <script keeplink=1 type="text/javascript" src="scripts/ol3-contextmenu{{{min}}}.js"></script>
     <script keeplink=1 type="text/javascript" src="scripts/purify{{{min}}}.js"></script>
     <script keeplink=1 type="text/javascript" src="scripts/marked{{{min}}}.js"></script>
-    <script type="text/javascript" src="scripts/custom.js"></script>
     {{{customJSTags}}}
     <title>{{{title}}}</title>
 </head>
@@ -330,7 +329,7 @@
                             <input type=button id=SelectAllButton onclick="selectallButtonFunction();" value="Select All" />&nbsp;
                             <input type=button id=GroupActionButton disabled="disabled" value="Group Action" onclick=groupActionFunction() />&nbsp;
                             <input type=button id=ScrollToTopButton onclick="onDevicesScroll(true);" style="display:none;margin-right:4px" value="Scroll To Top" />
-                            <input id=SearchInput type=input autocomplete=off placeholder=Filter onchange=onDeviceSearchChanged(event) onclick=onDeviceSearchChanged(event) onkeyup=onDeviceSearchChanged(event) onfocus=onSearchFocus(1) onblur=onSearchFocus(0) title="Filter: user:xxx or u:xxx ip:xxx group:xxx or g:xxx tag:xxx or t: xxx atag:xxx or a:xxx os:xxx amt:xxx desc:xxx wsc:ok wsc:noav wsc:noupdate wsc:nofirewall wsc:any connectivity:xxx c:xxx"/>&nbsp;
+                            <input id=SearchInput type=input autocomplete=off placeholder=Filter onchange=onDeviceSearchChanged(event) onclick=onDeviceSearchChanged(event) onkeyup=onDeviceSearchChanged(event) onfocus=onSearchFocus(1) onblur=onSearchFocus(0) title="Filter devices by name or prefix: user: (u:) ip: group: (g:) tag: (t:) atag: (a:) os: amt: desc: wsc:ok/noav/noupdate/nofirewall/any connectivity: (c:) - Prefix with ! to negate, e.g. !tag:abc"/>&nbsp;
                             <span id=SearchInputClearButton style="display:none;position:relative"><img src="images/x16.png" type="button" onclick="clearDeviceSearch()" style="position:absolute;cursor:pointer;left:-18px;top:-8px" srcset="images/x32.png 2x"/></span>
                             <select id=DevFilterSelect onchange=onOnlineCheckBox(event) title="Device Filter">
                                 <option value=0>All</option>
@@ -350,12 +349,14 @@
                         <td id=kvmListToolbar class=style14 style="display:none">
                             <img style="cursor:pointer;margin-top:4px;display:none" title="Collapse All" id="CollapseAllButton2" src="images/icon-collapse.png" width=9 height=11 onclick="cmexpandaction(2)" />
                             <img style="cursor:pointer;margin-top:4px;display:none" title="Expand All" id="ExpandAllButton2" src="images/icon-expand.png" width=9 height=11 onclick="cmexpandaction(1)" />
-                            <input type="button" onclick="connectAllKvmFunction()" value="Connect All" />&nbsp;
-                            <input type="button" onclick="disconnectAllKvmFunction()" value="Disconnect All" />&nbsp;
+                            <span id=KvmDesktopButtons>
+                                <input type="button" onclick="connectAllKvmFunction()" value="Connect All" />&nbsp;
+                                <input type="button" onclick="disconnectAllKvmFunction()" value="Disconnect All" />&nbsp;
+                                <label><input type="checkbox" id="autoConnectDesktopCheckbox" onclick="autoConnectDesktops(event)" title="Automatic connect" />Auto&nbsp;</label>
+                            </span>
                             <input type="button" onclick="onDevicesScroll(true);" value="Scroll To Top" />&nbsp;
-                            <label><input type="checkbox" id="autoConnectDesktopCheckbox" onclick="autoConnectDesktops(event)" title="Automatic connect" />Auto&nbsp;</label>
                             <input type="button" onclick="showMultiDesktopSettings()" value="Settings" />&nbsp;
-                            <input id=KvmSearchInput type=search placeholder=Filter onchange=onDeviceSearchChanged(event) onclick=onDeviceSearchChanged(event) onkeyup=onDeviceSearchChanged(event) autocomplete=off onfocus=onSearchFocus(1) onblur=onSearchFocus(0) />&nbsp;
+                            <input id=KvmSearchInput type=search placeholder=Filter onchange=onDeviceSearchChanged(event) onclick=onDeviceSearchChanged(event) onkeyup=onDeviceSearchChanged(event) autocomplete=off onfocus=onSearchFocus(1) onblur=onSearchFocus(0) title="Filter devices by name or prefix: user: (u:) ip: group: (g:) tag: (t:) atag: (a:) os: amt: desc: wsc:ok/noav/noupdate/nofirewall/any connectivity: (c:) - Prefix with ! to negate, e.g. !tag:abc" />&nbsp;
                             <span id=KvmSearchInputClearButton style="display:none;position:relative"><img src="images/x16.png" type="button" onclick="clearDeviceSearch()" style="position:absolute;cursor:pointer;left:-18px;top:-8px" srcset="images/x32.png 2x" /></span>
                         </td>
                         <td id=devMapToolbar class=style14 style="display:none">
@@ -384,6 +385,7 @@
                                     <option>Tags</option>
                                     <option>Group-Tags</option>
                                     <option>Last Seen</option>
+                                    <option>Last Boot Up Time</option>
                                 </select>
                                 &nbsp;
                             </div>
@@ -986,11 +988,6 @@
                                     </td>
                                     <td style="width:1%"><input id="id_p15consoleClear" type="button" class="bottombutton" value="Clear" onclick="p15consoleClear()" /></td>
                                 </tr>
-                                <tr id="p15umhrow">
-                                    <td colspan=4 style="padding-top:4px">
-                                        <div id="p15umhpanel" style="width:100%"></div>
-                                    </td>
-                                </tr>
                             </table>
                         </td>
                     </tr>
@@ -1564,6 +1561,7 @@
         var debugLevel = parseInt('{{{debuglevel}}}');
         var features = parseInt('{{{features}}}');
         var features2 = parseInt('{{{features2}}}');
+        var features3 = parseInt('{{{features3}}}');
         var sessionTime = parseInt('{{{sessiontime}}}');
         var webRelayPort = parseInt('{{{webRelayPort}}}');
         var webRelayDns = '{{{webRelayDns}}}';
@@ -1618,6 +1616,7 @@
         var deskKeyboardShortcuts = [];
         var deskKeyboardStrings = [];
         var deskLastClipboardSent = null;
+        var deskLastClipboardReceived = null;
         var requestedLastConnects = false;
         var devicePagingState = null;
 
@@ -1747,6 +1746,9 @@
 
             // Show the modern ui switcher
             QV('textnewui', ((features2 & 0x40000000) == 0) ? false : true);
+
+            // Show Connect All and Disconnect All
+            QV('KvmDesktopButtons', ((features3 & 0x00000001) == 0) ? true : false);
 
             // Connect to the mesh server
             meshserver = MeshServerCreateControl(domainUrl);
@@ -2780,8 +2782,13 @@
                             } else if ((message.type === 'getclip') && (currentNode != null) && (currentNode._id == message.nodeid)) {
                                 if ((message.tag == 1) && (xxdialogTag === 'clipboard')) {
                                     Q('d2clipText').value = message.data; // Put remote clipboard data into dialog box
-                                } else if (message.tag === 2) {
-                                    if (navigator.clipboard != null) { navigator.clipboard.writeText(message.data).then(function() { }).catch(function(err) { console.log(err); }) } // Put remote clipboard data into our clipboard
+                                } else if ((message.tag === 2) || (message.tag === 3)) {
+                                    // tag 2 = manual clipboard-in button, tag 3 = auto-clipboard poll
+                                    if ((navigator.clipboard != null) && (message.data != deskLastClipboardReceived) && document.hasFocus()) {
+                                        deskLastClipboardReceived = message.data;
+                                        deskLastClipboardSent = message.data; // prevent echo back to remote
+                                        navigator.clipboard.writeText(message.data).then(function() { }).catch(function(err) { });
+                                    }
                                 }
                             } else if ((message.type === 'setclip') && (xxdialogTag === 'clipboard') && (currentNode != null) && (currentNode._id == message.nodeid)) {
                                 // Display success/fail on the clipboard dialog box.
@@ -3615,11 +3622,13 @@
                                 }
                                 if (message.event.node.av != null) { node.av = message.event.node.av; }
                                 if (message.event.node.wsc != null) { node.wsc = message.event.node.wsc; }
+                                if (message.event.node.defender != null) { node.defender = message.event.node.defender; }
                                 if (message.event.node.volumes != null) { node.volumes = message.event.node.volumes; }
                                 node.namel = node.name.toLowerCase();
                                 if (node.rname) { node.rnamel = node.rname.toLowerCase(); } else { node.rnamel = node.namel; }
                                 if (message.event.node.icon) { node.icon = message.event.node.icon; }
                                 if (message.event.node.lastbootuptime != null) { node.lastbootuptime = message.event.node.lastbootuptime; }
+                                if (message.event.node.idletime != null) { node.idletime = message.event.node.idletime; }
 
                                 // Check if this device has changed device group
                                 if (message.event.node.meshid != node.meshid) {
@@ -3894,6 +3903,22 @@
                             //console.log('Unknown message.event.action', message.event.action);
                             break;
                     }
+                    break;
+                }
+                case 'pluginPermissions': {
+                    handlePluginPermissions(message);
+                    break;
+                }
+                case 'pluginPermissionsSet': {
+                    if (message.success) {
+                        // Already handled in save function
+                    } else {
+                        alert("Error saving permissions: " + message.error);
+                    }
+                    break;
+                }
+                case 'pluginPermissionList': {
+                    handlePluginPermissionList(message);
                     break;
                 }
                 case 'createInviteLink': { // Agent installation invitation link
@@ -4200,6 +4225,7 @@
             x += '<label><input id=d2c12 type=checkbox' + ((deviceViewSettings.devsCols.indexOf('windowsupdate') >= 0)?' checked':'') + '>' + "Windows Update" + '</label><br />';
             x += '<label><input id=d2c13 type=checkbox' + ((deviceViewSettings.devsCols.indexOf('windowsfirewall') >= 0)?' checked':'') + '>' + "Windows Firewall" + '</label><br />';
             x += '<label><input id=d2c14 type=checkbox' + ((deviceViewSettings.devsCols.indexOf('lastbootuptime') >= 0)?' checked':'') + '>' + "Last Boot Up Time" + '</label><br />';
+            x += '<label><input id=d2c16 type=checkbox' + ((deviceViewSettings.devsCols.indexOf('idletime') >= 0)?' checked':'') + '>' + "Idle Time" + '</label><br />';
             x += '<label><input id=d2c1 type=checkbox' + ((deviceViewSettings.devsCols.indexOf('links') >= 0)?' checked':'') + '>' + "MeshCentral Router Links" + '</label><br />';
             x += '<label><input id=d2c2 type=checkbox' + ((deviceViewSettings.devsCols.indexOf('user') >= 0)?' checked':'') + '>' + "Logged in users" + '</label><br />';
             x += '<label><input id=d2c3 type=checkbox' + ((deviceViewSettings.devsCols.indexOf('ip') >= 0)?' checked':'') + '>' + "Agent IP address" + '</label><br />';
@@ -4227,6 +4253,7 @@
             if (Q('d2c13').checked) { cols.push('windowsfirewall'); }
             if (Q('d2c14').checked) { cols.push('lastbootuptime'); }
             if (Q('d2c15').checked) { cols.push('amthost'); }
+            if (Q('d2c16').checked) { cols.push('idletime'); }
             if (Q('d2c17').checked) { cols.push('amtstate'); }
             deviceViewSettings.devsCols = cols;
             putstore('_deviceViewSettings', JSON.stringify(deviceViewSettings));
@@ -4444,6 +4471,16 @@
                     }
                     nodes.sort(lastConnectSort);
                 }
+                else if (sort == 6) {
+                    // Last Boot Up Time
+                    if (!(deviceViewSettings && deviceViewSettings.devsCols && deviceViewSettings.devsCols.indexOf('lastbootuptime') >= 0)) {
+                        // Force initialize the view settings
+                        if (deviceViewSettings == null) { deviceViewSettings = {}; }
+                        if (!Array.isArray(deviceViewSettings.devsCols)) { deviceViewSettings.devsCols = ['user','ip','conn', 'lastbootuptime']; }
+                        else { deviceViewSettings.devsCols.push('lastbootuptime'); }
+                    }
+                    nodes.sort(lastBootUpTimeSort);
+                }
 
                 // Compute the width of the device view.
                 var totalDeviceViewWidth = Q('column_l').clientWidth - 60;
@@ -4514,7 +4551,7 @@
                             c = 0;
                             if ((view == 1) || (view == 3) || (view == 5)) { r += '<div id=DevxCol' + deviceHeaderId + ((collapsed === true)?' style=display:none':'') + '>'; } // Open collapse div
                         }
-                    } else if (sort == 2 || sort == 5) {
+                    } else if (sort == 2 || sort == 5 || sort == 6) {
                         // Device header
                         if (current == null) { current = '1'; }
                     }
@@ -4669,6 +4706,7 @@
                         if (deviceViewSettings.devsCols.indexOf('windowsupdate') >= 0) { colums += '<th style=color:gray;width:120px>' + "Windows Update"; }
                         if (deviceViewSettings.devsCols.indexOf('windowsfirewall') >= 0) { colums += '<th style=color:gray;width:120px>' + "Windows Firewall"; }
                         if (deviceViewSettings.devsCols.indexOf('lastbootuptime') >= 0) { colums += '<th style=color:gray;width:120px>' + "Last Boot Up Time"; }
+                        if (deviceViewSettings.devsCols.indexOf('idletime') >= 0) { colums += '<th style=color:gray;width:100px title="' + "Updated every 5 Minutes" + '">' + "Idle Time"; }
                         if (deviceViewSettings.devsCols.indexOf('links') >= 0) { colums += '<th style=color:gray;width:120px>' + "Links"; }
                         if (deviceViewSettings.devsCols.indexOf('user') >= 0) { colums += '<th style=color:gray;width:120px>' + "User"; }
                         if (deviceViewSettings.devsCols.indexOf('ip') >= 0) { colums += '<th style=color:gray;width:120px>' + "Address"; }
@@ -4986,6 +5024,9 @@
                 if (deviceViewSettings.devsCols.indexOf('lastbootuptime') >= 0) { // Last Boot Up Time
                     r += '<td style=text-align:center;font-size:x-small>' + ((node.lastbootuptime != null) ? printDateTime(new Date(node.lastbootuptime)) : "");
                 }
+                if (deviceViewSettings.devsCols.indexOf('idletime') >= 0) { // Idle Time
+                    r += '<td style=text-align:center;font-size:x-small>' + ((node.idletime != null && node.idletime != -1) ? printTimer(node.idletime) : "");
+                }
                 if (deviceViewSettings.devsCols.indexOf('links') >= 0) { r += '<td style=text-align:center;font-size:x-small>' + getShortRouterLinks(node); } // Links
                 if (deviceViewSettings.devsCols.indexOf('user') >= 0) { r += '<td style=text-align:center>' + getUserShortStr(node); } // User
                 if (deviceViewSettings.devsCols.indexOf('ip') >= 0) { var ip = ''; if (node.mtype == 3) { ip = node.host; } else if (node.ip) { ip = node.ip; } r += '<td style=text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis title="' + EscapeHtml(ip) + '">' + EscapeHtml(ip); } // IP address
@@ -5216,7 +5257,8 @@
             if (node.users.length > 1) { return '<span title="' + EscapeHtml(node.users.join(', ')) + '">' + nobreak(format("{0} users", node.users.length)) + '</span>'; }
             var u = node.users[0], su = u, i = u.indexOf('\\');
             if (i > 0) { su = u.substring(i + 1); }
-            su = EscapeHtml(su);
+            var upn = node.upnusers && node.upnusers[0];
+			su = EscapeHtml((features3 & 0x00000002) && upn != null ? upn : su);
             if (su.length > 15) { su = su.substring(0, 14) + '&#8230;'; }
             if (node.lusers && node.lusers.length > 0) {
                 return addKeyLinkConditional(su, EscapeHtml(u) + ' (' + "Locked" + ')', (node.lusers && node.lusers.indexOf(u) >= 0));
@@ -5471,7 +5513,7 @@
         // Intel AMT ACM activation using setup.bin
         function showAmtAcmSetup() {
             if (xxdialogMode) return false;
-            var x = '<table><tr><td><img src=images/usbkey70.png height=70 width=31 style=margin-left:4px;margin-right:8px><td><div>' + "Activate Intel&reg; AMT in Admin Control Mode (ACM) using a FAT formated USB key. Place setup.bin on it and boot one or more computers with this key." + '</div><div style=margin-top:6px>' + "Start by entering the old and new MBEx password. " + '</div></table>';
+            var x = '<table><tr><td><img src=images/usbkey70.png height=70 width=31 style=margin-left:4px;margin-right:8px><td><div>' + "Activate Intel&reg; AMT in Admin Control Mode (ACM) using a FAT formatted USB key. Place setup.bin on it and boot one or more computers with this key." + '</div><div style=margin-top:6px>' + "Start by entering the old and new MEBx password. " + '</div></table>';
             x += addHtmlValue("Old Password", '<input id=dp1password0 type=password style=width:230px autocomplete=off maxlength=32 onchange=validateAmtAcmSetupEx() onkeyup=validateAmtAcmSetupEx() />');
             x += addHtmlValue("New Password*", '<input id=dp1password1 type=password style=width:230px autocomplete=off maxlength=32 onchange=validateAmtAcmSetupEx() onkeyup=validateAmtAcmSetupEx() />');
             x += addHtmlValue("New Password*", '<input id=dp1password2 type=password style=width:230px autocomplete=off maxlength=32 onchange=validateAmtAcmSetupEx() onkeyup=validateAmtAcmSetupEx() />');
@@ -5647,7 +5689,7 @@
             var opts = '<select id=aginsSelect onchange=addAgentToMeshClick() style=width:236px><option value=0>' + "Windows" + '</option><option value=1>' + "Linux / BSD" + '</option><option value=5>' + "Linux / BSD / macOS Binary Installer" + '</option><option value=2>' + "Apple macOS" + '</option>';
             if ((features & 2) == 0) { opts += '<option value=6>' + "Mobile device" + '</option>'; } // Don't display mobile setup in LAN mode.
             opts += '<option value=7>' + "MeshCentral Assistant" + '</option>';
-            opts += '<option value=3>' + "Windows (UnInstall)" + '</option><option value=4>' + "Linux / BSD (UnInstall)" + '</option><option value=8>' + "Apple macOS (UnInstall)" + '</option></select>';
+            opts += '<option value=3>' + "Windows (Uninstall)" + '</option><option value=4>' + "Linux / BSD (Uninstall)" + '</option><option value=8>' + "Apple macOS (Uninstall)" + '</option></select>';
             x += addHtmlValue("Operating System", opts);
 
             var servername = serverinfo.name;
@@ -5675,7 +5717,7 @@
             meshfilename = meshfilename.split('\\').join('').split('/').join('').split(':').join('').split('*').join('').split('?').join('').split('"').join('').split('<').join('').split('>').join('').split('|').join('').split(' ').join('').split('\'').join('');
 
             // Windows agent install
-            x += '<div id=agins_windows>' + format("To add a new computer to device group \"{0}\", download the mesh agent and install it the computer to manage. This agent has server and device group information embedded within it.", EscapeHtml(mesh.name)) + '<br /><br />';
+            x += '<div id=agins_windows>' + format("To add a new computer to the device group of \"{0}\", download the mesh agent and install it onto the designated computer to manage. This agent has server and device group information embedded within it.", EscapeHtml(mesh.name)) + '<br /><br />';
             x += addHtmlValue("Mesh Agent", '<a id=aginsw32lnk name="meshagents?id=3&meshid=' + meshid.split('/')[2] + '&installflags=0' + (urlargs.key?('&key=' + urlargs.key):'') + '" title="' + "x86 32bit version of the MeshAgent" + '">' + "Windows x86-32 (.exe)" + '</a> <img src=images/link4.png height=10 width=10 title="' + "Copy Windows x86 32bit agent URL to clipboard" + '" style=cursor:pointer onclick=copyAgentUrl("meshagents?id=3&meshid=' + meshid.split('/')[2] + '&installflags=",1)>');
             x += addHtmlValue("Mesh Agent", '<a id=aginsw64lnk name="meshagents?id=4&meshid=' + meshid.split('/')[2] + '&installflags=0' + (urlargs.key?('&key=' + urlargs.key):'') + '" title="' + "x86 64bit version of the MeshAgent" + '">' + "Windows x86-64 (.exe)" + '</a> <img src=images/link4.png height=10 width=10 title="' + "Copy Windows x86 64bit agent URL to clipboard" + '" style=cursor:pointer onclick=copyAgentUrl("meshagents?id=4&meshid=' + meshid.split('/')[2] + '&installflags=",1)>');
             x += addHtmlValue("Mesh Agent", '<a id=aginswa64lnk name="meshagents?id=43&meshid=' + meshid.split('/')[2] + '&installflags=0' + (urlargs.key?('&key=' + urlargs.key):'') + '" title="' + "ARM 64bit version of the MeshAgent" + '">' + "Windows ARM-64 (.exe)" + '</a> <img src=images/link4.png height=10 width=10 title="' + "Copy Windows ARM 64bit agent URL to clipboard" + '" style=cursor:pointer onclick=copyAgentUrl("meshagents?id=43&meshid=' + meshid.split('/')[2] + '&installflags=",1)>');
@@ -5683,12 +5725,12 @@
             x += '</div>';
 
             // Linux agent install
-            x += '<div id=agins_linux style=display:none>' + format("To add a computer to \"{0}\" run the following command. Root credentials will be needed.", EscapeHtml(mesh.name)) + '<br />';
+            x += '<div id=agins_linux style=display:none>' + format("To add a new computer to the device group of \"{0}\", run the following command. Root credentials will be needed.", EscapeHtml(mesh.name)) + '<br />';
             x += '<textarea id=agins_linux_area rows=2 cols=20 readonly=readonly style=border-radius:4px;padding:6px;margin-top:4px;margin-bottom:4px;background-color:#FFF9D3;border:0;width:100%;resize:none;height:160px;overflow:auto;font-size:12px></textarea>';
-            x += '<div style=font-size:x-small;float:right>' + "* For BSD, run \"pkg install wget sudo bash\" first." + '</div><a style=text-decoration:none title="' + "Copy to clipboard" + '" onclick=copyAgentIdValue("agins_linux_area")><img src=images/link4.png height=10 width=10 style=cursor:pointer> ' + "Copy" + '</a></div>';
+            x += '<div style=font-size:x-small;float:right>' + "* For BSD, run \"pkg install wget sudo bash\" beforehand." + '</div><a style=text-decoration:none title="' + "Copy to clipboard" + '" onclick=copyAgentIdValue("agins_linux_area")><img src=images/link4.png height=10 width=10 style=cursor:pointer> ' + "Copy" + '</a></div>';
 
             // macOS agent install
-            x += '<div id=agins_osx style=display:none>' + format("To add a new computer to device group \"{0}\", download the mesh agent and install it the computer to manage. This agent installer has server and device group information embedded within it.", EscapeHtml(mesh.name)) + '<br /><br />';
+            x += '<div id=agins_osx style=display:none>' + format("To add a new computer to the device group of \"{0}\", download the mesh agent and install it onto the designated computer to manage. This agent installer has server and device group information embedded within it.", EscapeHtml(mesh.name)) + '<br /><br />';
             x += addHtmlValue("Mesh Agent", '<a onclick=downloadFile("meshosxagent?id=16&meshid=' + meshid.split('/')[2] + (urlargs.key?('&key=' + urlargs.key):'') + '") title="' + "x86-64bit version of macOS Mesh Agent" + '">' + "macOS x86-64bit" + '</a> <img src=images/link4.png height=10 width=10 title="' + "Copy macOS agent URL to clipboard" + '" style=cursor:pointer onclick=copyAgentUrl("meshosxagent?id=16&meshid=' + meshid.split('/')[2] + '",0)>');
             x += addHtmlValue("Mesh Agent", '<a onclick=downloadFile("meshosxagent?id=29&meshid=' + meshid.split('/')[2] + (urlargs.key?('&key=' + urlargs.key):'') + '") title="' + "ARM 64bit version of macOS Mesh Agent" + '">' + "macOS ARM (64bit)" + '</a> <img src=images/link4.png height=10 width=10 title="' + "Copy macOS agent URL to clipboard" + '" style=cursor:pointer onclick=copyAgentUrl("meshosxagent?id=29&meshid=' + meshid.split('/')[2] + '",0)>');
             x += addHtmlValue("Mesh Agent", '<a onclick=downloadFile("meshosxagent?id=10005&meshid=' + meshid.split('/')[2] + (urlargs.key?('&key=' + urlargs.key):'') + '") title="' + "Universal version of macOS Mesh Agent" + '">' + "macOS (Universal)" + '</a> <img src=images/link4.png height=10 width=10 title="' + "Copy macOS agent URL to clipboard" + '" style=cursor:pointer onclick=copyAgentUrl("meshosxagent?id=10005&meshid=' + meshid.split('/')[2] + '",0)>');
@@ -5714,7 +5756,7 @@
             x += '</td><td><img src=images/assistant-100.png width=74 height=100 srcset="images/assistant-200.png 2x"></td></tr></table></div>';
 
             // Windows agent uninstall
-            x += '<div id=agins_windows_un style=display:none>' + "To remove a mesh agent, download the file below, run it and click \"uninstall\"." + '<br /><br />';
+            x += '<div id=agins_windows_un style=display:none>' + "To remove a mesh agent, download the file below, run it and click \"Uninstall\"." + '<br /><br />';
             x += addHtmlValue("Mesh Agent", '<a id=aginsw32unlnk name="meshagents?id=3&meshid=' + meshid.split('/')[2] + '&installflags=0' + (urlargs.key?('&key=' + urlargs.key):'') + '" title="' + "x86 32bit version of the MeshAgent" + '">' + "Windows x86-32 (.exe)" + '</a> <img src=images/link4.png height=10 width=10 title="' + "Copy Windows x86 32bit agent URL to clipboard" + '" style=cursor:pointer onclick=copyAgentUrl("meshagents?id=3&meshid=' + meshid.split('/')[2] + '&installflags=",1)>');
             x += addHtmlValue("Mesh Agent", '<a id=aginsw64unlnk name="meshagents?id=4&meshid=' + meshid.split('/')[2] + '&installflags=0' + (urlargs.key?('&key=' + urlargs.key):'') + '" title="' + "x86 64bit version of the MeshAgent" + '">' + "Windows x86-64 (.exe)" + '</a> <img src=images/link4.png height=10 width=10 title="' + "Copy Windows x86 64bit agent URL to clipboard" + '" style=cursor:pointer onclick=copyAgentUrl("meshagents?id=4&meshid=' + meshid.split('/')[2] + '&installflags=",1)>');
             x += addHtmlValue("Mesh Agent", '<a id=aginswa64unlnk name="meshagents?id=43&meshid=' + meshid.split('/')[2] + '&installflags=0' + (urlargs.key?('&key=' + urlargs.key):'') + '" title="' + "ARM 64bit version of the MeshAgent" + '">' + "Windows ARM-64 (.exe)" + '</a> <img src=images/link4.png height=10 width=10 title="' + "Copy Windows ARM 64bit agent URL to clipboard" + '" style=cursor:pointer onclick=copyAgentUrl("meshagents?id=43&meshid=' + meshid.split('/')[2] + '&installflags=",1)>');
@@ -5726,12 +5768,12 @@
             x += '<a style=text-decoration:none title="' + "Copy to clipboard" + '" onclick=copyAgentIdValue("agins_linux_area_un")><img src=images/link4.png height=10 width=10 style=cursor:pointer> Copy</a></div>';
 
             // macOS agent uninstall
-            x += '<div id=agins_osx_un style=display:none>' + "To remove a mesh agent, download the file below, right click on the \".mpkg\" file and click \"Show Package Contents\", then right click on \"Uninstall.command\" and click \"Open\"" + '<br /><br />';
+            x += '<div id=agins_osx_un style=display:none>' + "To remove a mesh agent, download the file below, right-click the \".mpkg\" file and select \"Show Package Contents\", then right-click \"Uninstall.command\" and select \"Open\"." + '<br /><br />';
             x += addHtmlValue("Mesh Agent", '<a onclick=downloadFile("meshosxagent?id=10005&meshid=' + meshid.split('/')[2] + (urlargs.key?('&key=' + urlargs.key):'') + '") title="' + "Universal version of macOS Mesh Agent" + '">macOS Agent (Universal)</a> <img src=images/link4.png height=10 width=10 title="' + "Copy macOS agent URL to clipboard" + '" style=cursor:pointer onclick=copyAgentUrl("meshosxagent?id=10005&meshid=' + meshid.split('/')[2] + '",0)>');
             x += '</div>';
 
             // Linux binary installer
-            x += '<div id=agins_linux_inst style=display:none>' + "This is a executable on OS's with graphical user interfaces" + '<br /><br />' + "Apple macOS executables will need to be removed from quarantine to run 'xattr -r -d com.apple.quarantine meshagent'" + '<br /><br />' + "You need to 'chmod +x meshagent' and run this file" + '<br /><br />';
+            x += '<div id=agins_linux_inst style=display:none>' + "This is an executable on OSs with graphical user interfaces." + '<br /><br />' + "Apple macOS executables will need to be removed from quarantine by running 'xattr -r -d com.apple.quarantine meshagent'." + '<br /><br />' + "You need to run 'chmod +x meshagent', and then run this file." + '<br /><br />';
             x += addHtmlValue("Mesh Agent", '<a id=aginsbinlnk name="meshagents?id=' + meshid.split('/')[2] + '&installflags=0' + (urlargs.key?('&key=' + urlargs.key):'') + '">' + "meshagent" + '</a> <img src=images/link4.png height=10 width=10 title="' + "Copy agent URL to clipboard" + '" style=cursor:pointer onclick=copyAgentUrl("meshagents?id=' + meshid.split('/')[2] + '&installflags=",1)>');
             x += addHtmlValue("Command", '<input id=aginsbincmd type=text style="width:216px" readonly value=\'wget -O meshagent' + (((features & 0x80000000) != 0)?' --no-check-certificate':'') + ' \"https://' + servername + portStr + domainUrl + 'meshagents?id=' + meshid.split('/')[2].split('$').join('%24').split('@').join('%40') + '\' /> <img src=images/link4.png height=10 width=10 title="' + "Copy agent URL to clipboard" + '" style=cursor:pointer onclick=copyAgentIdValue("aginsbincmd")>');
             x += '</div>';
@@ -6333,6 +6375,7 @@
         function deviceSort(a, b) { return sortCollator.compare(a.namel, b.namel); }
         function deviceHostSort(a, b) { return sortCollator.compare(a.rnamel, b.rnamel); }
         function lastConnectSort(a, b) { var aa = a.lastconnect, bb = b.lastconnect; if (aa == null) { aa = 99999999999999; } if (bb == null) { bb = 99999999999999; } if (a.conn > 0) { aa = 99999999999998; } if (b.conn > 0) { bb = 99999999999998; } if (aa == bb) { return nameSort(a, b); } return (aa - bb); }
+        function lastBootUpTimeSort(a, b) { var aa = a.lastbootuptime, bb = b.lastbootuptime; if (aa == null) { aa = 99999999999999; } if (bb == null) { bb = 99999999999999; } if (aa == bb) { return nameSort(a, b); } return (aa - bb); }
 
         function onSearchFocus(x) { searchFocus = x; }
         function clearDeviceSearch() { Q('KvmSearchInput').value = Q('SearchInput').value = ''; onOnlineCheckBox(); mainUpdate(1); }
@@ -6356,6 +6399,8 @@
         }
 
         function getDevicesThatMatchFilter(x) {
+            var negate = x.startsWith('!');
+            if (negate) x = x.substring(1);
             var r = [];
             var userSearch = null, ipSearch = null, groupSearch = null, tagSearch = null, agentTagSearch = null, wscSearch = null, osSearch = null, amtSearch = null, descSearch = null, connectivitySearch = null;
             if (x.startsWith('user:'.toLowerCase())) { userSearch = x.substring('user:'.length); }
@@ -6401,7 +6446,7 @@
             } else if (userSearch != null) {
                 // User search
                 for (var d in nodes) {
-                    if (nodes[d].users && nodes[d].users.length > 0) { for (var i in nodes[d].users) { if (nodes[d].users[i].toLowerCase().indexOf(userSearch) >= 0) { r.push(d); } } }
+                    if (nodes[d].users && nodes[d].users.length > 0) { for (var i in nodes[d].users) { if (nodes[d].users[i].toLowerCase().indexOf(userSearch) >= 0 || (nodes[d].upnusers && nodes[d].upnusers[i] && nodes[d].upnusers[i].toLowerCase().indexOf(userSearch) >= 0)) { r.push(d); } } }
                 }
             } else if (osSearch != null) {
                 // OS search
@@ -6457,7 +6502,7 @@
             } else {
                 // Device name search
                 try {
-                    var rs = x.split(/\s+/).join('|'), rx = new RegExp(rs); // In some cases (like +), this can throw an exception.
+                    var rs = x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), rx = new RegExp(rs); // In some cases (like +), this can throw an exception.
                       for (var d in nodes) {
                         if (features2 & 0x00008000) { // Both server and client names must match
                             if(features2 & 0x10000000){
@@ -6484,6 +6529,7 @@
                 } catch (ex) { for (var d in nodes) { r.push(d); } }
             }
 
+            if (negate) { var allIds = []; for (var d in nodes) { allIds.push(d); } return allIds.filter(function(d) { return r.indexOf(d) < 0; }); }
             return r;
         }
 
@@ -6994,7 +7040,15 @@
                 });
 
                 // Create a tile and use OSM source
-                xxmap.mapLayer = new ol.layer.Tile({ source: new ol.source.OSM() });
+                xxmap.mapLayer = new ol.layer.Tile({
+                    source: new ol.source.OSM({
+                        tileLoadFunction: function(imageTile, src) {
+                            var img = imageTile.getImage();
+                            img.referrerPolicy = 'origin';
+                            img.src = src;
+                        }
+                    })
+                });
 
                 xxmap.mapView = new ol.View({ // Set the initial view
                     center: ol.proj.transform([0, 0], 'EPSG:4326', 'EPSG:3857'),
@@ -7733,15 +7787,21 @@
                 // Active Users
                 if (node.users && node.users.length > 0) {
                     var u = node.users.map(function(user, index) {
-                        var label = (node.upnusers && node.upnusers[index] != null) ? EscapeHtml(node.upnusers[index]) : null;
-                        var locked = (node.lusers && node.lusers.indexOf(user) >= 0);
-                        var escapedUser = EscapeHtml(user);
-                        if (locked) { return addKeyLinkConditional(escapedUser, (label ? (label + ' - ' + "Locked") : "Locked"), true); }
-                        else if (label) { return '<span style=cursor:default title=\''+ label + '\'>' + escapedUser + '</span>'; }
-                        else { return escapedUser; }
+                        var upn = node.upnusers && node.upnusers[index];
+                        var label = (features3 & 0x00000002)
+                            ? ((node.users && node.users[index] != null) ? EscapeHtml(node.users[index]) : null)
+                            : (upn != null ? EscapeHtml(upn) : null);
+                        var escapedUser = EscapeHtml((features3 & 0x00000002) && upn != null ? upn : user);
+                        var locked = node.lusers && node.lusers.indexOf(user) >= 0;
+                        if (locked) { return addKeyLinkConditional(escapedUser, label ? label + ' - ' + "Locked" : "Locked", true); }
+                        if (label) { return '<span style=cursor:default title=\'' + label + '\'>' + escapedUser + '</span>'; }
+                        return escapedUser;
                     }).join(', ');
                     x += addDeviceAttribute((node.users.length > 1 ? "Active Users" : "Active User"), u);
                 }
+                
+                // Windows Idle Time
+                if (node.idletime && node.idletime != -1) { x += addDeviceAttribute("Idle Time", printTimer(node.idletime)); }
 
                 // Display device user consent
                 if ((node.agent != null) && (node.agent.id != 14) && (node.mtype != 3)) {
@@ -9715,7 +9775,15 @@
                 case 3:
                     if (desktop && (desktop.serverIsRecording == true)) { QV('deskRecordIcon', true); }
                     desktop.startTime = new Date();
-                    deskLastClipboardSent = null;
+                    deskLastClipboardReceived = null;
+                    // Pre-seed sent value with current local clipboard so we don't blast it to the remote on connect
+                    if ((navigator.clipboard != null) && (navigator.clipboard.readText != null) && (Mstsc.browser() != 'firefox')) {
+                        try {
+                            navigator.clipboard.readText().then(function(text) { deskLastClipboardSent = text; }).catch(function(err) { deskLastClipboardSent = null; });
+                        } catch (ex) { deskLastClipboardSent = null; }
+                    } else {
+                        deskLastClipboardSent = null;
+                    }
                     if (updateSessionTimer == null) { updateSessionTimer = setInterval(updateSessionTime, 1000); }
                     break;
                 default:
@@ -9737,17 +9805,28 @@
                 QH('DeskTimer', zeroPad(Math.floor(seconds / 3600), 2) + ':' + zeroPad((Math.floor(seconds / 60) % 60), 2) + ':' + zeroPad((seconds % 60), 2));
                 QH('DeskLatency', latencyStr);
                 // Auto-clipboard
-                if ((((desktop.contype != 4) && (desktopsettings.autoclipboard === true)) || ((desktop.contype == 4) && (desktopsettings.rdpautoclipboard === true))) && (navigator.clipboard != null) && (navigator.clipboard.readText != null)) {
-                    if (Mstsc.browser() == 'firefox') return; // this is needed because firefox pops up a PASTE option every second which is annoying
-                    try {
-                        navigator.clipboard.readText().then(function(text) {
-                            if (desktop == null) return;
-                            if ((text != null) && (deskLastClipboardSent != text)) {
-                                if (desktop.m.setClipboard) { desktop.m.setClipboard(text); } else { console.log('s3'); meshserver.send({ action: 'msg', type: 'setclip', nodeid: currentNode._id, data: text }); }
-                                deskLastClipboardSent = text;
-                            }
-                        }).catch(function(err) { });
-                    } catch (ex) { console.log(ex); }
+                var autoClipEnabled = ((desktop.contype != 4) && (desktopsettings.autoclipboard === true)) || ((desktop.contype == 4) && (desktopsettings.rdpautoclipboard === true));
+                if (autoClipEnabled && (navigator.clipboard != null)) {
+                    // Local -> Remote: skip on Firefox as readText triggers an annoying paste popup every second
+                    if ((Mstsc.browser() != 'firefox') && (navigator.clipboard.readText != null)) {
+                        try {
+                            navigator.clipboard.readText().then(function(text) {
+                                if (desktop == null) return;
+                                if ((text != null) && (deskLastClipboardSent != text)) {
+                                    if (desktop.m.setClipboard) {
+                                        desktop.m.setClipboard(text);
+                                    } else {
+                                        meshserver.send({ action: 'msg', type: 'setclip', nodeid: currentNode._id, data: text });
+                                    }
+                                    deskLastClipboardSent = text;
+                                }
+                            }).catch(function(err) { });
+                        } catch (ex) { console.log(ex); }
+                    }
+                    // Remote -> Local: poll remote clipboard every second (non-RDP only; RDP uses onClipboardChanged callback)
+                    if ((desktop.contype != 4) && (currentNode != null) && (navigator.clipboard.writeText != null)) {
+                        meshserver.send({ action: 'msg', type: 'getclip', nodeid: currentNode._id, tag: 3 });
+                    }
                 }
             } else {
                 QH('DeskTimer', '');
@@ -11006,7 +11085,7 @@
                         if (xterm != null) { xterm.dispose(); }
                         xtermfit = new FitAddon.FitAddon();
                         xtermimage = new ImageAddon.ImageAddon();
-                        xterm = new Terminal();
+                        xterm = new Terminal({ allowProposedApi: true });
                         if (xtermfit) { xterm.loadAddon(xtermfit); }
                         xterm.loadAddon(xtermimage);
                         xterm.open(Q('termarea3xdiv')); // termarea3x
@@ -11771,11 +11850,37 @@
                 if (gdownloadFile.tag == 'viewer') {
                     // View the file in the dialog box
                     setDialogMode(4, EscapeHtml(gdownloadFile.file), 3, p13editSaveBack, null, gdownloadFile.file);
+                    d4ToggleLineBreak(true);
                     QV('d4EncodingButton', true);
                     QV('d4LineBreakButton', true);
                     QS('dialog').width = 'auto';
                     QS('dialog').bottom = '80px';
                     QS('dialog').top = QS('dialog').left = QS('dialog').right = '100px';
+                    const crlf = (gdownloadFile.data.match(/\r\n/g) || []).length;
+                    const cr = (gdownloadFile.data.match(/\r(?!\n)/g) || []).length;
+                    const lf = (gdownloadFile.data.match(/(?<!\r)\n/g) || []).length;
+                    let type;
+                    if (crlf > 0 && cr === 0 && lf === 0) {
+                        type = 'crlf';
+                    } else if (lf > 0 && crlf === 0 && cr === 0) {
+                        type = 'lf';
+                    } else if (cr > 0 && crlf === 0 && lf === 0) {
+                        type = 'cr';
+                    } else {
+                        // Mixed - pick dominant
+                        const dominant = Math.max(crlf, cr, lf);
+                        if (dominant === crlf) type = 'crlf';
+                        else if (dominant === lf) type = 'lf';
+                        else type = 'cr';
+                    }
+                    if (type === 'crlf') {
+                        d4EditLineBreakVal = 0; // Windows (CR LF)
+                    } else if (type === 'lf') {
+                        d4EditLineBreakVal = 1; // Linux (LF)
+                    } else {
+                        d4EditLineBreakVal = 2; // Mac (CR)
+                    }
+                    d4ToggleLineBreak(true);
                     if (d4EditEncodingVal == 1) {
                         Q('d4editorarea').value = decode_utf8(gdownloadFile.data); // UTF8 Encoding
                     } else {
@@ -12217,6 +12322,7 @@
             if (node.osdesc) { x += addDetailItem("Version", EscapeHtml(node.osdesc), s); }
             if (hardware.windows && hardware.windows.osinfo) {
                 var m = hardware.windows.osinfo;
+				if(m.BuildRevision){ x += addDetailItem("Build Number", EscapeHtml(m.BuildRevision), s); }
                 if (m.OSArchitecture) {
                     if (m.OSArchitecture.startsWith('32')) { x += addDetailItem("Architecture", "32-bit", s); }
                     else if (m.OSArchitecture.startsWith('64')) { x += addDetailItem("Architecture", "64-bit", s); }
@@ -12745,124 +12851,6 @@
 
         var consoleNode;
         var consoleServerText = '';
-        var p15umhConsoleBridge = null;
-        var p15umhRequestQueue = Promise.resolve();
-        function p15umhSameNode(a, b) {
-            if (a == null || b == null || a === 'server' || b === 'server') return (a === b);
-            if (a === b) return true;
-            if ((a._id != null) && (b._id != null)) return (a._id === b._id);
-            return false;
-        }
-        function p15umhValidationError(msg) {
-            var panel = Q('p15umhpanel');
-            if ((window.MeshCentralUmhControlUi != null) && (typeof window.MeshCentralUmhControlUi.showPanelNotice == 'function') && panel) {
-                if (window.MeshCentralUmhControlUi.showPanelNotice(panel, msg, '#B00020')) return;
-            }
-        }
-
-        function p15umhEnsureConsoleBridge() {
-            if (p15umhConsoleBridge != null) return p15umhConsoleBridge;
-            if (typeof p15consoleReceive != 'function') return null;
-            var original = p15consoleReceive;
-            var listeners = [];
-            p15consoleReceive = function () {
-                var r = original.apply(this, arguments);
-                var copy = listeners.slice(0), i;
-                for (i = 0; i < copy.length; i++) { try { copy[i].apply(null, arguments); } catch (ex) { } }
-                return r;
-            };
-            p15umhConsoleBridge = {
-                subscribe: function (fn) {
-                    listeners.push(fn);
-                    return function () {
-                        var i = listeners.indexOf(fn);
-                        if (i >= 0) listeners.splice(i, 1);
-                    };
-                }
-            };
-            return p15umhConsoleBridge;
-        }
-
-        function p15umhRequest(cmd, type) {
-            var run = function () {
-                return new Promise(function (resolve, reject) {
-                    var bridge = p15umhEnsureConsoleBridge();
-                    var parser = ((window.MeshCentralUmhControlUi != null) && (typeof window.MeshCentralUmhControlUi.parseConsolePayload == 'function')) ? window.MeshCentralUmhControlUi.parseConsolePayload : null;
-                    var requestId = ((window.MeshCentralUmhControlUi != null) && (typeof window.MeshCentralUmhControlUi.buildRequestId == 'function') && /^\s*umhctl\b/i.test(String(cmd || ''))) ? window.MeshCentralUmhControlUi.buildRequestId() : null;
-                    var dispatchCmd = (requestId != null && window.MeshCentralUmhControlUi != null && typeof window.MeshCentralUmhControlUi.appendRequestId == 'function') ? window.MeshCentralUmhControlUi.appendRequestId(cmd, requestId) : cmd;
-                    var node = consoleNode;
-                    var nodeId = (node && node._id) ? String(node._id) : null;
-                    var input = Q('p15consoleText');
-                    var outputSel = Q('p15outputselect');
-                    var lines = [];
-                    var done = false;
-                    var hardTimer = null;
-                    var stop = null;
-                    var timeoutMs = (/^\s*umhctl\s+uiSnapshot\b/i).test(String(dispatchCmd || '')) ? 95000 : 60000;
-                    function cleanup() {
-                        if (stop) { try { stop(); } catch (ex) { } stop = null; }
-                        if (hardTimer) { clearTimeout(hardTimer); hardTimer = null; }
-                    }
-                    function finish(err) {
-                        if (done) return;
-                        done = true;
-                        cleanup();
-                        if (err) { reject(err); } else { resolve(lines.join('\n')); }
-                    }
-                    if ((type != null) && (type !== 4)) { reject(new Error('Only agent console requests are supported.')); return; }
-                    if ((bridge == null) || (typeof p15consoleSend != 'function')) { reject(new Error('UMH console bridge is unavailable.')); return; }
-                    if ((node == null) || (node === 'server')) { reject(new Error('Device console is not active.')); return; }
-                    if ((node.conn & 1) == 0) { reject(new Error('Agent is offline.')); return; }
-                    if (input == null) { reject(new Error('Console input is unavailable.')); return; }
-                    stop = bridge.subscribe(function (rxNode, data, source) {
-                        var parsed = null;
-                        var rxNodeId = (rxNode && rxNode._id) ? String(rxNode._id) : null;
-                        if (done || source === 'MQTT' || (typeof data != 'string')) return;
-                        if ((rxNode !== node) && (!nodeId || !rxNodeId || (rxNodeId !== nodeId))) return;
-                        lines.push(data);
-                        if (parser) { parsed = parser(lines.join('\n'), requestId); }
-                        if (parsed && (parsed.isTerminal === true)) { finish(null); return; }
-                    });
-                    hardTimer = setTimeout(function () { finish(new Error('Timed out waiting for UMH response.')); }, timeoutMs);
-                    try {
-                        if (outputSel) outputSel.value = 1;
-                        setupConsole();
-                        input.value = dispatchCmd;
-                        p15consoleSend();
-                    } catch (ex2) {
-                        finish(ex2);
-                    }
-                });
-            };
-            p15umhRequestQueue = p15umhRequestQueue.then(run, run);
-            return p15umhRequestQueue;
-        }
-
-        function p15umhRenderPanel() {
-            var container = Q('p15umhpanel');
-            if (!container || !window.MeshCentralUmhControlUi) return;
-            if (container.getAttribute('data-umh-built') == '1') return;
-            window.MeshCentralUmhControlUi.renderConsolePanel(container, {
-                request: p15umhRequest,
-                onCommand: function (cmd) {
-                    if ((consoleNode == null) || (consoleNode == 'server')) return;
-                    if ((consoleNode.conn & 1) == 0) { p15umhValidationError('Agent is offline.'); return; }
-                    Q('p15outputselect').value = 1;
-                    setupConsole();
-                    Q('p15consoleText').value = cmd;
-                    p15consoleSend();
-                }
-            });
-            container.setAttribute('data-umh-built', '1');
-        }
-
-        function p15umhSetEnabled(active) {
-            var container = Q('p15umhpanel');
-            if (container) {
-                container.style.pointerEvents = active ? '' : 'none';
-                container.style.opacity = active ? '1' : '0.55';
-            }
-        }
         function setupConsole() {
             if (xxcurrentView == 115) {
                 // Setup server console
@@ -12874,8 +12862,6 @@
                 QH('p15statetext', '');
                 QH('p15coreName', '');
                 QV('p15outputselecttd', false);
-                QV('p15umhrow', false);
-                p15umhSetEnabled(false);
 
                 if (samenode == false) {
                     QH('p15agentConsoleText', consoleServerText);
@@ -12883,7 +12869,7 @@
                 }
             } else {
                 // Setup the console
-                var samenode = p15umhSameNode(consoleNode, currentNode);
+                var samenode = (consoleNode == currentNode);
                 consoleNode = currentNode;
 
                 var mesh = meshes[consoleNode.meshid];
@@ -12900,8 +12886,6 @@
                     QH('p15statetext', onlineText);
                     QE('p15uploadCore', ((consoleNode.conn & 1) != 0));
                     QV('p15outputselecttd', ((consoleNode.conn & 16) != 0) || ((currentNode.pmt == 1) && ((features2 & 4) != 0)));
-                    QV('p15umhrow', true);
-                    p15umhRenderPanel();
                     QV('p15outputselect2', ((consoleNode.conn & 16) != 0)); // MQTT channel
                     QV('p15outputselect3', ((currentNode.pmt == 1) && ((features2 & 4) != 0))); // Two-way Push Notification channel
 
@@ -12914,14 +12898,11 @@
                     if (((consoleNode.conn & 16) != 0) && (c == 2)) { active = true; } // MQTT
                     if (((currentNode.pmt == 1) && ((features2 & 4) != 0)) && (c == 3)) { active = true; } // Push
                     QE('p15consoleText', active);
-                    p15umhSetEnabled(((consoleNode.conn & 1) != 0));
                 } else {
                     QH('p15statetext', "Access Denied");
                     QE('p15consoleText', false);
                     QE('p15uploadCore', false);
                     QV('p15outputselecttd', false);
-                    QV('p15umhrow', false);
-                    p15umhSetEnabled(false);
                 }
                 QV('devListToolbarViewIcons3', ((consoleNode.conn & 1) != 0));
             }
@@ -12994,7 +12975,7 @@
                 // Agent console data
                 if (source == 'MQTT') { data = '<div style=color:red>' + "MQTT" + '&gt; ' + EscapeHtml(data) + '<br/></div>'; } else { data = '<div>' + EscapeHtml(data) + '</div>' }
                 if (node.consoleText == null) { node.consoleText = data; } else { node.consoleText += data; }
-                if (p15umhSameNode(consoleNode, node)) {
+                if (consoleNode == node) {
                     Q('p15agentConsoleText').innerHTML += data;
                     Q('p15agentConsoleText').scrollTop = Q('p15agentConsoleText').scrollHeight;
                 }
@@ -18302,14 +18283,14 @@
                         }
                     }
 
-                    r += '<div title="' + format("Occured at {0}", printDateTime(d)) + '" id="notifyx' + n.id + '" class=notification style="cursor:pointer;border-top:1px solid ' + ((r == '') ? 'transparent' : 'orange') + '">';
+                    r += '<div title="' + format("Occured at {0}", printDateTime(d)) + '" id="notifyx' + n.id + '" class=notification style="cursor:pointer;' + (notifications.length > 1 ? 'border-top:1px solid orange' : '') + '">';
                     if (icon) { r += '<div class=j' + icon + ' onclick="notificationSelected(' + n.id + ')" style=margin:5px;float:left></div>'; }
                     r += '<div onclick="notificationDelete(' + n.id + ')" class=unselectable title="' + "Clear this notification" + '" style=margin:5px;float:right;color:orange><b>X</b></div><div onclick="notificationSelected(' + n.id + ')" style=margin:5px>' + t + EscapeHtml(n.text) + '</div><div style=margin-left:5px;margin-bottom:5px;color:gray;font-size:10px>' + printDateTime(d) + '</div></div>';
                 }
             }
             var deleteall = '';
-            if (notifications.length > 1) { deleteall = '<div id="notifyRemoveAll" onclick="deleteAllNotifications()" style="cursor:pointer;border-top:1px solid orange;margin:5px;color:orange;text-align:right;padding-right:3px">' + "Clear all" + '</div>'; }
-            QH('notifiyBox', '<div class=customScroll style="max-height:170px;overflow-y:auto;margin:5px">' + r + deleteall + '</div>' );
+            if (notifications.length > 1) { deleteall = '<div id="notifyRemoveAll" onclick="deleteAllNotifications()" style="cursor:pointer;margin:5px;color:orange;text-align:right;padding-right:3px">' + "Clear all" + '</div>'; }
+            QH('notifiyBox', '<div class=customScroll style="max-height:170px;overflow-y:auto;margin:5px">' + deleteall + r + '</div>' );
         }
 
         // A notification was selected
@@ -19037,7 +19018,7 @@
             if ((xxcurrentView == 11) && (desktop != null) && (desktop.m.recordedData != null)) { deskRecordSession(); }
 
             // If we are trying to go to "My Users" and we are not a user manager, move to recordings
-            if (((x == 4) && (userinfo != null) && ((userinfo.siteadmin & 2) == 0)) || ((features & 4) != 0)) { x = 52; }
+            if (((x == 4) && (userinfo != null) && ((userinfo.siteadmin & 2) == 0)) || ((features & 4) != 0) && (userinfo != null) && (userinfo._id.split('/')[2][0] != '~')) { x = 52; }
 
             // Stop the list graph if active
             if (xxcurrentView == 17) deviceDetailsStatsClear();
@@ -19188,7 +19169,7 @@
                     if (installedPluginList['version_info'] == null) installedPluginList['version_info'] = [];
                     installedPluginList['version_info'][versInfo.id] = versInfo;
                 }
-                var tr = Q('p42tbl').querySelectorAll('.p42tblRow');
+                var tr = document.getElementById('p42tbl').querySelectorAll('.p42tblRow');
                 if (tr.length) {
                     for (var i in Object.values(tr)) {
                         tr[i].parentNode.removeChild(tr[i]);
@@ -19212,12 +19193,14 @@
                     1: {
                         'disable': 'Disable',
                         'upgrade': 'Upgrade',
+                        'reload': 'Reload',
+                        'permissions': 'Permissions',
                         //  'downgrade': 'Downgrade' // disabling until plugins have prior versions available for better testing
                     }
                 };
                 var vers_not_compat = ' [ <span onclick="return setDialogMode(2, \'Compatibility Issue\', 1, null, \'This plugin version is not compatible with your MeshCentral installation, please upgrade MeshCentral first.\');" title="' + "Version incompatible, please upgrade your MeshCentral installation first" + '" style="cursor: pointer; color:red;"> ! </span> ]';
 
-                var tbl = Q('p42tbl');
+                var tbl = document.getElementById('p42tbl');
                 installedPluginList.forEach(function(p){
                     var cant_action = [];
                     if (p.hasAdminPanel == true && p.status) {
@@ -19264,7 +19247,7 @@
                     tr.setAttribute('id', 'pluginRow-' + p._id);
                 });
             } else {
-                var tr = Q('p42tbl').querySelectorAll('.p42tblRow');
+                var tr = document.getElementById('p42tbl').querySelectorAll('.p42tblRow');
                 for (var i in Object.values(tr)) { tr[i].parentNode.removeChild(tr[i]); }
             }
             if (versInfo == null) refreshPluginLatest();
@@ -19278,12 +19261,12 @@
         function distributeCore() {
             if (pluginHandler == null) return;
             meshserver.send({ action: 'distributeCore', nodes: nodes }); // All nodes the user has access to
-            QV('pluginRestartNotice', false);
+            document.getElementById('pluginRestartNotice').style.display = 'none';
         }
 
         function pluginActionEx() {
             if (pluginHandler == null) return;
-            var act = Q('lastPluginAct').value, id = Q('lastPluginId').value, pVersUrl = Q('lastPluginVersion').value;
+            var act = document.getElementById('lastPluginAct').value, id = document.getElementById('lastPluginId').value, pVersUrl = document.getElementById('lastPluginVersion').value;
 
             switch(act) {
                 case 'upgrade':
@@ -19291,7 +19274,7 @@
                     meshserver.send({ 'action': 'installplugin', 'id': id, 'version_only': false });
                     break;
                 case 'downgrade':
-                    Q('lastPluginVersion').querySelectorAll('option').forEach(function(opt) {
+                    document.getElementById('lastPluginVersion').querySelectorAll('option').forEach(function(opt) {
                         if (opt.value == pVersUrl) pVers = opt.text;
                     });
                     meshserver.send({ 'action': 'installplugin', 'id': id, 'version_only': { 'name': pVers, 'url': pVersUrl }});
@@ -19302,12 +19285,31 @@
                 case 'disable':
                     meshserver.send({ 'action': 'disableplugin', 'id': id });
                     break;
+                case 'reload':
+                    var plugin = null;
+                    for (var i in installedPluginList) { if (installedPluginList[i]._id == id) { plugin = installedPluginList[i]; } }
+                    if (plugin) {
+                        meshserver.send({ 'action': 'reloadplugin', 'plugin': plugin.shortName });
+                    }
+                    break;
             }
-            QV('pluginRestartNotice', true);
+            document.getElementById('pluginRestartNotice').style.display = 'none';
         }
 
         function pluginAction(elem, id) {
             if (pluginHandler == null) return;
+            
+            // Special handling for permissions - opens matrix dialog
+            if (elem.value == 'permissions') {
+                var plugin = null;
+                for (var i in installedPluginList) { if (installedPluginList[i]._id == id) { plugin = installedPluginList[i]; } }
+                if (plugin) {
+                    openPluginPermissionsDialog(plugin);
+                }
+                elem.value = '';
+                return;
+            }
+            
             if (elem.value == 'downgrade') {
                 meshserver.send({ 'action': 'getpluginversions', 'id': id });
             } else {
@@ -19318,9 +19320,635 @@
             elem.value = '';
         }
 
+        // Plugin Permissions Dialog - Custom Modal (same as default3)
+        var currentPluginPermissions = null;
+        var permissionListData = null;
+        var permissionState = {}; // JavaScript state for permissions
+        
+        function openPluginPermissionsDialog(plugin) {
+            meshserver.send({ action: 'getpluginpermissions', plugin: plugin.shortName });
+            meshserver.send({ action: 'getpluginpermissionlist' });
+            
+            currentPluginPermissions = { plugin: plugin.shortName, name: plugin.name };
+            
+            // Create custom modal
+            var modalHtml = '<div id="pluginPermModal" style="display:none; position:fixed; z-index:10000; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.5);">';
+            modalHtml += '<div style="margin:30px auto; max-width:900px; background:#fff; border-radius:8px;">';
+            modalHtml += '<div style="padding:15px 20px; border-bottom:1px solid #dee2e6; display:flex; justify-content:space-between; align-items:center;">';
+            modalHtml += '<h5 style="margin:0;">' + "Plugin Permissions" + ' - ' + EscapeHtml(plugin.name) + '</h5>';
+            modalHtml += '<button type="button" onclick="closePluginPermModal()" style="background:none; border:none; font-size:20px; cursor:pointer;">&times;</button>';
+            modalHtml += '</div>';
+            modalHtml += '<div id="pluginPermBody" style="padding:20px; max-height:70vh; overflow-y:auto;">';
+            modalHtml += '<div style="text-align:center; padding:40px;">' + "Loading permissions" + '...</div>';
+            modalHtml += '</div>';
+            modalHtml += '<div style="padding:15px 20px; border-top:1px solid #dee2e6; display:flex; justify-content:space-between; align-items:center;">';
+            modalHtml += '<div style="font-size:12px; color:#666;">' + "Permissions cascade: Node → Mesh → Global → Default" + '</div>';
+            modalHtml += '<div>';
+            modalHtml += '<button type="button" style="margin-right:10px; padding:5px 15px;" onclick="closePluginPermModal()">' + "Cancel" + '</button>';
+            modalHtml += '<button type="button" style="padding:5px 15px; background:#007bff; color:#fff; border:none; border-radius:4px;" onclick="savePluginPermissionsEx()">' + "Save" + '</button>';
+            modalHtml += '</div>';
+            modalHtml += '</div></div></div>';
+            
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            document.getElementById('pluginPermModal').style.display = 'block';
+            document.body.style.overflow = 'hidden';
+        }
+        
+        function closePluginPermModal() {
+            var modal = document.getElementById('pluginPermModal');
+            if (modal) {
+                modal.remove();
+                document.body.style.overflow = '';
+            }
+        }
+        
+        function handlePluginPermissions(msg) {
+            if (msg.action != 'pluginPermissions') return;
+            currentPluginPermissions.data = msg.permissions;
+            renderPermissionMatrixEx();
+        }
+        
+        function handlePluginPermissionList(msg) {
+            if (msg.action != 'pluginPermissionList') return;
+            permissionListData = msg.list;
+            renderPermissionMatrixEx();
+        }
+        
+        function renderPermissionMatrixEx() {
+            if (!currentPluginPermissions || !currentPluginPermissions.data || !permissionListData) return;
+            
+            var data = currentPluginPermissions.data;
+            var definitions = data.definitions || {};
+            var permissions = data.permissions || {};
+            var defaults = data.defaults || {};
+            
+            // Check if plugin has no permissions defined
+            if (Object.keys(definitions).length === 0) {
+                var body = document.getElementById('pluginPermBody');
+                if (body) {
+                    body.innerHTML = '<div style="padding:20px;">' + "This plugin has not defined any permissions." + '</div>';
+                }
+                return;
+            }
+            
+            // Initialize permissionState from loaded data
+            permissionState = {};
+            window.meshOverridesState = {};
+            window.nodeOverridesState = {};
+            for (var permKey in definitions) {
+                var permData = permissions[permKey] || { 
+                    allowed: { users: [], userGroups: [], meshes: [], nodes: [] }, 
+                    denied: { users: [], userGroups: [], meshes: [], nodes: [] },
+                    meshOverrides: {}, 
+                    nodeOverrides: {} 
+                };
+                permissionState[permKey] = {
+                    allowed: { users: [], userGroups: [], meshes: [], nodes: [] },
+                    denied: { users: [], userGroups: [], meshes: [], nodes: [] }
+                };
+                // Copy allowed
+                if (permData.allowed) {
+                    if (permData.allowed.users) permissionState[permKey].allowed.users = permData.allowed.users.slice();
+                    if (permData.allowed.userGroups) permissionState[permKey].allowed.userGroups = permData.allowed.userGroups.slice();
+                    if (permData.allowed.meshes) permissionState[permKey].allowed.meshes = permData.allowed.meshes.slice();
+                    if (permData.allowed.nodes) permissionState[permKey].allowed.nodes = permData.allowed.nodes.slice();
+                }
+                // Copy denied
+                if (permData.denied) {
+                    if (permData.denied.users) permissionState[permKey].denied.users = permData.denied.users.slice();
+                    if (permData.denied.userGroups) permissionState[permKey].denied.userGroups = permData.denied.userGroups.slice();
+                    if (permData.denied.meshes) permissionState[permKey].denied.meshes = permData.denied.meshes.slice();
+                    if (permData.denied.nodes) permissionState[permKey].denied.nodes = permData.denied.nodes.slice();
+                }
+                
+                // Initialize meshOverridesState and nodeOverridesState from loaded data
+                window.meshOverridesState[permKey] = permData.meshOverrides || {};
+                window.nodeOverridesState[permKey] = permData.nodeOverrides || {};
+            }
+            
+            var x = '';
+            
+            // Custom tab buttons
+            x += '<div style="margin-bottom:15px; border-bottom:1px solid #dee2e6;">';
+            x += '<button class="btn btn-sm active" id="btnTabGlobal" style="margin-right:5px; background:#007bff; color:#fff;" onclick="switchPermTab(\'global\')">' + "Global" + '</button>';
+            x += '<button class="btn btn-sm" id="btnTabMeshes" style="margin-right:5px; background:#6c757d; color:#fff;" onclick="switchPermTab(\'meshes\')">' + "Meshes"+ '</button>';
+            x += '<button class="btn btn-sm" id="btnTabNodes" style="background:#6c757d; color:#fff;" onclick="switchPermTab(\'nodes\')">' + "Nodes" + '</button>';
+            x += '</div>';
+            
+            x += '<div id="panel-global">';
+            x += buildPermissionSection(definitions, permissions, defaults, 'global', null);
+            x += '</div>';
+            
+            x += '<div id="panel-meshes" style="display:none;">';
+            x += buildMeshNodeSection(definitions, permissions, 'mesh');
+            x += '</div>';
+            
+            x += '<div id="panel-nodes" style="display:none;">';
+            x += buildMeshNodeSection(definitions, permissions, 'node');
+            x += '</div>';
+            
+            x += '<input type="hidden" id="permPluginShortName" value="' + currentPluginPermissions.plugin + '" />';
+            
+            document.getElementById('pluginPermBody').innerHTML = x;
+        }
+        
+        function switchPermTab(tab) {
+            document.getElementById('panel-global').style.display = 'none';
+            document.getElementById('panel-meshes').style.display = 'none';
+            document.getElementById('panel-nodes').style.display = 'none';
+            
+            document.getElementById('btnTabGlobal').style.background = '#6c757d';
+            document.getElementById('btnTabMeshes').style.background = '#6c757d';
+            document.getElementById('btnTabNodes').style.background = '#6c757d';
+            
+            document.getElementById('panel-' + tab).style.display = 'block';
+            document.getElementById('btnTab' + tab.charAt(0).toUpperCase() + tab.slice(1)).style.background = '#007bff';
+        }
+        
+        function buildPermissionSection(definitions, permissions, defaults, level, parentId, overrideData) {
+            var x = '';
+            
+            var idx = 0;
+            for (var permKey in definitions) {
+                var def = definitions[permKey];
+                var permData = permissions[permKey] || { 
+                    allowed: { users: [], userGroups: [], meshes: [], nodes: [] }, 
+                    denied: { users: [], userGroups: [], meshes: [], nodes: [] },
+                    meshOverrides: {}, 
+                    nodeOverrides: {} 
+                };
+                var defaultVal = defaults[permKey] || 'inherited';
+                
+                var collapseId = 'permCollapse-' + level + '-' + permKey + (parentId ? '-' + parentId : '');
+                var isFirst = idx === 0;
+                
+                // Determine which data to use: overrideData (for mesh/node) or permissionState (for global)
+                var useData;
+                if (overrideData && overrideData[permKey]) {
+                    useData = overrideData[permKey];
+                } else if (permissionState[permKey]) {
+                    useData = permissionState[permKey];
+                } else {
+                    useData = { allowed: { users: [], userGroups: [], meshes: [], nodes: [] }, denied: { users: [], userGroups: [], meshes: [], nodes: [] } };
+                }
+                
+                x += '<div style="border:1px solid #dee2e6; border-radius:8px; margin-bottom:10px; overflow:hidden;">';
+                x += '<div style="padding:12px 15px; background:#f8f9fa; display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="togglePermCollapse(\'' + collapseId + '\')">';
+                x += '<div><strong>' + EscapeHtml(def.title || permKey) + '</strong><br><small style="color:#666;">' + EscapeHtml(def.desc || '') + '</small></div>';
+                x += '<div><select style="padding:3px;" id="perm_default_' + permKey + '" onclick="event.stopPropagation()">';
+                x += '<option value="allowed"' + (defaultVal === 'allowed' ? ' selected' : '') + '>✓ ' + "Allowed" + '</option>';
+                x += '<option value="denied"' + (defaultVal === 'denied' ? ' selected' : '') + '>✗ ' + "Denied" + '</option>';
+                x += '<option value="inherited"' + (defaultVal === 'inherited' ? ' selected' : '') + '>↩ ' + "Inherited" + '</option>';
+                x += '</select></div>';
+                x += '</div>';
+                x += '<div id="' + collapseId + '" style="padding:15px;' + (isFirst ? '' : 'display:none;') + '">';
+                
+                x += '<div style="display:flex; gap:20px; margin-bottom:15px;">';
+                x += '<div style="flex:1;">';
+                x += '<div style="margin-bottom:5px;"><span style="background:#28a745; color:#fff; padding:2px 8px; border-radius:3px; font-size:12px;">' + "Allowed" + '</span></div>';
+                x += buildAutocompleteSection(permKey, level, 'allowed', parentId, useData ? useData.allowed : { users: [], userGroups: [], meshes: [], nodes: [] });
+                x += '</div>';
+                x += '<div style="flex:1;">';
+                x += '<div style="margin-bottom:5px;"><span style="background:#dc3545; color:#fff; padding:2px 8px; border-radius:3px; font-size:12px;">' + "Denied" + '</span></div>';
+                x += buildAutocompleteSection(permKey, level, 'denied', parentId, useData ? useData.denied : { users: [], userGroups: [], meshes: [], nodes: [] });
+                x += '</div>';
+                x += '</div>';
+                
+                x += '</div></div>';
+                idx++;
+            }
+            
+            return x;
+        }
+        
+        function togglePermCollapse(id) {
+            var el = document.getElementById(id);
+            el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+        
+        function buildAutocompleteSection(permKey, level, accessType, parentId, currentData) {
+            var inputId = 'perm_input_' + level + '_' + accessType + '_' + permKey + (parentId ? '_' + parentId : '');
+            var listId = 'perm_list_' + level + '_' + accessType + '_' + permKey + (parentId ? '_' + parentId : '');
+            var containerId = 'perm_tags_' + level + '_' + accessType + '_' + permKey + (parentId ? '_' + parentId : '');
+            
+            var x = '<div style="position:relative;">';
+            x += '<input type="text" id="' + inputId + '" placeholder="' + "Search" + '..." style="width:100%; padding:5px;" ';
+            x += 'onkeyup="searchPermEntities(this, \'' + permKey + '\', \'' + level + '\', \'' + accessType + '\', \'' + (parentId || '') + '\')" ';
+            x += 'onfocus="showPermDropdown(\'' + listId + '\')">';
+            x += '<div id="' + listId + '" style="position:relative; background:#fff; border:1px solid #ccc; border-top:none; max-height:200px; overflow-y:auto; display:none; cursor:pointer;"></div>';
+            x += '</div>';
+            
+            x += '<div id="' + containerId + '" style="margin-top:5px; display:flex; flex-wrap:wrap; gap:5px;">';
+            
+            var allEntities = [];
+            if (permissionListData.users) allEntities = allEntities.concat(permissionListData.users);
+            if (permissionListData.userGroups) allEntities = allEntities.concat(permissionListData.userGroups);
+            if (permissionListData.meshes) allEntities = allEntities.concat(permissionListData.meshes);
+            if (permissionListData.nodes) allEntities = allEntities.concat(permissionListData.nodes);
+            
+            var selectedIds = currentData.users || [];
+            selectedIds.forEach(function(id) {
+                var entity = allEntities.find(function(e) { return e._id === id; });
+                if (entity) x += buildPermTag(entity, permKey, level, accessType, 'user', parentId);
+            });
+            
+            var selectedGroups = currentData.userGroups || [];
+            selectedGroups.forEach(function(id) {
+                var entity = allEntities.find(function(e) { return e._id === id; });
+                if (entity) x += buildPermTag(entity, permKey, level, accessType, 'userGroup', parentId);
+            });
+            
+            x += '</div>';
+            
+            return x;
+        }
+        
+        function buildPermTag(entity, permKey, level, accessType, entityType, parentId) {
+            var icon = entity._id.startsWith('user/') ? '👤' : (entity._id.startsWith('ugrp/') ? '👥' : (entity._id.startsWith('mesh/') ? '🖥️' : '💻'));
+            var tagId = 'perm_tag_' + entity._id.replace(/[^a-zA-Z0-9]/g, '_') + '_' + permKey + '_' + level + '_' + accessType + (parentId ? '_' + parentId : '');
+            var safeId = entity._id.replace(/'/g, '___');
+            
+            return '<span style="background:#6c757d; color:#fff; padding:3px 8px; border-radius:3px; font-size:12px;" id="' + tagId + '" data-actualid="' + EscapeHtml(entity._id) + '" data-perm="' + permKey + '" data-level="' + level + '" data-access="' + accessType + '" data-type="' + entityType + '" data-parentid="' + (parentId || '') + '">' + icon + ' ' + EscapeHtml(entity.name || entity._id) + ' <span style="cursor:pointer; margin-left:5px;" onclick="removePermTagFromTag(this)">×</span></span>';
+        }
+        
+        function removePermTagFromTag(el) {
+            var span = el.parentElement;
+            removePermTag(span.getAttribute('data-actualid'), span.getAttribute('data-perm'), span.getAttribute('data-level'), span.getAttribute('data-access'), span.getAttribute('data-type'), span.getAttribute('data-parentid') || '');
+        }
+        
+        function searchPermEntities(input, permKey, level, accessType, parentId) {
+            var query = input.value.toLowerCase();
+            var listId = 'perm_list_' + level + '_' + accessType + '_' + permKey + (parentId ? '_' + parentId : '');
+            var list = document.getElementById(listId);
+            if (!list) return;
+            
+            if (query.length < 1) {
+                list.style.display = 'none';
+                return;
+            }
+            
+            // Get currently selected IDs to filter out
+            var selectedIds = [];
+            if (permissionState[permKey] && permissionState[permKey][accessType]) {
+                var state = permissionState[permKey][accessType];
+                if (state.users) selectedIds = selectedIds.concat(state.users);
+                if (state.userGroups) selectedIds = selectedIds.concat(state.userGroups);
+                if (state.meshes) selectedIds = selectedIds.concat(state.meshes);
+                if (state.nodes) selectedIds = selectedIds.concat(state.nodes);
+            }
+            
+            // Also check mesh/node overrides for the current context
+            if (level === 'mesh' && parentId && window.meshOverridesState && window.meshOverridesState[permKey] && window.meshOverridesState[permKey][parentId] && window.meshOverridesState[permKey][parentId][accessType]) {
+                var meshState = window.meshOverridesState[permKey][parentId][accessType];
+                if (meshState.users) selectedIds = selectedIds.concat(meshState.users);
+                if (meshState.userGroups) selectedIds = selectedIds.concat(meshState.userGroups);
+                if (meshState.meshes) selectedIds = selectedIds.concat(meshState.meshes);
+                if (meshState.nodes) selectedIds = selectedIds.concat(meshState.nodes);
+            }
+            if (level === 'node' && parentId && window.nodeOverridesState && window.nodeOverridesState[permKey] && window.nodeOverridesState[permKey][parentId] && window.nodeOverridesState[permKey][parentId][accessType]) {
+                var nodeState = window.nodeOverridesState[permKey][parentId][accessType];
+                if (nodeState.users) selectedIds = selectedIds.concat(nodeState.users);
+                if (nodeState.userGroups) selectedIds = selectedIds.concat(nodeState.userGroups);
+                if (nodeState.meshes) selectedIds = selectedIds.concat(nodeState.meshes);
+                if (nodeState.nodes) selectedIds = selectedIds.concat(nodeState.nodes);
+            }
+            
+            var results = [];
+            var groupedNodes = {};
+            
+            if (permissionListData.users) {
+                permissionListData.users.forEach(function(u) {
+                    if (selectedIds.indexOf(u._id) >= 0) return;
+                    if ((u.name && u.name.toLowerCase().includes(query)) || (u.email && u.email.toLowerCase().includes(query))) {
+                        results.push({ _id: u._id, name: u.name || u.email, type: 'user', icon: '👤' });
+                    }
+                });
+            }
+            
+            if (permissionListData.userGroups) {
+                permissionListData.userGroups.forEach(function(ug) {
+                    if (selectedIds.indexOf(ug._id) >= 0) return;
+                    if (ug.name && ug.name.toLowerCase().includes(query)) {
+                        results.push({ _id: ug._id, name: ug.name, type: 'userGroup', icon: '👥' });
+                    }
+                });
+            }
+            
+            if (level === 'global' && permissionListData.meshes) {
+                permissionListData.meshes.forEach(function(m) {
+                    if (selectedIds.indexOf(m._id) >= 0) return;
+                    if (m.name && m.name.toLowerCase().includes(query)) {
+                        results.push({ _id: m._id, name: m.name, type: 'mesh', icon: '🖥️' });
+                    }
+                });
+            }
+            
+            if (level === 'node' && permissionListData.nodes) {
+                permissionListData.nodes.forEach(function(n) {
+                    if (selectedIds.indexOf(n._id) >= 0) return;
+                    if (n.name && n.name.toLowerCase().includes(query)) {
+                        var meshGroup = n.meshname || 'Ungrouped';
+                        if (!groupedNodes[meshGroup]) groupedNodes[meshGroup] = [];
+                        groupedNodes[meshGroup].push({ _id: n._id, name: n.name, type: 'node', icon: '💻', meshname: meshGroup });
+                    }
+                });
+            }
+            
+            list.innerHTML = '';
+            
+            // Add individual results first
+            results.slice(0, 10).forEach(function(r) {
+                var safeId = r._id.replace(/'/g, '___');
+                list.innerHTML += '<div class="perm-result-item" style="padding:8px 12px; cursor:pointer;" data-id="' + safeId + '" data-actualid="' + EscapeHtml(r._id) + '" data-perm="' + permKey + '" data-level="' + level + '" data-access="' + accessType + '" data-type="' + r.type + '" data-name="' + EscapeHtml(r.name) + '" data-icon="' + r.icon + '" data-parentid="' + (parentId || '') + '" onclick="addPermEntityFromDropdown(this)">' + r.icon + ' ' + EscapeHtml(r.name) + ' <small style="color:#666;">(' + r.type + ')</small></div>';
+            });
+            
+            // Add grouped nodes at the end
+            if (level === 'node') {
+                for (var meshName in groupedNodes) {
+                    list.innerHTML += '<div style="padding:8px 12px; background:#eee; font-weight:bold; font-size:11px;">🖥️ ' + EscapeHtml(meshName) + '</div>';
+                    groupedNodes[meshName].forEach(function(n) {
+                        var safeId = n._id.replace(/'/g, '___');
+                        list.innerHTML += '<div class="perm-result-item" style="padding:8px 12px; cursor:pointer; padding-left:20px;" data-id="' + safeId + '" data-actualid="' + EscapeHtml(n._id) + '" data-perm="' + permKey + '" data-level="' + level + '" data-access="' + accessType + '" data-type="' + n.type + '" data-name="' + EscapeHtml(n.name) + '" data-icon="' + n.icon + '" data-parentid="' + (parentId || '') + '" onclick="addPermEntityFromDropdown(this)">' + n.icon + ' ' + EscapeHtml(n.name) + '</div>';
+                    });
+                }
+            }
+            
+            list.style.display = (results.length > 0 || (level === 'node' && Object.keys(groupedNodes).length > 0)) ? 'block' : 'none';
+        }
+        
+        function addPermEntityFromDropdown(el) {
+            var entityId = el.getAttribute('data-actualid');
+            var permKey = el.getAttribute('data-perm');
+            var level = el.getAttribute('data-level');
+            var accessType = el.getAttribute('data-access');
+            var entityType = el.getAttribute('data-type');
+            var entityName = el.getAttribute('data-name');
+            var entityIcon = el.getAttribute('data-icon');
+            var parentId = el.getAttribute('data-parentid') || '';
+            addPermEntity(entityId, permKey, level, accessType, entityType, parentId, entityName, entityIcon);
+        }
+        
+        function showPermDropdown(listId) {
+            var list = document.getElementById(listId);
+            if (list && list.children.length > 0) {
+                list.style.display = 'block';
+            }
+        }
+        
+        function addPermEntity(entityId, permKey, level, accessType, entityType, parentId, entityName, entityIcon) {
+            var containerId = 'perm_tags_' + level + '_' + accessType + '_' + permKey + (parentId ? '_' + parentId : '');
+            var container = document.getElementById(containerId);
+            var inputId = 'perm_input_' + level + '_' + accessType + '_' + permKey + (parentId ? '_' + parentId : '');
+            var listId = 'perm_list_' + level + '_' + accessType + '_' + permKey + (parentId ? '_' + parentId : '');
+            
+            document.getElementById(inputId).value = '';
+            document.getElementById(listId).style.display = 'none';
+            
+            var existingTags = container.querySelectorAll('span');
+            var tagId = 'perm_tag_' + entityId.replace(/[^a-zA-Z0-9]/g, '_') + '_' + permKey + '_' + level + '_' + accessType + (parentId ? '_' + parentId : '');
+            for (var i = 0; i < existingTags.length; i++) {
+                if (existingTags[i].id && existingTags[i].id == tagId) {
+                    return;
+                }
+            }
+            
+            var tagHtml = '<span style="background:#6c757d; color:#fff; padding:3px 8px; border-radius:3px; font-size:12px;" id="' + tagId + '" data-actualid="' + EscapeHtml(entityId) + '">' + entityIcon + ' ' + EscapeHtml(entityName) + ' <span style="cursor:pointer; margin-left:5px;" onclick="removePermTag(\'' + entityId + '\', \'' + permKey + '\', \'' + level + '\', \'' + accessType + '\', \'' + entityType + '\', \'' + (parentId || '') + '\')">×</span></span>';
+            container.insertAdjacentHTML('beforeend', tagHtml);
+            
+            // Initialize overrides storage
+            if (!window.meshOverridesState) window.meshOverridesState = {};
+            if (!window.nodeOverridesState) window.nodeOverridesState = {};
+            if (!window.meshOverridesState[permKey]) window.meshOverridesState[permKey] = {};
+            if (!window.nodeOverridesState[permKey]) window.nodeOverridesState[permKey] = {};
+            
+            var entityTypeKey = entityType === 'user' ? 'users' : (entityType === 'userGroup' ? 'userGroups' : (entityType === 'mesh' ? 'meshes' : (entityType === 'node' ? 'nodes' : null)));
+            
+            // Skip if entityTypeKey is invalid
+            if (entityTypeKey === null) {
+                console.log('Invalid entityType:', entityType);
+                return;
+            }
+            
+            // Update permissionState only for global level
+            if (level === 'global') {
+                if (permissionState[permKey] && permissionState[permKey][accessType] && permissionState[permKey][accessType][entityTypeKey]) {
+                    if (permissionState[permKey][accessType][entityTypeKey].indexOf(entityId) === -1) {
+                        permissionState[permKey][accessType][entityTypeKey].push(entityId);
+                    }
+                }
+            }
+            
+            // Update mesh/node overrides if in context
+            if (level === 'mesh' && parentId) {
+                if (!window.meshOverridesState[permKey][parentId]) {
+                    window.meshOverridesState[permKey][parentId] = { allowed: { users: [], userGroups: [], meshes: [], nodes: [] }, denied: { users: [], userGroups: [], meshes: [], nodes: [] } };
+                }
+                // Ensure accessType object exists
+                if (!window.meshOverridesState[permKey][parentId][accessType]) {
+                    window.meshOverridesState[permKey][parentId][accessType] = { users: [], userGroups: [], meshes: [], nodes: [] };
+                }
+                if (window.meshOverridesState[permKey][parentId][accessType][entityTypeKey] && window.meshOverridesState[permKey][parentId][accessType][entityTypeKey].indexOf(entityId) === -1) {
+                    window.meshOverridesState[permKey][parentId][accessType][entityTypeKey].push(entityId);
+                }
+            }
+            if (level === 'node' && parentId) {
+                if (!window.nodeOverridesState[permKey][parentId]) {
+                    window.nodeOverridesState[permKey][parentId] = { allowed: { users: [], userGroups: [], meshes: [], nodes: [] }, denied: { users: [], userGroups: [], meshes: [], nodes: [] } };
+                }
+                // Ensure accessType object exists
+                if (!window.nodeOverridesState[permKey][parentId][accessType]) {
+                    window.nodeOverridesState[permKey][parentId][accessType] = { users: [], userGroups: [], meshes: [], nodes: [] };
+                }
+                // Ensure entityTypeKey array exists
+                if (!window.nodeOverridesState[permKey][parentId][accessType][entityTypeKey]) {
+                    window.nodeOverridesState[permKey][parentId][accessType][entityTypeKey] = [];
+                }
+                if (window.nodeOverridesState[permKey][parentId][accessType][entityTypeKey] && window.nodeOverridesState[permKey][parentId][accessType][entityTypeKey].indexOf(entityId) === -1) {
+                    window.nodeOverridesState[permKey][parentId][accessType][entityTypeKey].push(entityId);
+                }
+            }
+        }
+        
+        function removePermTag(entityId, permKey, level, accessType, entityType, parentId) {
+            var tagId = 'perm_tag_' + entityId.replace(/[^a-zA-Z0-9]/g, '_') + '_' + permKey + '_' + level + '_' + accessType + (parentId ? '_' + parentId : '');
+            var tag = document.getElementById(tagId);
+            if (tag) tag.remove();
+            
+            // Initialize overrides storage
+            if (!window.meshOverridesState) window.meshOverridesState = {};
+            if (!window.nodeOverridesState) window.nodeOverridesState = {};
+            if (!window.meshOverridesState[permKey]) window.meshOverridesState[permKey] = {};
+            if (!window.nodeOverridesState[permKey]) window.nodeOverridesState[permKey] = {};
+            
+            var entityTypeKey = entityType === 'user' ? 'users' : (entityType === 'userGroup' ? 'userGroups' : (entityType === 'mesh' ? 'meshes' : 'nodes'));
+            
+            // Remove from permissionState only for global level
+            if (level === 'global') {
+                if (permissionState[permKey] && permissionState[permKey][accessType] && permissionState[permKey][accessType][entityTypeKey]) {
+                    var idx = permissionState[permKey][accessType][entityTypeKey].indexOf(entityId);
+                    if (idx > -1) {
+                        permissionState[permKey][accessType][entityTypeKey].splice(idx, 1);
+                    }
+                }
+            }
+            
+            // Remove from mesh overrides if in mesh context
+            if (level === 'mesh' && parentId && window.meshOverridesState[permKey][parentId]) {
+                var override = window.meshOverridesState[permKey][parentId];
+                if (override[accessType] && override[accessType][entityTypeKey]) {
+                    var idx3 = override[accessType][entityTypeKey].indexOf(entityId);
+                    if (idx3 > -1) {
+                        override[accessType][entityTypeKey].splice(idx3, 1);
+                    }
+                }
+            }
+            
+            // Remove from node overrides if in node context
+            if (level === 'node' && parentId && window.nodeOverridesState[permKey][parentId]) {
+                var nodeOverride = window.nodeOverridesState[permKey][parentId];
+                if (nodeOverride[accessType] && nodeOverride[accessType][entityTypeKey]) {
+                    var idx4 = nodeOverride[accessType][entityTypeKey].indexOf(entityId);
+                    if (idx4 > -1) {
+                        nodeOverride[accessType][entityTypeKey].splice(idx4, 1);
+                    }
+                }
+            }
+        }
+        
+        function buildMeshNodeSection(definitions, permissions, type) {
+            var x = '<p style="color:#666;">Select a ' + type + ' to configure permissions:</p>';
+            x += '<select style="width:100%; padding:8px; margin-bottom:15px;" id="perm_' + type + 'Select" onchange="renderMeshNodePerms(\'' + type + '\', this.value)">';
+            x += '<option value="">-- ' + (type === 'mesh' ? "Select Device Group" : "Select Device" ) + ' --</option>';
+            
+            if (type === 'mesh') {
+                var list = permissionListData.meshes;
+                if (list) {
+                    list.forEach(function(item) {
+                        x += '<option value="' + EscapeHtml(item._id) + '">' + EscapeHtml(item.name) + '</option>';
+                    });
+                }
+            } else {
+                // Group nodes by mesh
+                var groupedNodes = {};
+                if (permissionListData.nodes) {
+                    permissionListData.nodes.forEach(function(n) {
+                        var meshGroup = n.meshname || 'Ungrouped';
+                        if (!groupedNodes[meshGroup]) groupedNodes[meshGroup] = [];
+                        groupedNodes[meshGroup].push(n);
+                    });
+                }
+                for (var meshName in groupedNodes) {
+                    x += '<optgroup label="🖥️ ' + EscapeHtml(meshName) + '">';
+                    groupedNodes[meshName].forEach(function(item) {
+                        x += '<option value="' + EscapeHtml(item._id) + '">  ' + EscapeHtml(item.name) + '</option>';
+                    });
+                    x += '</optgroup>';
+                }
+            }
+            x += '</select>';
+            
+            x += '<div id="meshNodePermContent_' + type + '"></div>';
+            
+            return x;
+        }
+        
+        function renderMeshNodePerms(type, selectedId) {
+            var content = document.getElementById('meshNodePermContent_' + type);
+            if (!selectedId) {
+                content.innerHTML = '';
+                return;
+            }
+            
+            var data = currentPluginPermissions.data;
+            var definitions = data.definitions || {};
+            var permissions = data.permissions || {};
+            var defaults = data.defaults || {};
+            
+            var overrideKey = type === 'mesh' ? 'meshOverrides' : 'nodeOverrides';
+            
+            // Extract override data for the selected mesh/node
+            var overrideData = {};
+            for (var pk in definitions) {
+                if (permissions[pk] && permissions[pk][overrideKey] && permissions[pk][overrideKey][selectedId]) {
+                    overrideData[pk] = permissions[pk][overrideKey][selectedId];
+                } else {
+                    overrideData[pk] = {
+                        allowed: { users: [], userGroups: [], meshes: [], nodes: [] },
+                        denied: { users: [], userGroups: [], meshes: [], nodes: [] }
+                    };
+                }
+            }
+            
+            var displayName = '';
+            var list = type === 'mesh' ? permissionListData.meshes : permissionListData.nodes;
+            if (list) {
+                var item = list.find(function(i) { return i._id === selectedId; });
+                if (item) displayName = item.name;
+            }
+            
+            // Store current override data for this mesh/node in a temporary location
+            window.currentPermOverride = { type: type, id: selectedId, data: overrideData };
+            
+            var x = '<div style="background:#d1ecf1; padding:10px; border-radius:4px; margin-bottom:15px;"><strong>' + EscapeHtml(displayName) + '</strong> - ' + "Specific permissions" + '</div>';
+            x += buildPermissionSection(definitions, permissions, defaults, type, selectedId, overrideData);
+            
+            content.innerHTML = x;
+        }
+        
+        function savePluginPermissionsEx() {
+            if (!currentPluginPermissions || !permissionListData) return;
+                        
+            var pluginName = document.getElementById('permPluginShortName').value;
+            var definitions = currentPluginPermissions.data.definitions || {};
+            var permissions = {};
+            var defaults = {};
+            
+            // Initialize mesh and node overrides storage if not exists
+            if (!window.meshOverridesState) window.meshOverridesState = {};
+            if (!window.nodeOverridesState) window.nodeOverridesState = {};
+            
+            // Collect defaults from DOM
+            for (var permKey in definitions) {
+                defaults[permKey] = document.getElementById('perm_default_' + permKey).value;
+            }
+            
+            // Use permissionState for permissions (more reliable than DOM scraping)
+            for (var permKey in definitions) {
+                var state = permissionState[permKey] || { allowed: { users: [], userGroups: [], meshes: [], nodes: [] }, denied: { users: [], userGroups: [], meshes: [], nodes: [] } };
+                permissions[permKey] = {
+                    allowed: { users: [], userGroups: [], meshes: [], nodes: [] },
+                    denied: { users: [], userGroups: [], meshes: [], nodes: [] },
+                    meshOverrides: window.meshOverridesState[permKey] || {},
+                    nodeOverrides: window.nodeOverridesState[permKey] || {}
+                };
+                
+                // Copy from permissionState (global)
+                if (state.allowed) {
+                    permissions[permKey].allowed.users = state.allowed.users ? state.allowed.users.slice() : [];
+                    permissions[permKey].allowed.userGroups = state.allowed.userGroups ? state.allowed.userGroups.slice() : [];
+                    permissions[permKey].allowed.meshes = state.allowed.meshes ? state.allowed.meshes.slice() : [];
+                    permissions[permKey].allowed.nodes = state.allowed.nodes ? state.allowed.nodes.slice() : [];
+                }
+                if (state.denied) {
+                    permissions[permKey].denied.users = state.denied.users ? state.denied.users.slice() : [];
+                    permissions[permKey].denied.userGroups = state.denied.userGroups ? state.denied.userGroups.slice() : [];
+                    permissions[permKey].denied.meshes = state.denied.meshes ? state.denied.meshes.slice() : [];
+                    permissions[permKey].denied.nodes = state.denied.nodes ? state.denied.nodes.slice() : [];
+                }
+            }
+            
+            meshserver.send({
+                action: 'setpluginpermissions',
+                plugin: pluginName,
+                data: { permissions: permissions, defaults: defaults }
+            });
+            
+            closePluginPermModal();
+        }
+
         function goPlugin(pname, title) {
             if (pluginHandler == null) return;
-            if (pname == null) { Q('p43iframe').src = ''; } else { QH('p43title', title); Q('p43iframe').src = '/pluginadmin.ashx?pin=' + pname; go(43); }
+            if (pname == null) { document.getElementById('p43iframe').src = ''; } else { document.getElementById('p43title').innerHTML =  title; document.getElementById('p43iframe').src = '/pluginadmin.ashx?pin=' + pname; go(43); }
         }
 
         //
@@ -19600,6 +20228,7 @@
         function printDate(d) { return d.toLocaleDateString(args.locale); }
         function printTime(d) { return d.toLocaleTimeString(args.locale); }
         function printDateTime(d) { return d.toLocaleString(args.locale); }
+        function printTimer(d) { return zeroPad(Math.floor(d / 3600), 2) + ':' + zeroPad((Math.floor(d / 60) % 60), 2) + ':' + zeroPad((d % 60), 2); }
         function printFlexDateTime(d) { if (printDate(new Date()) == printDate(d)) { return printTime(d); } else { return printDateTime(d); } }
         function addDetailItem(title, value, state) { return '<table style=width:100%><td>' + nobreak(title) + '<td style=text-align:right>' + value + '</table>'; }
         function format(format) { var args = Array.prototype.slice.call(arguments, 1); return format.replace(/{(\d+)}/g, function (match, number) { return typeof args[number] != 'undefined' ? args[number] : match; }); };

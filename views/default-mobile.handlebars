@@ -32,7 +32,6 @@
     <script type="text/javascript" src="scripts/zlib-adler32{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/zlib-crc32{{{min}}}.js"></script>
     <script keeplink=1 type="text/javascript" src="scripts/filesaver.min.js"></script>
-    <script type="text/javascript" src="scripts/custom.js"></script>
     {{{customJSTags}}}
     <meta name="msapplication-TileColor" content="#00aba9">
     <meta name="theme-color" content="#ffffff">
@@ -1104,11 +1103,6 @@
                                             </td>
                                             <td style="width:1%"><input id="id_p15consoleClear" type="button" class="bottombutton" value="Clear" onclick="p15consoleClear()" /></td>
                                         </tr>
-                                        <tr id="p15umhrow">
-                                            <td colspan=3 style="padding-top:4px">
-                                                <div id="p15umhpanel" style="width:100%"></div>
-                                            </td>
-                                        </tr>
                                     </table>
                                 </td>
                             </tr>
@@ -1326,6 +1320,7 @@
         var debugLevel = parseInt('{{{debuglevel}}}');
         var features = parseInt('{{{features}}}');
         var features2 = parseInt('{{{features2}}}');
+        var features3 = parseInt('{{{features3}}}');
         var sessionTime = parseInt('{{{sessiontime}}}');
         var sessionRefreshTimer = null;
         var domain = '{{{domain}}}';
@@ -2102,10 +2097,12 @@
                                 }
                                 if (message.event.node.av != null) { node.av = message.event.node.av; }
                                 if (message.event.node.wsc != null) { node.wsc = message.event.node.wsc; }
+                                if (message.event.node.defender != null) { node.defender = message.event.node.defender; }
                                 node.namel = node.name.toLowerCase();
                                 if (node.rname) { node.rnamel = node.rname.toLowerCase(); } else { node.rnamel = node.namel; }
                                 if (message.event.node.icon) { node.icon = message.event.node.icon; }
                                 if (message.event.node.lastbootuptime != null) { node.lastbootuptime = message.event.node.lastbootuptime; }
+                                if (message.event.node.idletime != null) { node.idletime = message.event.node.idletime; }
 
                                 //onSortSelectChange(true);
                                 //drawNotifications();
@@ -3107,18 +3104,22 @@
         function onSearchInputChanged() {
             var x = Q('SearchInput').value.toLowerCase().trim(); putstore('_search', Q('SearchInput').value);
             QS('SearchInput')['background-color'] = (x == '') ? '#FFFFFF' : '#FDFFBE';
+            var negate = x.startsWith('!');
+            if (negate) x = x.substring(1);
+            var rawVal = Q('SearchInput').value.trim();
+            if (negate) rawVal = rawVal.substring(1);
             var userSearch = null, ipSearch = null, groupSearch = null, tagSearch = null, agentTagSearch = null, wscSearch = null, osSearch = null, amtSearch = null;
             if (x.startsWith('user:'.toLowerCase())) { userSearch = x.substring('user:'.length); }
             else if (x.startsWith('u:'.toLowerCase())) { userSearch = x.substring('u:'.length); }
             else if (x.startsWith('ip:'.toLowerCase())) { ipSearch = x.substring('ip:'.length); }
             else if (x.startsWith('group:'.toLowerCase())) { groupSearch = x.substring('group:'.length); }
             else if (x.startsWith('g:'.toLowerCase())) { groupSearch = x.substring('g:'.length); }
-            else if (x.startsWith('tag:'.toLowerCase())) { tagSearch = Q('SearchInput').value.trim().substring('tag:'.length); }
-            else if (x.startsWith('t:'.toLowerCase())) { tagSearch = Q('SearchInput').value.trim().substring('t:'.length); }
-            else if (x.startsWith('atag:'.toLowerCase())) { agentTagSearch = Q('SearchInput').value.trim().substring('atag:'.length).toLowerCase(); }
-            else if (x.startsWith('a:'.toLowerCase())) { agentTagSearch = Q('SearchInput').value.trim().substring('a:'.length).toLowerCase(); }
-            else if (x.startsWith('os:'.toLowerCase())) { osSearch = Q('SearchInput').value.trim().substring('os:'.length).toLowerCase(); }
-            else if (x.startsWith('amt:'.toLowerCase())) { amtSearch = Q('SearchInput').value.trim().substring('amt:'.length).toLowerCase(); }
+            else if (x.startsWith('tag:'.toLowerCase())) { tagSearch = rawVal.substring('tag:'.length); }
+            else if (x.startsWith('t:'.toLowerCase())) { tagSearch = rawVal.substring('t:'.length); }
+            else if (x.startsWith('atag:'.toLowerCase())) { agentTagSearch = rawVal.substring('atag:'.length).toLowerCase(); }
+            else if (x.startsWith('a:'.toLowerCase())) { agentTagSearch = rawVal.substring('a:'.length).toLowerCase(); }
+            else if (x.startsWith('os:'.toLowerCase())) { osSearch = rawVal.substring('os:'.length).toLowerCase(); }
+            else if (x.startsWith('amt:'.toLowerCase())) { amtSearch = rawVal.substring('amt:'.length).toLowerCase(); }
             else if (x == 'wsc:ok') { wscSearch = 1; }
             else if (x == 'wsc:noav') { wscSearch = 2; }
             else if (x == 'wsc:noupdate') { wscSearch = 3; }
@@ -3173,7 +3174,7 @@
             } else {
                 // Device name search
                 try {
-                    var rs = x.split(/\s+/).join('|'), rx = new RegExp(rs); // In some cases (like +), this can throw an exception.
+                    var rs = x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), rx = new RegExp(rs); // In some cases (like +), this can throw an exception.
                     for (var d in nodes) {
                         if (features2 & 0x00008000) {
                             if(features2 & 0x10000000){
@@ -3199,6 +3200,8 @@
                     }
                 } catch (ex) { for (var d in nodes) { nodes[d].v = true; } }
             }
+
+            if (negate) { for (var d in nodes) { nodes[d].v = !nodes[d].v; } }
 
             // Check power state
             var onlineOnly = Q('OnlineCheckBox').checked;
@@ -5552,7 +5555,7 @@
 
                 // Setup the terminal with auto-fit
                 if (xterm != null) { xterm.dispose(); }
-                xterm = new Terminal();
+                xterm = new Terminal({ allowProposedApi: true });
                 xtermfit = new FitAddon.FitAddon();
                 xtermimage = new ImageAddon.ImageAddon();
                 if (xtermfit) { xterm.loadAddon(xtermfit); }
@@ -6306,6 +6309,7 @@
             if (node.osdesc) { x += addDetailItem("Version", EscapeHtml(node.osdesc), s); }
             if (hardware.windows && hardware.windows.osinfo) {
                 var m = hardware.windows.osinfo;
+				if(m.BuildRevision){ x += addDetailItem("Build Number", EscapeHtml(m.BuildRevision), s); }
                 if (m.OSArchitecture) {
                     if (m.OSArchitecture.startsWith('32')) { x += addDetailItem("Architecture", "32-bit", s); }
                     else if (m.OSArchitecture.startsWith('64')) { x += addDetailItem("Architecture", "64-bit", s); }
@@ -6388,11 +6392,22 @@
 
             // Active Users
            if (node.users && node.users.length > 0) {
-                var u = node.users.map(function(user) {
-                    return addKeyLinkConditional(EscapeHtml(user), "Locked", (node.lusers && node.lusers.indexOf(user) >= 0));
+                var u = node.users.map(function(user, index) {
+                    var upn = node.upnusers && node.upnusers[index];
+                    var label = (features3 & 0x00000002)
+                        ? ((node.users && node.users[index] != null) ? EscapeHtml(node.users[index]) : null)
+                        : (upn != null ? EscapeHtml(upn) : null);
+                    var escapedUser = EscapeHtml((features3 & 0x00000002) && upn != null ? upn : user);
+                    var locked = node.lusers && node.lusers.indexOf(user) >= 0;
+                    if (locked) { return addKeyLinkConditional(escapedUser, label ? label + ' - ' + "Locked" : "Locked", true); }
+                    if (label) { return '<span style=cursor:default title=\'' + label + '\'>' + escapedUser + '</span>'; }
+                    return escapedUser;
                 }).join(', ');
                 x += addDetailItem((node.users.length > 1 ? "Active Users" : "Active User"), u);
             }
+
+            // Windows Idle Time
+            if (node.idletime && node.idletime != -1) { x += addDetailItem("Idle Time", printTimer(node.idletime)); }
 
             if (x != '') { sections.push({ name: "Operating System", html: x, img: 'software' }); }
 
@@ -6848,127 +6863,9 @@
 
         var consoleNode;
         var consoleServerText = '';
-        var p15umhConsoleBridge = null;
-        var p15umhRequestQueue = Promise.resolve();
-        function p15umhSameNode(a, b) {
-            if (a == null || b == null || a === 'server' || b === 'server') return (a === b);
-            if (a === b) return true;
-            if ((a._id != null) && (b._id != null)) return (a._id === b._id);
-            return false;
-        }
-        function p15umhValidationError(msg) {
-            var panel = Q('p15umhpanel');
-            if ((window.MeshCentralUmhControlUi != null) && (typeof window.MeshCentralUmhControlUi.showPanelNotice == 'function') && panel) {
-                if (window.MeshCentralUmhControlUi.showPanelNotice(panel, msg, '#B00020')) return;
-            }
-        }
-
-        function p15umhEnsureConsoleBridge() {
-            if (p15umhConsoleBridge != null) return p15umhConsoleBridge;
-            if (typeof p15consoleReceive != 'function') return null;
-            var original = p15consoleReceive;
-            var listeners = [];
-            p15consoleReceive = function () {
-                var r = original.apply(this, arguments);
-                var copy = listeners.slice(0), i;
-                for (i = 0; i < copy.length; i++) { try { copy[i].apply(null, arguments); } catch (ex) { } }
-                return r;
-            };
-            p15umhConsoleBridge = {
-                subscribe: function (fn) {
-                    listeners.push(fn);
-                    return function () {
-                        var i = listeners.indexOf(fn);
-                        if (i >= 0) listeners.splice(i, 1);
-                    };
-                }
-            };
-            return p15umhConsoleBridge;
-        }
-
-        function p15umhRequest(cmd, type) {
-            var run = function () {
-                return new Promise(function (resolve, reject) {
-                    var bridge = p15umhEnsureConsoleBridge();
-                    var parser = ((window.MeshCentralUmhControlUi != null) && (typeof window.MeshCentralUmhControlUi.parseConsolePayload == 'function')) ? window.MeshCentralUmhControlUi.parseConsolePayload : null;
-                    var requestId = ((window.MeshCentralUmhControlUi != null) && (typeof window.MeshCentralUmhControlUi.buildRequestId == 'function') && /^\s*umhctl\b/i.test(String(cmd || ''))) ? window.MeshCentralUmhControlUi.buildRequestId() : null;
-                    var dispatchCmd = (requestId != null && window.MeshCentralUmhControlUi != null && typeof window.MeshCentralUmhControlUi.appendRequestId == 'function') ? window.MeshCentralUmhControlUi.appendRequestId(cmd, requestId) : cmd;
-                    var node = consoleNode;
-                    var nodeId = (node && node._id) ? String(node._id) : null;
-                    var input = Q('p15consoleText');
-                    var outputSel = Q('p15outputselect');
-                    var lines = [];
-                    var done = false;
-                    var hardTimer = null;
-                    var stop = null;
-                    var timeoutMs = (/^\s*umhctl\s+uiSnapshot\b/i).test(String(dispatchCmd || '')) ? 95000 : 60000;
-                    function cleanup() {
-                        if (stop) { try { stop(); } catch (ex) { } stop = null; }
-                        if (hardTimer) { clearTimeout(hardTimer); hardTimer = null; }
-                    }
-                    function finish(err) {
-                        if (done) return;
-                        done = true;
-                        cleanup();
-                        if (err) { reject(err); } else { resolve(lines.join('\n')); }
-                    }
-                    if ((type != null) && (type !== 4)) { reject(new Error('Only agent console requests are supported.')); return; }
-                    if ((bridge == null) || (typeof p15consoleSend != 'function')) { reject(new Error('UMH console bridge is unavailable.')); return; }
-                    if ((node == null) || (node === 'server')) { reject(new Error('Device console is not active.')); return; }
-                    if ((node.conn & 1) == 0) { reject(new Error('Agent is offline.')); return; }
-                    if (input == null) { reject(new Error('Console input is unavailable.')); return; }
-                    stop = bridge.subscribe(function (rxNode, data, source) {
-                        var parsed = null;
-                        var rxNodeId = (rxNode && rxNode._id) ? String(rxNode._id) : null;
-                        if (done || source === 'MQTT' || (typeof data != 'string')) return;
-                        if ((rxNode !== node) && (!nodeId || !rxNodeId || (rxNodeId !== nodeId))) return;
-                        lines.push(data);
-                        if (parser) { parsed = parser(lines.join('\n'), requestId); }
-                        if (parsed && (parsed.isTerminal === true)) { finish(null); return; }
-                    });
-                    hardTimer = setTimeout(function () { finish(new Error('Timed out waiting for UMH response.')); }, timeoutMs);
-                    try {
-                        if (outputSel) outputSel.value = 1;
-                        setupConsole();
-                        input.value = dispatchCmd;
-                        p15consoleSend();
-                    } catch (ex2) {
-                        finish(ex2);
-                    }
-                });
-            };
-            p15umhRequestQueue = p15umhRequestQueue.then(run, run);
-            return p15umhRequestQueue;
-        }
-
-        function p15umhRenderPanel() {
-            var container = Q('p15umhpanel');
-            if (!container || !window.MeshCentralUmhControlUi) return;
-            if (container.getAttribute('data-umh-built') == '1') return;
-            window.MeshCentralUmhControlUi.renderConsolePanel(container, {
-                request: p15umhRequest,
-                onCommand: function (cmd) {
-                    if (consoleNode == null) return;
-                    if ((consoleNode.conn & 1) == 0) { p15umhValidationError('Agent is offline.'); return; }
-                    Q('p15outputselect').value = 1;
-                    setupConsole();
-                    Q('p15consoleText').value = cmd;
-                    p15consoleSend();
-                }
-            });
-            container.setAttribute('data-umh-built', '1');
-        }
-
-        function p15umhSetEnabled(active) {
-            var container = Q('p15umhpanel');
-            if (container) {
-                container.style.pointerEvents = active ? '' : 'none';
-                container.style.opacity = active ? '1' : '0.55';
-            }
-        }
         function setupConsole() {
             // Setup the console
-            var samenode = p15umhSameNode(consoleNode, currentNode);
+            var samenode = (consoleNode == currentNode);
             consoleNode = currentNode;
 
             var mesh = meshes[consoleNode.meshid];
@@ -6985,8 +6882,6 @@
                 QH('p15statetext', onlineText);
                 QE('p15uploadCore', ((consoleNode.conn & 1) != 0));
                 QV('p15outputselecttd', ((consoleNode.conn & 16) != 0) || ((currentNode.pmt == 1) && ((features2 & 2) != 0)));
-                QV('p15umhrow', true);
-                p15umhRenderPanel();
                 QV('p15outputselect2', ((consoleNode.conn & 16) != 0)); // MQTT channel
                 QV('p15outputselect3', ((currentNode.pmt == 1) && ((features2 & 2) != 0))); // Push Notification channel
 
@@ -6999,14 +6894,11 @@
                 if (((consoleNode.conn & 16) != 0) && (c == 2)) { active = true; } // MQTT
                 if (((currentNode.pmt == 1) && ((features2 & 2) != 0)) && (c == 3)) { active = true; } // Push
                 QE('p15consoleText', active);
-                p15umhSetEnabled(((consoleNode.conn & 1) != 0));
             } else {
                 QH('p15statetext', "Access Denied");
                 QE('p15consoleText', false);
                 QE('p15uploadCore', false);
                 QV('p15outputselecttd', false);
-                QV('p15umhrow', false);
-                p15umhSetEnabled(false);
             }
             QV('devListToolbarViewIcons3', ((consoleNode.conn & 1) != 0));
         }
@@ -7068,7 +6960,7 @@
                 // Agent console data
                 if (source == 'MQTT') { data = '<div style=color:red>' + "MQTT" + '&gt; ' + EscapeHtml(data) + '<br/></div>'; } else { data = '<div>' + EscapeHtml(data) + '</div>' }
                 if (node.consoleText == null) { node.consoleText = data; } else { node.consoleText += data; }
-                if (p15umhSameNode(consoleNode, node)) {
+                if (consoleNode == node) {
                     Q('p15agentConsoleText').innerHTML += data;
                     Q('p15agentConsoleText').scrollTop = Q('p15agentConsoleText').scrollHeight;
                 }
@@ -7895,6 +7787,7 @@
         function printDate(d) { return d.toLocaleDateString(args.locale); }
         function printTime(d) { return d.toLocaleTimeString(args.locale); }
         function printDateTime(d) { return d.toLocaleString(args.locale); }
+        function printTimer(d) { return zeroPad(Math.floor(d / 3600), 2) + ':' + zeroPad((Math.floor(d / 60) % 60), 2) + ':' + zeroPad((d % 60), 2); }
         function format(format) { var args = Array.prototype.slice.call(arguments, 1); return format.replace(/{(\d+)}/g, function (match, number) { return typeof args[number] != 'undefined' ? args[number] : match; }); };
         function nobreak(x) { return x.split(' ').join('&nbsp;'); }
         function getUserName(userid) { 
