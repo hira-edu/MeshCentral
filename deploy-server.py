@@ -42,11 +42,23 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+
+def resolve_ssh_config_path():
+    """Return an operator-specified SSH config or a known local failover config if present."""
+    configured = os.environ.get("MESHCENTRAL_SSH_CONFIG")
+    if configured:
+        return configured
+    candidate = Path(tempfile.gettempdir()) / "meshcentral_proxy_failover.sshconfig"
+    if candidate.exists():
+        return str(candidate)
+    return None
+
+
 # ─── Configuration ────────────────────────────────────────────────────────────
 
 SERVER = "meshcentral"  # SSH config alias (resolves to 167.88.44.65)
 SERVER_IP = "167.88.44.65"
-SSH_CONFIG_PATH = os.environ.get("MESHCENTRAL_SSH_CONFIG")
+SSH_CONFIG_PATH = resolve_ssh_config_path()
 SSH_OPTIONS = [
     "-o", "BatchMode=yes",
     "-o", "ConnectTimeout=8",
@@ -80,6 +92,10 @@ LOCAL_WEBSERVER_CERT_PATH = LOCAL_SERVER / "meshcentral-data" / "webserver-cert-
 FILE_MAP = {
     # Custom web overlay (lives outside the npm module on server)
     "public/scripts/custom.js": f"{MC_WEB}/public/scripts/custom.js",
+    "public/scripts/agent-desktop-0.0.2.js": f"{MC_MODULE}/public/scripts/agent-desktop-0.0.2.js",
+    "public/scripts/agent-desktop-0.0.2-min.js": f"{MC_MODULE}/public/scripts/agent-desktop-0.0.2-min.js",
+    "public/scripts/agent-redir-ws-0.1.1.js": f"{MC_MODULE}/public/scripts/agent-redir-ws-0.1.1.js",
+    "public/scripts/agent-redir-ws-0.1.1-min.js": f"{MC_MODULE}/public/scripts/agent-redir-ws-0.1.1-min.js",
 
     # Live core overrides in meshcentral-data
     "meshcentral-data/meshcore.js": f"{MC_DATA}/meshcore.js",
@@ -111,6 +127,7 @@ FILE_MAP = {
     # Server modules
     "meshdevicefile.js": f"{MC_MODULE}/meshdevicefile.js",
     "meshagent.js": f"{MC_MODULE}/meshagent.js",
+    "meshdesktopmultiplex.js": f"{MC_MODULE}/meshdesktopmultiplex.js",
 
     # Config (stored in meshcentral-data/ locally for reference)
     "meshcentral-data/config.json": MC_CONFIG,

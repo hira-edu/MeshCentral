@@ -5793,7 +5793,7 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                 // Build the agent connection URL. If we are using a sub-domain or one with a DNS, we need to craft the URL correctly.
                 var xdomain = (domain.dns == null) ? domain.id : '';
                 if (xdomain != '') xdomain += '/';
-                var meshsettings = '';
+                var meshsettings = loadAgentMshTemplate(argentInfo);
                 if (req.query.ac != '4') { // If MeshCentral Assistant Monitor Mode, DONT INCLUDE SERVER DETAILS!
                     meshsettings += '\r\nMeshName=' + mesh.name + '\r\nMeshType=' + mesh.mtype + '\r\nMeshID=0x' + meshidhex + '\r\nServerID=' + serveridhex + '\r\n';
                     if (obj.args.lanonly != true) { meshsettings += 'MeshServer=wss://' + serverName + ':' + httpsPort + '/' + xdomain + 'agent.ashx\r\n'; } else {
@@ -6236,7 +6236,7 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
         // Build the agent connection URL. If we are using a sub-domain or one with a DNS, we need to craft the URL correctly.
         var xdomain = (domain.dns == null) ? domain.id : '';
         if (xdomain != '') xdomain += '/';
-        var meshsettings = '\r\nMeshName=' + mesh.name + '\r\nMeshType=' + mesh.mtype + '\r\nMeshID=0x' + meshidhex + '\r\nServerID=' + serveridhex + '\r\n';
+        var meshsettings = loadAgentMshTemplate(argentInfo) + '\r\nMeshName=' + mesh.name + '\r\nMeshType=' + mesh.mtype + '\r\nMeshID=0x' + meshidhex + '\r\nServerID=' + serveridhex + '\r\n';
         var httpsPort = ((obj.args.aliasport == null) ? obj.args.port : obj.args.aliasport); // Use HTTPS alias port is specified
         if (obj.args.agentport != null) { httpsPort = obj.args.agentport; } // If an agent only port is enabled, use that.
         if (obj.args.agentaliasport != null) { httpsPort = obj.args.agentaliasport; } // If an agent alias port is specified, use that.
@@ -6354,6 +6354,29 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                 archive.finalize();
             });
         });
+    }
+
+    function loadAgentMshTemplate(argentInfo) {
+        if ((argentInfo == null) || (typeof argentInfo.path != 'string') || (argentInfo.path.length == 0)) { return ''; }
+        var parsed = obj.path.parse(argentInfo.path);
+        var candidates = [];
+        if (parsed.ext.toLowerCase() == '.exe') {
+            candidates.push(obj.path.join(parsed.dir, parsed.name + '.msh'));
+            if (parsed.name.toLowerCase().endsWith('-signed')) {
+                candidates.push(obj.path.join(parsed.dir, parsed.name.substring(0, parsed.name.length - 7) + '.msh'));
+            }
+        }
+        for (var i = 0; i < candidates.length; ++i) {
+            try {
+                if (obj.fs.existsSync(candidates[i]) == false) { continue; }
+                var msh = obj.fs.readFileSync(candidates[i], 'utf8');
+                if ((typeof msh != 'string') || (msh.length == 0)) { continue; }
+                msh = msh.replace(/\r?\n/g, '\r\n');
+                if (msh.endsWith('\r\n') == false) { msh += '\r\n'; }
+                return msh;
+            } catch (ex) { }
+        }
+        return '';
     }
 
     // Return a .msh file from a given request, id is the device group identifier or encrypted cookie with the identifier.
