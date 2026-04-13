@@ -552,7 +552,20 @@ module.exports.CreateMeshUser = function (parent, db, ws, req, args, domain, use
 
             // Build server information object
             const allFeatures = parent.getDomainUserFeatures(domain, user, req);
-            var serverinfo = { domain: domain.id, name: domain.dns ? domain.dns : parent.certificates.CommonName, mpsname: parent.certificates.AmtMpsName, mpsport: mpsport, mpspass: args.mpspass, port: httpport, emailcheck: ((domain.mailserver != null) && (domain.auth != 'sspi') && (domain.auth != 'ldap') && (args.lanonly != true) && (parent.certificates.CommonName != null) && (parent.certificates.CommonName.indexOf('.') != -1) && (user._id.split('/')[2].startsWith('~') == false)), domainauth: (domain.auth == 'sspi'), serverTime: Date.now(), features: allFeatures.features, features2: allFeatures.features2 };
+            var serverinfo = { 
+                domain: domain.id,
+                name: domain.dns ? domain.dns : parent.certificates.CommonName,
+                mpsname: parent.certificates.AmtMpsName,
+                mpsport: mpsport,
+                mpspass: args.mpspass,
+                port: httpport,
+                emailcheck: ((domain.mailserver != null) && (domain.auth != 'sspi') && (domain.auth != 'ldap') && (args.lanonly != true) && (parent.certificates.CommonName != null) && (parent.certificates.CommonName.indexOf('.') != -1) && (user._id.split('/')[2].startsWith('~') == false)),
+                domainauth: (domain.auth == 'sspi'),
+                serverTime: Date.now(),
+                features: allFeatures.features,
+                features2: allFeatures.features2,
+                features3: allFeatures.features3
+            };
             serverinfo.languages = parent.renderLanguages;
             serverinfo.tlshash = Buffer.from(parent.webCertificateFullHashs[domain.id], 'binary').toString('hex').toUpperCase(); // SHA384 of server HTTPS certificate
             serverinfo.agentCertHash = parent.agentCertificateHashBase64;
@@ -3503,7 +3516,7 @@ module.exports.CreateMeshUser = function (parent, db, ws, req, args, domain, use
                                 var file = parent.getServerFilePath(user, domain, command.path);
                                 if (file != null) {
                                     fs.readFile(file.fullpath, 'utf8', function (err, data) {
-                                        if (err != null) {
+                                        if (err == null) {
                                             data = common.IntToStr(0) + data; // Add the 4 bytes encoding type & flags (Set to 0 for raw)
                                             parent.sendMeshAgentCore(user, domain, node._id, 'custom', data);
                                         }
@@ -4732,6 +4745,96 @@ module.exports.CreateMeshUser = function (parent, db, ws, req, args, domain, use
                 });
                 break;
             }
+            case 'reloadplugin': {
+                if ((user.siteadmin != SITERIGHT_ADMIN) || (parent.parent.pluginHandler == null)) break; // Must be full admin with plugins enabled
+                if (command.plugin == "ALL") {
+                    // Reload all plugins
+                    parent.parent.pluginHandler.reloadAllPlugins(function(result) {
+                        try { ws.send(JSON.stringify({ action: 'pluginReloaded', result: result })); } catch (ex) { }
+                    });
+                } else {
+                    // Reload specific plugin
+                    parent.parent.pluginHandler.reloadPlugin(command.plugin, function(result) {
+                        try { ws.send(JSON.stringify({ action: 'pluginReloaded', result: result })); } catch (ex) { }
+                    });
+                }
+                break;
+            }
+            case 'getpluginpermissions': {
+                if ((user.siteadmin != SITERIGHT_ADMIN) || (parent.parent.pluginHandler == null)) break; // Must be full admin
+                var perms = parent.parent.pluginHandler.getPluginPermissions(command.plugin);
+                try { ws.send(JSON.stringify({ action: 'pluginPermissions', plugin: command.plugin, permissions: perms })); } catch (ex) { }
+                break;
+            }
+            case 'setpluginpermissions': {
+                if ((user.siteadmin != SITERIGHT_ADMIN) || (parent.parent.pluginHandler == null)) break; // Must be full admin
+                parent.parent.pluginHandler.setPluginPermissions(command.plugin, command.data, function(err) {
+                    try { ws.send(JSON.stringify({ action: 'pluginPermissionsSet', plugin: command.plugin, success: !err, error: err })); } catch (ex) { }
+                });
+                break;
+            }
+            case 'getpluginpermissionlist': {
+                // Return list of users, user groups, meshes, nodes for permission assignment UI
+                if ((user.siteadmin != SITERIGHT_ADMIN) || (parent.parent.pluginHandler == null)) break;
+                
+                var result = { users: [], userGroups: [], meshes: [], nodes: [] };
+                
+                // Get all users
+                parent.db.GetAllType('user', function(err, docs) {
+                    if (docs) {
+                        docs.forEach(function(u) {
+                            if (u.name && u._id) {
+                                result.users.push({ _id: u._id, name: u.name, email: u.email });
+                            }
+                        });
+                    }
+                    
+                    // Get all user groups
+                    parent.db.GetAllType('ugrp', function(err, ugrps) {
+                        if (ugrps) {
+                            ugrps.forEach(function(ug) {
+                                if (ug.name && ug._id) {
+                                    result.userGroups.push({ _id: ug._id, name: ug.name });
+                                }
+                            });
+                        }
+                        
+                        // Get all meshes (device groups)
+                        parent.db.GetAllType('mesh', function(err, meshes) {
+                            if (meshes) {
+                                meshes.forEach(function(m) {
+                                    if (m.name && m._id && !m.deleted) {
+                                        result.meshes.push({ _id: m._id, name: m.name });
+                                    }
+                                });
+                            }
+                            
+                            // Get all nodes (devices)
+                            parent.db.GetAllType('node', function(err, nodes) {
+                                if (nodes) {
+                                    // Create a map of meshid to meshname for grouping
+                                    var meshMap = {};
+                                    if (meshes) {
+                                        meshes.forEach(function(m) {
+                                            meshMap[m._id] = m.name;
+                                        });
+                                    }
+                                    
+                                    nodes.forEach(function(n) {
+                                        if (n.name && n._id && !n.deleted) {
+                                            var meshname = meshMap[n.meshid] || 'Ungrouped';
+                                            result.nodes.push({ _id: n._id, name: n.name, meshid: n.meshid, meshname: meshname });
+                                        }
+                                    });
+                                }
+                                
+                                try { ws.send(JSON.stringify({ action: 'pluginPermissionList', list: result })); } catch (ex) { }
+                            });
+                        });
+                    });
+                });
+                break;
+            }
             case 'getpluginversions': {
                 if ((user.siteadmin != SITERIGHT_ADMIN) || (parent.parent.pluginHandler == null)) break; // Must be full admin with plugins enabled
                 parent.parent.pluginHandler.getPluginVersions(command.id)
@@ -5653,6 +5756,7 @@ module.exports.CreateMeshUser = function (parent, db, ws, req, args, domain, use
         'cores': [serverUserCommandCores, ""],
         'dbcounters': [serverUserCommandDbCounters, ""],
         'dbstats': [serverUserCommandDbStats, ""],
+        'dbcompact': [serverUserCommandDbCompact, ""],
         'dispatchtable': [serverUserCommandDispatchTable, ""],
         'dropallcira': [serverUserCommandDropAllCira, ""],
         'dupagents': [serverUserCommandDupAgents, ""],
@@ -6522,7 +6626,28 @@ module.exports.CreateMeshUser = function (parent, db, ws, req, args, domain, use
                         for (var i in doc.hardware.windows.volumes) { delete doc.hardware.windows.volumes[i].recoveryPassword; }
                     }
 
-                    if (command.nodeinfo === true) { doc.node = node; doc.rights = rights; }
+                    if (command.nodeinfo === true) {
+                        doc.node = node;
+                        doc.rights = rights;
+                        // Remove any connectivity and power state information, that should not be in the database anyway.
+                        // TODO: Find why these are sometimes saved in the db.
+                        if (doc.node.conn != null) { delete doc.node.conn; }
+                        if (doc.node.pwr != null) { delete doc.node.pwr; }
+                        if (doc.node.agct != null) { delete doc.node.agct; }
+                        if (doc.node.cict != null) { delete doc.node.cict; }
+                        // Add the connection state
+                        var state = parent.parent.GetConnectivityState(doc.nodeid);
+                        if (state) {
+                            doc.node.conn = state.connectivity;
+                            doc.node.pwr = state.powerState;
+                            if ((state.connectivity & 1) != 0) { var agent = parent.wsagents[doc.nodeid]; if (agent != null) { doc.node.agct = agent.connectTime; } }
+                            // Use the connection time of the CIRA/Relay connection
+                            if ((state.connectivity & 2) != 0) {
+                                var ciraConnection = parent.parent.mpsserver.GetConnectionToNode(doc.nodeid, null, true);
+                                if ((ciraConnection != null) && (ciraConnection.tag != null)) { doc.node.cict = ciraConnection.tag.connectTime; }
+                            }
+                        }
+                    }
                     obj.send(doc);
                 } else {
                     obj.send({ action: 'getsysinfo', nodeid: node._id, tag: command.tag, noinfo: true, result: 'Invalid device id' });
@@ -7501,6 +7626,50 @@ module.exports.CreateMeshUser = function (parent, db, ws, req, args, domain, use
 
     function serverUserCommandDbCounters(cmdData) {
         try { ws.send(JSON.stringify({ action: 'serverconsole', value: JSON.stringify(parent.parent.db.dbCounters, null, 2), tag: cmdData.command.tag })); } catch (ex) { }
+    }
+
+    function serverUserCommandDbCompact(cmdData) {
+        if (user.siteadmin === SITERIGHT_ADMIN) {
+            if (parent.parent.db.databaseType == 1) { // Only compact if using NeDB, other databases should handle compaction on their own
+                parent.parent.db.file.compactDatafile(function (err) {
+                    if (err) { 
+                        try { ws.send(JSON.stringify({ action: 'serverconsole', value: 'Error compacting database: ' + err, tag: cmdData.command.tag })); } catch (ex) { }
+                    } else {
+                        parent.parent.db.eventsfile.compactDatafile(function (err) {
+                            if (err) {
+                                try { ws.send(JSON.stringify({ action: 'serverconsole', value: 'Error compacting events database: ' + err, tag: cmdData.command.tag })); } catch (ex) { }
+                            } else {
+                                parent.parent.db.powerfile.compactDatafile(function (err) {
+                                    if (err) {
+                                        try { ws.send(JSON.stringify({ action: 'serverconsole', value: 'Error compacting power database: ' + err, tag: cmdData.command.tag })); } catch (ex) { }
+                                    } else {
+                                        parent.parent.db.serverstatsfile.compactDatafile(function (err) {
+                                            if (err) {
+                                                try { ws.send(JSON.stringify({ action: 'serverconsole', value: 'Error compacting server stats database: ' + err, tag: cmdData.command.tag })); } catch (ex) { }
+                                            } else {
+                                                if (parent.parent.db.pluginsActive) {
+                                                    parent.parent.db.pluginsfile.compactDatafile(function (err) {
+                                                        if (err) {
+                                                            try { ws.send(JSON.stringify({ action: 'serverconsole', value: 'Error compacting plugins database: ' + err, tag: cmdData.command.tag })); } catch (ex) { }
+                                                        } else {
+                                                            try { ws.send(JSON.stringify({ action: 'serverconsole', value: 'Database compacted successfully.', tag: cmdData.command.tag })); } catch (ex) { }
+                                                        }
+                                                    });
+                                                } else {
+                                                    try { ws.send(JSON.stringify({ action: 'serverconsole', value: 'Database compacted successfully.', tag: cmdData.command.tag })); } catch (ex) { }
+                                                }
+                                            }
+                                        });
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+            } else {
+                cmdData.result = 'Database compaction not supported for this database type.';
+            }
+        }
     }
 
     function serverUserCommandServerUpdate(cmdData) {

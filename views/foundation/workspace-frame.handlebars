@@ -1,0 +1,52 @@
+<section
+  class="mc-workspace-frame o-stack"
+  style="--mc-stack-gap: var(--mc-space-16);"
+  data-mc-workspace-frame
+  data-mc-route="{{route.id}}"
+>
+  <header class="mc-panel" data-mc-slot="workspace-header">
+    <div class="o-cluster" style="justify-content:space-between;">
+      <div class="o-cluster">
+        {{#if backButton}}
+          <button
+            class="mc-button"
+            data-variant="ghost"
+            data-mc-action="back"
+            data-mc-dom-id="{{backButton.domId}}"
+            type="button"
+          >
+            {{backButton.label}}
+          </button>
+        {{/if}}
+        <div class="o-stack" style="--mc-stack-gap: var(--mc-space-4);">
+          <h2>{{title}}</h2>
+          {{#if subtitle}}<p>{{subtitle}}</p>{{/if}}
+        </div>
+      </div>
+
+      <div class="o-cluster" data-mc-slot="workspace-header-actions">
+        {{{headerActions}}}
+      </div>
+    </div>
+  </header>
+
+  {{#if toolbar}}
+    <div data-mc-slot="workspace-toolbar">
+      {{{toolbar}}}
+    </div>
+  {{/if}}
+
+  <div class="mc-workspace-frame__body">
+    {{#if @partial-block}}
+      {{> @partial-block}}
+    {{else}}
+      {{{content}}}
+    {{/if}}
+  </div>
+
+  {{#if emptyState}}
+    <div data-mc-slot="workspace-empty-state">
+      {{{emptyState}}}
+    </div>
+  {{/if}}
+</section>

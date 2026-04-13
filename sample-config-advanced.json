@@ -50,6 +50,7 @@
     "_allowLoginToken": true,
     "_StrictTransportSecurity": true,
     "_allowFraming": true,
+    "_allowedFramingOrigins": ["https://rmm.example.com"],
     "_cookieIpCheck": false,
     "_cookieEncoding": "hex",
     "_webRTC": false,
@@ -567,6 +568,11 @@
           "client": {
             "client_id": "00000000-0000-0000-0000-000000000000",
             "client_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          },
+          "_custom": {
+            "_buttonText": "Sign-in using Custom Button Text",
+            "_buttonIconUrl": "https://example.com/custom-icon.png",
+            "_buttonIconUrl2x": "https://example.com/custom-icon-2x.png"
           },
           "groups": {
             "required": [ "groupA", "groupB", "groupC" ],

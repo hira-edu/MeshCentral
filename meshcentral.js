@@ -1431,7 +1431,7 @@ function CreateMeshCentralServer(config, args) {
         var i;
 
         // Add NodeJS version warning if needed
-        if (Number(process.version.match(/^v(\d+\.\d+)/)[1]) < 16) { addServerWarning("MeshCentral will require Node v16 or above in the future, your current version is " + process.version + "."); }
+        if (Number(process.version.match(/^v(\d+\.\d+)/)[1]) < 20) { addServerWarning("MeshCentral will require Node v20 or above in the future, your current version is " + process.version + "."); }
 
         // Setup certificate operations
         obj.certificateOperations = require('./certoperations.js').CertificateOperations(obj);
@@ -3618,9 +3618,9 @@ function CreateMeshCentralServer(config, args) {
                 try { objx.meshAgentBinaries[archid].pe = obj.exeHandler.parseWindowsExecutable(agentpath); } catch (ex) { }
             }
 
-            // If agents must be stored in RAM or if this is a Windows 32/64 agent, load the agent in RAM.
-            if ((obj.args.agentsinram === true) || (((archid == 3) || (archid == 4)) && (obj.args.agentsinram !== false))) {
-                if ((archid == 3) || (archid == 4)) {
+            // If agents must be stored in RAM or if this is a Windows 32/64/ARM64 agent, load the agent in RAM.
+            if ((obj.args.agentsinram === true) || (((archid == 3) || (archid == 4) || (archid == 43)) && (obj.args.agentsinram !== false))) {
+                if ((archid == 3) || (archid == 4) || (archid == 43)) {
                     // Load the agent with a random msh added to it.
                     const outStream = new require('stream').Duplex();
                     outStream.meshAgentBinary = objx.meshAgentBinaries[archid];
@@ -3734,7 +3734,7 @@ function CreateMeshCentralServer(config, args) {
             obj.exeHandler.hashExecutableFile(options);
 
             // If we are not loading Windows binaries to RAM, compute the RAW file hash of the signed binaries here.
-            if ((obj.args.agentsinram === false) && ((archid == 3) || (archid == 4))) {
+            if ((obj.args.agentsinram === false) && ((archid == 3) || (archid == 4) || (archid == 43))) {
                 const hash = obj.crypto.createHash('sha384').update(obj.fs.readFileSync(agentpath));
                 objx.meshAgentBinaries[archid].fileHash = hash.digest('binary');
                 objx.meshAgentBinaries[archid].fileHashHex = Buffer.from(objx.meshAgentBinaries[archid].fileHash, 'binary').toString('hex');
@@ -4392,7 +4392,7 @@ function mainStart() {
             if (typeof config.settings.autobackup.googledrive == 'object') { modules.push('googleapis@128.0.0'); }
             // Enable WebDAV Support
             if (typeof config.settings.autobackup.webdav == 'object') {
-                if ((typeof config.settings.autobackup.webdav.url != 'string') || (typeof config.settings.autobackup.webdav.username != 'string') || (typeof config.settings.autobackup.webdav.password != 'string')) { addServerWarning("Missing WebDAV parameters.", 2, null, !args.launch); } else { modules.push('webdav@5.8.0'); }
+                if ((typeof config.settings.autobackup.webdav.url != 'string') || (typeof config.settings.autobackup.webdav.username != 'string') || (typeof config.settings.autobackup.webdav.password != 'string')) { addServerWarning("Missing WebDAV parameters.", 2, null, !args.launch); } else { modules.push('webdav@5.9.0'); }
             }
             // Enable S3 Support
             if (typeof config.settings.autobackup.s3 == 'object') { modules.push('minio@8.0.6'); }

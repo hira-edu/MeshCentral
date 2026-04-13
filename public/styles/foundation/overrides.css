@@ -1,0 +1,48 @@
+@layer overrides {
+  body[data-mc-surface="default3"] {
+    color-scheme: light;
+  }
+
+  body[data-mc-surface="default3"].night {
+    color-scheme: dark;
+  }
+
+  body[data-mc-surface="default3"] :is(.form-control, .form-control-sm, .form-select, .form-select-sm, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), textarea, select) {
+    background-color: #fff;
+    color: #152033;
+    border-color: #adb5bd;
+  }
+
+  body[data-mc-surface="default3"].night :is(.form-control, .form-control-sm, .form-select, .form-select-sm, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), textarea, select) {
+    background-color: #111b2b;
+    color: #edf2fa;
+    border-color: #415370;
+  }
+
+  body[data-mc-surface="default3"] ::placeholder {
+    color: #68758c;
+    opacity: 1;
+  }
+
+  body[data-mc-surface="default3"].night ::placeholder {
+    color: #8f9bb0;
+  }
+
+  body[data-mc-surface="default3"] :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    outline: 3px solid var(--mc-color-focus-ring);
+    outline-offset: 2px;
+  }
+
+  body[data-mc-surface="default3"] .mc-default3-bridge__header-slot,
+  body[data-mc-surface="default3"] .mc-default3-bridge__subnav-slot {
+    display: flex;
+    align-items: center;
+    gap: var(--mc-space-3);
+  }
+
+  body[data-mc-surface="default3"] .mc-default3-bridge__header-slot:empty,
+  body[data-mc-surface="default3"] .mc-default3-bridge__subnav-slot:empty {
+    display: none;
+  }
+
+}

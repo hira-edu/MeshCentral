@@ -1,0 +1,50 @@
+<div class="mc-shell-user-menu" data-mc-shell-user-menu>
+  <button
+    type="button"
+    class="mc-shell-user-menu__trigger"
+    data-mc-user-menu-trigger
+    aria-controls="{{menuId}}"
+    aria-expanded="false"
+  >
+    {{{triggerContent}}}
+  </button>
+
+  <div
+    id="{{menuId}}"
+    class="mc-shell-user-menu__panel mc-panel"
+    data-mc-user-menu-panel
+    hidden
+    aria-hidden="true"
+  >
+    {{{menuContent}}}
+
+    {{#if uiSettings}}
+      <section class="mc-shell-user-menu__submenu-group">
+        <button
+          type="button"
+          class="mc-shell-user-menu__submenu-trigger"
+          data-mc-user-menu-submenu-trigger
+          aria-controls="{{uiSettings.menuId}}"
+          aria-expanded="false"
+        >
+          <span>{{uiSettings.label}}</span>
+          <i class="{{uiSettings.chevronClass}}" data-mc-user-menu-submenu-chevron aria-hidden="true"></i>
+        </button>
+
+        <div
+          id="{{uiSettings.menuId}}"
+          class="mc-shell-user-menu__submenu"
+          data-mc-user-menu-submenu
+          hidden
+          aria-hidden="true"
+        >
+          {{{uiSettings.content}}}
+        </div>
+      </section>
+    {{/if}}
+
+    {{#if @partial-block}}
+      {{> @partial-block}}
+    {{/if}}
+  </div>
+</div>

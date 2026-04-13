@@ -55,6 +55,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.SwapMouse = false;
     obj.UseExtendedKeyFlag = true;
     obj.FirstDraw = false;
+    obj.drawGeneration = 0;
 
     // Remote user mouse and keyboard lock
     obj.onRemoteInputLockChanged = null;
@@ -85,9 +86,40 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.mouseCursorActive = function (x) { if (xMouseCursorActive == x) return; xMouseCursorActive = x; obj.CanvasId.style.cursor = ((x == true) ? xMouseCursorCurrent : 'default'); }
     var mouseCursors = ['default', 'progress', 'crosshair', 'pointer', 'help', 'text', 'no-drop', 'move', 'nesw-resize', 'ns-resize', 'nwse-resize', 'w-resize', 'alias', 'wait', 'none', 'not-allowed', 'col-resize', 'row-resize', 'copy', 'zoom-in', 'zoom-out'];
 
+    obj.trace = function (msg) {
+        if ((obj.debugmode > 0) || ((typeof urlargs != 'undefined') && (urlargs.kvmtrace != null))) { console.log('KVMTRACE', msg); }
+    }
+
+    obj.resetDrawState = function (reason) {
+        obj.drawGeneration++;
+        obj.PendingOperations = [];
+        obj.tilesReceived = 0;
+        obj.TilesDrawn = 0;
+        obj.KillDraw = 0;
+        if (reason != null) { obj.trace('draw-reset reason=' + reason + ' generation=' + obj.drawGeneration); }
+    }
+
+    obj.resetStreamState = function (reason) {
+        obj.resetDrawState(reason);
+        obj.stopInput = false;
+        obj.firstUpKeys = [];
+        obj.pressedKeys = [];
+        obj.RemoteInputLock = null;
+        obj.KeyboardState = 0;
+        obj.displays = null;
+        obj.selectedDisplay = null;
+        obj.TouchArray = {};
+    }
+
+    obj.resetSessionState = function (reason) {
+        obj.resetStreamState(reason);
+        obj.FirstDraw = false;
+    }
+
     obj.Start = function () {
         obj.State = 0;
         obj.accumulator = null;
+        obj.resetSessionState('start');
     }
 
     obj.Stop = function () {
@@ -97,6 +129,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         obj.touchenabled = 0;
         if (obj.onScreenSizeChange != null) { obj.onScreenSizeChange(obj, obj.ScreenWidth, obj.ScreenHeight, obj.CanvasId); }
         obj.Canvas.clearRect(0, 0, obj.CanvasId.width, obj.CanvasId.height);
+        obj.resetSessionState('stop');
     }
 
     obj.xxStateChange = function (newstate) {
@@ -128,15 +161,18 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.ProcessPictureMsg = function (data, X, Y) {
         //if (obj.targetnode != null) obj.Debug("ProcessPictureMsg " + X + "," + Y + " - " + obj.targetnode.substring(0, 8));
         var tile = new Image();
-        tile.xcount = obj.tilesReceived++;
+        var generation = obj.drawGeneration;
+        obj.tilesReceived++;
+        tile.xcount = obj.tilesReceived;
         var r = obj.tilesReceived, tdata = data.slice(4), ptr = 0, strs = [];
         // String.fromCharCode.apply() can't handle very large argument count, so we have to split like this.
         while ((tdata.byteLength - ptr) > 50000) { strs.push(String.fromCharCode.apply(null, tdata.slice(ptr, ptr + 50000))); ptr += 50000; }
         if (ptr > 0) { strs.push(String.fromCharCode.apply(null, tdata.slice(ptr))); } else { strs.push(String.fromCharCode.apply(null, tdata)); }
         tile.src = 'data:image/jpeg;base64,' + btoa(strs.join(''));
         tile.onload = function () {
+            if (generation != obj.drawGeneration) { return; }
             //console.log('DecodeTile #' + this.xcount);
-            if ((obj.Canvas != null) && (obj.KillDraw < r) && (obj.State != 0)) {
+            if ((obj.Canvas != null) && (obj.State != 0)) {
                 obj.PendingOperations.push([r, 2, tile, X, Y]);
                 while (obj.DoPendingOperations()) { }
             } else {
@@ -199,15 +235,16 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     }
 
     obj.ProcessScreenMsg = function (width, height) {
+        var sameSize = ((obj.ScreenWidth == width) && (obj.ScreenHeight == height));
         if (obj.debugmode > 0) { console.log('ScreenSize: ' + width + ' x ' + height); }
-        if ((obj.ScreenWidth == width) && (obj.ScreenHeight == height)) return; // Ignore change if screen is same size.
+        obj.trace('screen-reset width=' + width + ' height=' + height + ' sameSize=' + (sameSize ? 1 : 0));
         obj.Canvas.setTransform(1, 0, 0, 1, 0, 0);
         obj.rotation = 0;
-        obj.FirstDraw = true;
         obj.ScreenWidth = obj.width = width;
         obj.ScreenHeight = obj.height = height;
-        obj.KillDraw = obj.tilesReceived;
-        while (obj.PendingOperations.length > 0) { obj.PendingOperations.shift(); }
+        obj.resetStreamState('screen:' + width + 'x' + height + ':same=' + (sameSize ? 1 : 0));
+        obj.FirstDraw = true;
+        if (obj.parent != null && obj.parent.State < 3) { obj.parent.xxStateChange(3); }
         obj.SendCompressionLevel(obj.ImageType);
         obj.SendUnPause();
         obj.SendRemoteInputLock(2); // Query input lock state

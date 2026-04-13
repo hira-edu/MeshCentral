@@ -1,0 +1,76 @@
+{
+  "settings": {
+    "cert": "high.support",
+    "WANonly": true,
+    "aliasPort": 443,
+    "port": 4430,
+    "portBind": "127.0.0.1",
+    "redirPort": 0,
+    "tlsOffload": "127.0.0.1,::1",
+    "dbEncryptKey": "547c0dd82d709fabd11e40d1d23bf78c3492aea90d2e1c8c42a3d83494108f0b",
+    "dbRecordsEncryptKey": "6a64dd8118dff31c12646ae92b38a712d202561b74def008743b70a0cc34e6e7",
+    "sessionKey": "8491dd1841736e9376dff1a5cddf5fc9ae17d7b1c05e472052f1e4528718ce5e",
+    "selfUpdate": false,
+    "noAgentUpdate": true,
+    "plugins": {
+      "enabled": true
+    },
+    "agentLogDump": true,
+    "agentCoreDump": true,
+    "agentPing": 60,
+    "agentPong": 60,
+    "agentIdleTimeout": 180,
+    "agentSignLock": true,
+    "agentPortTls": false,
+    "webRTC": false,
+    "ciphers": "HIGH:!aNULL:!MD5",
+    "threads": 4,
+    "dataPath": "/opt/meshcentral/meshcentral-data",
+    "mongodb": "mongodb://meshcentral:StrongMeshMongoPass!@127.0.0.1:27017/meshcentral",
+    "autobackup": {
+      "backuppath": "/var/meshcentral-backups",
+      "intervalhours": 24,
+      "keeplastdaysbackup": 14,
+      "backupskipfoldersglob": [
+        "**/apparmor/**",
+        "**/cache/**",
+        "**/tmp/**",
+        "/var/lib/apt/lists/**"
+      ]
+    },
+    "ignoreAgentHashCheck": true,
+    "agentSkipServerSign": true,
+    "desktopmultiplex": true
+  },
+  "domains": {
+    "": {
+      "title": "High Support",
+      "title2": "Remote Management",
+      "auth": "default",
+      "newAccounts": false,
+      "geoLocation": true,
+      "ipLocation": true,
+      "meshMessenger": true,
+      "showmodernuitoggle": true,
+      "agentConfig": [
+        "coreDumpEnabled=1",
+        "connectionTimeout=60",
+        "retryAttempts=10",
+        "retryDelay=20",
+        "agentPing=60",
+        "agentPong=60",
+        "ignoreProxyFile=1"
+      ],
+      "minify": false,
+      "certurl": "https://high.support/",
+      "url": "https://high.support",
+      "allowedorigin": [
+        "high.support",
+        "agents.high.support",
+        "relay.high.support",
+        "cfrelay.high.support"
+      ],
+      "umhControls": true
+    }
+  }
+}

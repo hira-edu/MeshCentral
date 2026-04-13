@@ -264,7 +264,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
 
                 // Add any previous agent traffic accounting
                 if (peer.agentInTraffic) { inTraffc += peer.agentInTraffic; }
-                if (peer.outTraffc) { inTraffc += peer.agentOutTraffic; }
+                if (peer.agentOutTraffic) { outTraffc += peer.agentOutTraffic; }
 
                 // Compute traffic to and from the agent
                 if (obj.agent != null) {
@@ -376,15 +376,17 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         if (obj.agent.sending) {
             obj.agent.sendQueue.push(data);
 
-            // Flow control, pause all viewers is the queue is backing up
-            if (obj.agent.sendQueue > 10) {
+            // Flow control, pause all viewers if the queue is backing up.
+            if (obj.agent.sendQueue.length > 10) {
                 obj.agent.overflow = true;
+                parent.parent.debug('relay', 'DesktopRelay: Pausing viewers, agent send backlog=' + obj.agent.sendQueue.length + ' node=' + obj.nodeid);
                 for (var i in obj.viewers) {
                     var v = obj.viewers[i];
                     if (v.paused == false) { v.paused = true; v.ws._socket.pause(); }
                 }
             }
         } else {
+            obj.agent.sending = true;
             obj.agent.ws.send(data, sendAgentNext);
         }
     }
@@ -750,12 +752,14 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 break;
             case 7: // Screen Size, clear the screen state and compute the tile count
                 if (data.length < 8) break;
-                if ((obj.width === data.readUInt16BE(4)) && (obj.height === data.readUInt16BE(6))) break; // Same screen size as before, skip this.
+                var width = data.readUInt16BE(4), height = data.readUInt16BE(6);
+                var sameSize = ((obj.width === width) && (obj.height === height));
+                parent.parent.debug('relay', 'DesktopRelay: Reanchoring screen packet ' + width + 'x' + height + ' sameSize=' + sameSize + ' viewers=' + obj.viewers.length + ' node=' + obj.nodeid);
                 obj.counter++;
                 obj.lastScreenSizeCmd = data;
                 obj.lastScreenSizeCounter = obj.counter;
-                obj.width = data.readUInt16BE(4);
-                obj.height = data.readUInt16BE(6);
+                obj.width = width;
+                obj.height = height;
                 obj.swidth = obj.width / 16;
                 obj.sheight = obj.height / 16;
                 if (Math.floor(obj.swidth) != obj.swidth) { obj.swidth = Math.floor(obj.swidth) + 1; }

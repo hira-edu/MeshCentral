@@ -120,20 +120,32 @@ function linux_identifiers()
         identifiers['product_name'] = ret['product_name'];
     }
 
+    // BIOS Mode
     try {
-        if ((require('fs')).existsSync('/sys/firmware/efi')) {
-            identifiers['bios_mode'] = 'UEFI';
-        } else if ((require('fs')).existsSync('/sys/firmware/devicetree/base/model')) {
-            const modelContent = (require('fs')).readFileSync('/sys/firmware/devicetree/base/model').trim();
+        var uefiExist = false;
+        var assumePi = false;
 
-            if (modelContent.includes('Raspberry Pi')) {
-                identifiers['bios_mode'] = 'Raspberry Pi Firmware (Proprietary)'
+        try { uefiExist = (require('fs')).existsSync('/sys/firmware/efi'); }
+        catch (ex) { uefiExist = false; }
+
+        try { assumePi = (require('fs')).existsSync('/sys/firmware/devicetree/base/model'); }
+        catch (ex) { assumePi = false; }
+
+        if (uefiExist) {
+            identifiers['bios_mode'] = 'UEFI';
+        } else if (assumePi) {
+            var modelBuffer = (require('fs')).readFileSync('/sys/firmware/devicetree/base/model');
+            var modelString = modelBuffer.toString().trim()
+
+            if (modelString.includes('Raspberry Pi')) {
+                identifiers['bios_mode'] = 'Raspberry Pi Firmware (Proprietary)';
             }
         } else {
-            identifiers['bios_mode'] = 'Legacy';
+            identifiers['bios_mode'] = 'Legacy BIOS (MBR)';
         }
     } catch (ex) { identifiers['bios_mode'] = 'Legacy / Unknown'; }
 
+    // CPU Model info
     child = require('child_process').execFile('/bin/sh', ['sh']);
     child.stdout.str = ''; child.stdout.on('data', dataHandler);
     child.stdin.write('cat /proc/cpuinfo | grep -i "model name" | ' + "tr '\\n' ':' | awk -F: '{ print $2 }'\nexit\n");
@@ -527,6 +539,14 @@ function windows_identifiers()
     if(values[0]){
         trimResults(values);
         ret.windows.osinfo = values[0];
+		
+		try {
+            var reg = require('win-registry');
+            var ubr = reg.QueryKey(reg.HKEY.LocalMachine, 'Software\\Microsoft\\Windows NT\\CurrentVersion', 'UBR');
+            if(ubr && ret.windows.osinfo.Version){
+                ret.windows.osinfo.BuildRevision = ret.windows.osinfo.Version + "." + ubr 
+            }
+        } catch (ex){}
     }
 
     values = require('win-wmi-fixed').query('ROOT\\CIMV2', "SELECT * FROM Win32_DiskPartition");

@@ -1,0 +1,147 @@
+@layer tokens {
+  :root,
+  [data-mc-theme="light"] {
+    color-scheme: light;
+    --mc-font-sans: "Segoe UI Variable Text", "Atkinson Hyperlegible", "Noto Sans", sans-serif;
+    --mc-font-mono: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", monospace;
+
+    --mc-text-strong: #152033;
+    --mc-text-muted: #46546c;
+    --mc-text-subtle: #68758c;
+    --mc-text-inverse: #f7f9fc;
+
+    --mc-surface-canvas: #f3f6fb;
+    --mc-surface-app: #ffffff;
+    --mc-surface-panel: #f8fafc;
+    --mc-surface-raised: #ffffff;
+    --mc-surface-inset: #e8eef6;
+    --mc-surface-accent-soft: #dbeafe;
+    --mc-surface-success-soft: #dcfce7;
+    --mc-surface-warning-soft: #fef3c7;
+    --mc-surface-danger-soft: #fee2e2;
+    --mc-surface-scrim: rgb(15 23 42 / 62%);
+
+    --mc-border-subtle: #d7dfeb;
+    --mc-border-strong: #aab7c9;
+
+    --mc-accent: #0a6ee8;
+    --mc-accent-hover: #0958b7;
+    --mc-accent-strong: #08438b;
+    --mc-success: #18794d;
+    --mc-warning: #9a6200;
+    --mc-danger: #ba1f33;
+    --mc-info: #006f8f;
+
+    --mc-shadow-sm: 0 1px 2px rgb(15 23 42 / 8%);
+    --mc-shadow-md: 0 10px 24px rgb(15 23 42 / 10%);
+    --mc-shadow-lg: 0 20px 44px rgb(15 23 42 / 14%);
+
+    --mc-space-2: 0.125rem;
+    --mc-space-4: 0.25rem;
+    --mc-space-8: 0.5rem;
+    --mc-space-12: 0.75rem;
+    --mc-space-16: 1rem;
+    --mc-space-20: 1.25rem;
+    --mc-space-24: 1.5rem;
+    --mc-space-32: 2rem;
+    --mc-space-40: 2.5rem;
+    --mc-space-48: 3rem;
+
+    --mc-radius-sm: 0.375rem;
+    --mc-radius-md: 0.625rem;
+    --mc-radius-lg: 0.875rem;
+    --mc-radius-pill: 999px;
+
+    --mc-font-size-100: 0.75rem;
+    --mc-font-size-200: 0.875rem;
+    --mc-font-size-300: 1rem;
+    --mc-font-size-400: 1.125rem;
+    --mc-font-size-500: 1.375rem;
+    --mc-font-size-600: 1.75rem;
+
+    --mc-line-tight: 1.2;
+    --mc-line-default: 1.5;
+    --mc-line-loose: 1.65;
+
+    --mc-control-height-sm: 2rem;
+    --mc-control-height-md: 2.5rem;
+    --mc-control-height-lg: 3rem;
+    --mc-icon-size-sm: 1rem;
+    --mc-icon-size-md: 1.25rem;
+    --mc-icon-size-lg: 1.5rem;
+    --mc-nav-width-collapsed: 4.5rem;
+    --mc-nav-width-expanded: 17rem;
+    --mc-drawer-width: min(24rem, 100vw - 2rem);
+    --mc-dialog-width: min(42rem, 100vw - 2rem);
+
+    --mc-duration-fast: 120ms;
+    --mc-duration-default: 180ms;
+    --mc-duration-slow: 260ms;
+    --mc-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+    --mc-z-base: 0;
+    --mc-z-sticky: 100;
+    --mc-z-drawer: 400;
+    --mc-z-dialog: 800;
+    --mc-z-toast: 900;
+
+    --mc-breakpoint-compact: 30rem;
+    --mc-breakpoint-tablet: 48rem;
+    --mc-breakpoint-laptop: 64rem;
+    --mc-breakpoint-desktop: 80rem;
+    --mc-breakpoint-wide: 96rem;
+
+    --mc-safe-top: env(safe-area-inset-top, 0px);
+    --mc-safe-right: env(safe-area-inset-right, 0px);
+    --mc-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --mc-safe-left: env(safe-area-inset-left, 0px);
+  }
+
+  [data-mc-theme="dark"] {
+    color-scheme: dark;
+    --mc-text-strong: #edf2fa;
+    --mc-text-muted: #b5c0d3;
+    --mc-text-subtle: #8f9bb0;
+    --mc-text-inverse: #0e1726;
+
+    --mc-surface-canvas: #0d1522;
+    --mc-surface-app: #111b2b;
+    --mc-surface-panel: #162235;
+    --mc-surface-raised: #1b2a40;
+    --mc-surface-inset: #0c1320;
+    --mc-surface-accent-soft: #0f2f57;
+    --mc-surface-success-soft: #0d3321;
+    --mc-surface-warning-soft: #3b2a05;
+    --mc-surface-danger-soft: #43121a;
+    --mc-surface-scrim: rgb(2 6 23 / 72%);
+
+    --mc-border-subtle: #2b3a52;
+    --mc-border-strong: #415370;
+
+    --mc-accent: #7bb0ff;
+    --mc-accent-hover: #9bc2ff;
+    --mc-accent-strong: #bed7ff;
+    --mc-success: #5ccb8a;
+    --mc-warning: #f4bb53;
+    --mc-danger: #ff8192;
+    --mc-info: #68d1f6;
+
+    --mc-shadow-sm: 0 1px 2px rgb(2 6 23 / 28%);
+    --mc-shadow-md: 0 10px 24px rgb(2 6 23 / 34%);
+    --mc-shadow-lg: 0 20px 44px rgb(2 6 23 / 40%);
+  }
+
+  [data-mc-density="compact"] {
+    --mc-control-height-sm: 1.75rem;
+    --mc-control-height-md: 2.25rem;
+    --mc-control-height-lg: 2.75rem;
+    --mc-space-12: 0.625rem;
+    --mc-space-16: 0.875rem;
+    --mc-space-24: 1.25rem;
+  }
+
+  [data-mc-contrast="high"] {
+    --mc-border-subtle: var(--mc-border-strong);
+    --mc-text-muted: var(--mc-text-strong);
+  }
+}

@@ -155,7 +155,7 @@ var CreateAgentRedirect = function (meshserver, module, serverPublicNamePort, au
                 if (e.data == 'cr') { obj.serverIsRecording = true; }
                 if (obj.options != null) { delete obj.options.action; obj.options.type = 'options'; try { obj.sendCtrlMsg(JSON.stringify(obj.options)); } catch (ex) { } }
                 try { obj.socket.send(obj.protocol); } catch (ex) { }
-                obj.xxStateChange(3);
+                if (obj.protocol != 2) { obj.xxStateChange(3); }
 
                 if (obj.attemptWebRTC == true) {
                     // Try to get WebRTC setup
