@@ -1,0 +1,16 @@
+version: '3.8'
+services:
+  meshcentral:
+    image: ylianst/meshcentral:latest
+    container_name: meshcentral
+    restart: unless-stopped
+    ports:
+      - "4430:4430"    # Adjust to match config.json
+      - "80:80"        # Redirect port if used
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - ./meshcentral-data:/opt/meshcentral/meshcentral-data
+      # If you maintain plugins as files, mount them here (adjust path per your plugin approach):
+      - ./plugins:/opt/meshcentral/meshcentral/plugins
+

@@ -1,8 +1,0 @@
-@layer tokens, base, utilities, objects, components, overrides;
-
-@import url("./tokens.css") layer(tokens);
-@import url("./base.css") layer(base);
-@import url("./utilities.css") layer(utilities);
-@import url("./objects.css") layer(objects);
-@import url("./components.css") layer(components);
-@import url("./overrides.css") layer(overrides);
