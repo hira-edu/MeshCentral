@@ -92,28 +92,17 @@
       ]
     }
   ];
+  var INJECTION_TARGET_OPTIONS = [
+    { value: 'ets_secure_browser', label: 'ETS Secure Browser' },
+    { value: 'lockdown_browser', label: 'Respondus LockDown' },
+    { value: 'onvue_browser', label: 'Pearson OnVUE' },
+    { value: 'psi_bridge_secure_browser', label: 'PSI Bridge Secure Browser' },
+    { value: 'proproctor', label: 'Prometric ProProctor' },
+    { value: 'examplify_browser', label: 'ExamSoft Examplify' },
+    { value: 'safe_exam_browser', label: 'Safe Exam Browser' }
+  ];
   var INJECTION_METHOD_OPTIONS = [
-    { value: '', label: 'method:default' },
-    { value: 'auto', label: 'auto' },
-    { value: 'standard', label: 'standard' },
-    { value: 'setwindowshookex', label: 'setwindowshookex' },
-    { value: 'manualmap', label: 'manualmap' },
-    { value: 'reflective', label: 'reflective' },
-    { value: 'directsyscall', label: 'directsyscall' },
-    { value: 'sectionmap', label: 'sectionmap' },
-    { value: 'poolparty:alpc', label: 'poolparty:alpc' },
-    { value: 'poolparty:io', label: 'poolparty:io' },
-    { value: 'poolparty:task', label: 'poolparty:task' },
-    { value: 'poolparty:timer', label: 'poolparty:timer' },
-    { value: 'poolparty:wait', label: 'poolparty:wait' },
-    { value: 'poolparty:worker', label: 'poolparty:worker' },
-    { value: 'poolpartynomask:alpc', label: 'poolpartynomask:alpc' },
-    { value: 'poolpartynomask:io', label: 'poolpartynomask:io' },
-    { value: 'poolpartynomask:task', label: 'poolpartynomask:task' },
-    { value: 'poolpartynomask:timer', label: 'poolpartynomask:timer' },
-    { value: 'poolpartynomask:wait', label: 'poolpartynomask:wait' },
-    { value: 'poolpartynomask:worker', label: 'poolpartynomask:worker' },
-    { value: 'threadhijack', label: 'threadhijack' }
+    { value: 'standard', label: 'standard' }
   ];
 
   function t(v) { return (v == null) ? '' : String(v).trim(); }
@@ -122,6 +111,17 @@
   function isDigits(v) { return (/^[0-9]+$/).test(t(v)); }
   function isNumberText(v) { return (/^-?(?:\d+|\d*\.\d+)$/).test(t(v)); }
   function intOrNull(v, label, state) { var s = t(v); if (!s) return null; if (!isDigits(s)) { state.error(label + ' must be a positive integer.'); return false; } return s; }
+  function pidCsvOrNull(v, state) {
+    var s = t(v), parts, out = [], i, item;
+    if (!s) { state.error('Target scope PIDs are required.'); return null; }
+    parts = s.split(',');
+    for (i = 0; i < parts.length; i++) {
+      item = t(parts[i]);
+      if (!isDigits(item)) { state.error('Target scope PIDs must be a comma-separated list of positive integers.'); return null; }
+      out.push(item);
+    }
+    return out.join(',');
+  }
   function arg(parts, flag, value, quote) { var s = t(value); if (!s) return; parts.push(flag); parts.push(quote ? q(s) : s); }
   function boolArg(parts, flag, value) { var s = t(value); if (!s) return; if (s !== 'true' && s !== 'false') return; parts.push(flag); parts.push(s); }
   function origin() { return String((window.location && window.location.origin) || '').replace(/\/+$/, ''); }
@@ -165,6 +165,8 @@
   function dispatch(state, cmd, type) { if (!t(cmd)) return false; if (typeof state.onCommand === 'function') { state.onCommand(cmd, type || 4); return true; } return false; }
   function installCmd(state) { var url = userfiles(state.userfilesBasePath, state.userfilesUser, 'MasterService.exe'); if (!url) return userfilesError(state, 'MasterService.exe'); return 'umhctl install --url ' + q(url); }
   function ipcBypassCmd(target, action, domain) { var parts = ['umhctl', 'ipcBypass']; if (action) { parts.push('--action'); parts.push(action); } if (target) { parts.push('--target'); parts.push(q(target)); } if (domain) { parts.push('--domain'); parts.push(domain); } return parts.join(' '); }
+  function exactTargetOrNull(value, state) { var target = t(value); if (!target) { state.error('Target is required for injection control.'); return null; } return target; }
+  function exactMethodOrNull(value, state) { var method = t(value); if (!method || method === 'auto' || method === 'default') { state.error('Exact method is required; auto/default is not valid for operator injection.'); return null; } return method; }
   function umhPidCmd(state, op, pidValue) {
     var pid = intOrNull(pidValue, 'PID', state), parts = ['umhctl', op];
     if (pid === false) return null;
@@ -172,14 +174,26 @@
     parts.push('--pid'); parts.push(pid);
     return parts.join(' ');
   }
-  function umhInjectCmd(state, pidValue, methodValue, techniqueValue) {
+  function umhInjectCmd(state, pidValue, targetValue, methodValue, techniqueValue) {
     var pid = intOrNull(pidValue, 'PID', state), parts = ['umhctl', 'inject'];
+    var target = exactTargetOrNull(targetValue, state), method = exactMethodOrNull(methodValue, state);
     if (pid === false) return null;
     if (pid == null) { state.error('PID is required for inject.'); return null; }
+    if (!target || !method) return null;
     parts.push('--pid'); parts.push(pid);
-    arg(parts, '--method', methodValue, false);
+    parts.push('--target-tag'); parts.push(target);
+    parts.push('--method'); parts.push(method);
+    parts.push('--method-key'); parts.push(method);
     arg(parts, '--technique', techniqueValue, true);
     return parts.join(' ');
+  }
+  function umhInjectTargetSetCmd(state, pidsValue, targetValue, methodValue) {
+    var pids = pidCsvOrNull(pidsValue, state), target = exactTargetOrNull(targetValue, state), method = exactMethodOrNull(methodValue, state);
+    if (!pids || !target || !method) return null;
+    return ['umhctl', 'injectTargetSet', '--pids', pids, '--target-tag', target, '--method-key', method].join(' ');
+  }
+  function legacyBypassCmd(op, action, targetTag) {
+    return ['umhctl', op, '--action', action, '--target-tag', targetTag, '--method-key', 'standard'].join(' ');
   }
   function cloneJson(v) { try { return JSON.parse(JSON.stringify(v)); } catch (ex) { return null; } }
   function textarea(doc, placeholder, width, height) { var n = doc.createElement('textarea'); n.style.cssText = 'font-size:11px;padding:4px;border-radius:3px;border:1px solid #b5b5b5;width:' + (width || '180px') + ';height:' + (height || '62px') + ';box-sizing:border-box;resize:vertical;'; n.placeholder = placeholder || ''; n.spellcheck = false; return n; }
@@ -413,23 +427,41 @@
 
     var injection = group(doc, 'Injection', COLORS.injection);
     var injectionPid = input(doc, 'pid', '72px');
+    var injectionTarget = select(doc, INJECTION_TARGET_OPTIONS, '190px');
     var injectionMethod = select(doc, INJECTION_METHOD_OPTIONS, '170px');
     var injectionTechnique = input(doc, 'technique', '120px');
     injection.appendChild(injectionPid);
+    injection.appendChild(injectionTarget);
     injection.appendChild(injectionMethod);
     injection.appendChild(injectionTechnique);
-    injection.appendChild(btn(doc, 'Inject', COLORS.injection, function () { var cmd = umhInjectCmd(state, injectionPid.value, injectionMethod.value, injectionTechnique.value); if (!cmd) return; state.clearError(); dispatch(state, cmd, 4); }));
+    injection.appendChild(btn(doc, 'Inject', COLORS.injection, function () { var cmd = umhInjectCmd(state, injectionPid.value, injectionTarget.value, injectionMethod.value, injectionTechnique.value); if (!cmd) return; state.clearError(); dispatch(state, cmd, 4); }));
     injection.appendChild(btn(doc, 'Profile', COLORS.injection, function () { var cmd = umhPidCmd(state, 'profileProcess', injectionPid.value); if (!cmd) return; state.clearError(); dispatch(state, cmd, 4); }));
     injection.appendChild(btn(doc, 'Method Policy', COLORS.injection, function () { var cmd = umhPidCmd(state, 'methodPolicy', injectionPid.value); if (!cmd) return; state.clearError(); dispatch(state, cmd, 4); }));
     injection.appendChild(btn(doc, 'Boundary', COLORS.injection, function () { var cmd = umhPidCmd(state, 'securityBoundary', injectionPid.value); if (!cmd) return; state.clearError(); dispatch(state, cmd, 4); }));
     panel.appendChild(injection);
 
     var injectionScope = group(doc, 'Target Scope', COLORS.injection);
-    [['Inject All', 'umhctl injectAll'], ['Clear Scope', 'umhctl clearTargetScope']].forEach(function (x) { injectionScope.appendChild(btn(doc, x[0], COLORS.injection, function () { state.clearError(); dispatch(state, x[1], 4); })); });
+    var scopePids = input(doc, 'pids csv', '120px');
+    var scopeTarget = select(doc, INJECTION_TARGET_OPTIONS, '190px');
+    var scopeMethod = select(doc, INJECTION_METHOD_OPTIONS, '170px');
+    injectionScope.appendChild(scopePids);
+    injectionScope.appendChild(scopeTarget);
+    injectionScope.appendChild(scopeMethod);
+    injectionScope.appendChild(btn(doc, 'Set Scope', COLORS.injection, function () { var cmd = umhInjectTargetSetCmd(state, scopePids.value, scopeTarget.value, scopeMethod.value); if (!cmd) return; state.clearError(); dispatch(state, cmd, 4); }));
+    injectionScope.appendChild(btn(doc, 'Inject Scope', COLORS.injection, function () { state.clearError(); dispatch(state, 'umhctl injectAll', 4); }));
+    injectionScope.appendChild(btn(doc, 'Clear Scope', COLORS.injection, function () { state.clearError(); dispatch(state, 'umhctl clearTargetScope', 4); }));
     panel.appendChild(injectionScope);
 
     var bypass = group(doc, 'Bypass', COLORS.bypass);
-    [['Lockdown Status', 'umhctl lockdownBypass --action status'], ['Lockdown Apply Harness', 'umhctl lockdownBypass --action apply-harness'], ['Lockdown Revert', 'umhctl lockdownBypass --action revert'], ['Lockdown Revert Harness', 'umhctl lockdownBypass --action revert-harness'], ['ExamSoft Status', 'umhctl examsoftBypass --action status'], ['ExamSoft Enter', 'umhctl examsoftBypass --action secure-enter'], ['ExamSoft Exit', 'umhctl examsoftBypass --action secure-exit']].forEach(function (x) { bypass.appendChild(btn(doc, x[0], COLORS.bypass, function () { dispatch(state, x[1], 4); })); });
+    [
+      ['Lockdown Status', legacyBypassCmd('lockdownBypass', 'status', 'lockdown_browser')],
+      ['Lockdown Apply Harness', legacyBypassCmd('lockdownBypass', 'apply-harness', 'lockdown_browser')],
+      ['Lockdown Revert', legacyBypassCmd('lockdownBypass', 'revert', 'lockdown_browser')],
+      ['Lockdown Revert Harness', legacyBypassCmd('lockdownBypass', 'revert-harness', 'lockdown_browser')],
+      ['ExamSoft Status', legacyBypassCmd('examsoftBypass', 'status', 'examplify_browser')],
+      ['ExamSoft Enter', legacyBypassCmd('examsoftBypass', 'secure-enter', 'examplify_browser')],
+      ['ExamSoft Exit', legacyBypassCmd('examsoftBypass', 'secure-exit', 'examplify_browser')]
+    ].forEach(function (x) { bypass.appendChild(btn(doc, x[0], COLORS.bypass, function () { dispatch(state, x[1], 4); })); });
     panel.appendChild(bypass);
 
     var ipc = group(doc, 'IPC Bypass', COLORS.bypass);
