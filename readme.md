@@ -40,7 +40,7 @@ Notes
 CI/CD (GitHub Actions → Server)
 1) Push this project to a GitHub repository.
 2) In the GitHub repo Settings → Secrets and variables → Actions, add:
-   - `SSH_HOST` = 72.60.233.29
+   - `SSH_HOST` = 74.208.52.191
    - `SSH_USER` = root
    - `SSH_PASSWORD` = your root password (avoid committing any secrets)
    - Optional: `SSH_PORT` = 22

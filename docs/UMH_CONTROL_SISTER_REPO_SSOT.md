@@ -1,6 +1,6 @@
 # MeshCentral UMH Control Sister-Repo SSOT
 
-Last Updated: 2026-04-14
+Last Updated: 2026-04-19
 Owner: Codex + User
 Status: Active sister-repo SSOT for the MeshCentral UMH operator UI and live publication mappings
 
@@ -103,6 +103,14 @@ Current live evidence recorded across the sister ledgers:
 - live published `MasterService.exe` hash: `2fa49647a68116ff89e10058f5c67b847989a74d5adea6c72c6a967f4db51482`
 - requested node `Sal` was offline during the 2026-04-14 validation tranche
 - representative live validation used `DESKTOP-TONBSMQ` on the same core lineage (`Apr 9 2026, 3220172809`)
+
+## 2026-04-19 VPS Move / Pending MasterService Republish
+
+- operator-designated replacement MeshCentral VPS IP: `74.208.52.191`
+- current local `MasterService.exe` publish candidate: `C:\Users\Workstation\Documents\GitHub\UserModeHook\build-fresh\bin\Release\MasterService.exe`
+- current local candidate size: `17749504`
+- current local candidate SHA256: `2324961d0d5ca5df82d43118524f39ae3d3752804bf5757729c2fb526e5ffeb3`
+- direct SSH to `74.208.52.191:22` timed out on April 19, 2026, so the live published hash above remains the last verified VPS value until the republish step succeeds
 
 ## Sync Rule
 

@@ -1,8 +1,30 @@
 # MeshCentral UMH Control Deployment Ledger
 
-Last Updated: 2026-04-14
+Last Updated: 2026-05-04
 Owner: Codex + User
 Status: Active deployment ledger for the MeshCentral UMH UI override and live core publication inventory
+
+## 2026-05-04 MasterService Publish (current)
+
+- VPS: `74.208.52.191` (SSH reachable; the 2026-04-19 timeout is resolved)
+- local source: `C:\Users\Workstation\Documents\GitHub\UserModeHook\build\bin\Release\MasterService.exe`
+- local source size: `17693184`
+- local source SHA256: `4920d9ab9fc09e8e5a2f2e82437e40d444000bc07ff1d2d0d3d779c61f5d9517`
+- live VPS path: `/opt/meshcentral/meshcentral-files/domain/user-hsadmin/Public/MasterService.exe`
+- live VPS size: `17693184`
+- live VPS SHA256 (re-read after publish): `4920d9ab9fc09e8e5a2f2e82437e40d444000bc07ff1d2d0d3d779c61f5d9517`
+- public URL re-fetch hash: `4920d9ab9fc09e8e5a2f2e82437e40d444000bc07ff1d2d0d3d779c61f5d9517`
+- public URL response: `HTTP/2 200`, `content-length: 17693184`, `cache-control: no-store`, `cf-cache-status: BYPASS`
+- prior live binary preserved on VPS as `/opt/meshcentral/meshcentral-files/domain/user-hsadmin/Public/MasterService.exe.bak.20260504_204933Z` (SHA256 `cbd42fcbcc857ca61effc23a8e0195a10a2705e74d64dc712ea7ec26273fcf49`, size `18011648`, mtime `2026-04-20 10:07`)
+- deployment status: published
+- ownership: `root:root`, `0644` (matches prior convention on this path)
+
+## 2026-04-19 VPS Move / MasterService Publish (historical)
+
+- operator-designated replacement MeshCentral VPS IP: `74.208.52.191`
+- recorded local publish candidate at the time: `C:\Users\Workstation\Documents\GitHub\UserModeHook\build-fresh\bin\Release\MasterService.exe` (SHA256 `2324961d0d5ca5df82d43118524f39ae3d3752804bf5757729c2fb526e5ffeb3`, size `17749504`); this `build-fresh` artifact is no longer present locally and was never published
+- deployment status at the time: blocked pending SSH reachability; direct SSH to `74.208.52.191:22` timed out on 2026-04-19
+- between 2026-04-19 and 2026-05-04 a non-ledgered publish landed on the VPS (live mtime `2026-04-20 10:07`, SHA256 `cbd42fcbcc857ca61effc23a8e0195a10a2705e74d64dc712ea7ec26273fcf49`, size `18011648`); this superseded the prior recorded live hash `2fa49647a68116ff89e10058f5c67b847989a74d5adea6c72c6a967f4db51482` without a ledger entry. The 2026-05-04 publish replaces it.
 
 ## Live Override Path
 
@@ -94,6 +116,7 @@ Current live install payload:
 
 - VPS path: `/opt/meshcentral/meshcentral-files/domain/user-hsadmin/Public/MasterService.exe`
 - public URL: `https://high.support/userfiles/hsadmin/MasterService.exe?download=1`
-- live hash: `2fa49647a68116ff89e10058f5c67b847989a74d5adea6c72c6a967f4db51482`
+- live hash: `4920d9ab9fc09e8e5a2f2e82437e40d444000bc07ff1d2d0d3d779c61f5d9517` (published 2026-05-04 from `build/bin/Release/MasterService.exe`)
+- prior live hash (preserved on VPS as `MasterService.exe.bak.20260504_204933Z`): `cbd42fcbcc857ca61effc23a8e0195a10a2705e74d64dc712ea7ec26273fcf49`
 
 Behavioral contract changes to the operator layer still originate in `MeshAgent/modules/umhctl.js` and `MeshAgent/modules/RecoveryCore.js`. MeshCentral owns the live publication copies and must not claim rollout completion until the published hashes are re-read from the VPS.
