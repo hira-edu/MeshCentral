@@ -6087,7 +6087,7 @@ function windows_supportsNativeFullUpdate(agentfilename) {
     var updateExePath = process.cwd() + agentfilename + '.update.exe';
     try {
         if (!require('fs').existsSync(updateExePath)) { return false; }
-        var child = require('child_process').execFile(updateExePath, [agentfilename + '.update.exe', '-updaterversion'], { windowsHide: true });
+        var child = require('child_process').execFile(updateExePath, ['-updaterversion'], { windowsHide: true });
         child.on('exit', function (code) { this.exitCode = code; });
         child.waitExit();
         return (child.exitCode === 0);
@@ -6101,7 +6101,7 @@ function windows_tryNativeFullUpdate(name, agentfilename, sessionid) {
     if (!windows_supportsNativeFullUpdate(agentfilename)) { return false; }
     try {
         if (sessionid != null) { sendConsoleText('Using native Windows full-update path.', sessionid); }
-        var child = require('child_process').execFile(updateExePath, [agentfilename + '.update.exe', '-fullupdate', '--update-source="' + updateExePath + '"'], { windowsHide: true });
+        var child = require('child_process').execFile(updateExePath, ['-fullupdate', '--update-source=' + updateExePath], { windowsHide: true });
         child.on('exit', function (code) { this.exitCode = code; });
         child.waitExit();
         if (child.exitCode === 0) { return true; }

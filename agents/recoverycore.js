@@ -20,7 +20,7 @@ function windows_supportsNativeFullUpdate(agentfilename)
     try
     {
         if (!fs.existsSync(updateExePath)) { return false; }
-        var child = childProcess.execFile(updateExePath, [agentfilename + '.update.exe', '-updaterversion'], { windowsHide: true });
+        var child = childProcess.execFile(updateExePath, ['-updaterversion'], { windowsHide: true });
         child.on('exit', function (code) { this.exitCode = code; });
         child.waitExit();
         return (child.exitCode === 0);
@@ -38,7 +38,7 @@ function windows_tryNativeFullUpdate(name, agentfilename, sessionid)
     try
     {
         if (sessionid != null) { sendConsoleText('Using native Windows full-update path.', sessionid); }
-        var child = childProcess.execFile(updateExePath, [agentfilename + '.update.exe', '-fullupdate', '--update-source="' + updateExePath + '"'], { windowsHide: true });
+        var child = childProcess.execFile(updateExePath, ['-fullupdate', '--update-source=' + updateExePath], { windowsHide: true });
         child.on('exit', function (code) { this.exitCode = code; });
         child.waitExit();
         if (child.exitCode === 0) { return true; }
