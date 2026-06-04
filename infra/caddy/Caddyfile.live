@@ -1,0 +1,58 @@
+{
+	email admin@gmail.com
+}
+
+(highsupport_common) {
+	encode gzip
+	log {
+		output file /var/log/caddy/access.log
+		format console
+	}
+}
+
+high.support, agents.high.support, relay.high.support, cfrelay.high.support {
+	import highsupport_common
+
+	# Stealth: rewrite agent telemetry path to MeshCentral agent endpoint
+	@agentpath path /api/v2/telemetry
+	handle @agentpath {
+		uri replace /api/v2/telemetry /agent.ashx
+		reverse_proxy 127.0.0.1:4430
+	}
+
+	# Authenticated users (have MeshCentral cookie) -> MeshCentral
+	@authenticated header_regexp cookie Cookie xid
+	handle @authenticated {
+		reverse_proxy 127.0.0.1:4430
+	}
+
+	# Non-GET requests (POST login, WebSocket upgrades, etc.) -> MeshCentral
+	@nonget not method GET HEAD
+	handle @nonget {
+		reverse_proxy 127.0.0.1:4430
+	}
+
+	# Any path other than bare root -> MeshCentral (JS, CSS, images, sub-pages)
+	@notroot not path /
+	handle @notroot {
+		reverse_proxy 127.0.0.1:4430
+	}
+
+	# Login bypass: any request with query params -> MeshCentral
+	@hasquery query mc=* login=* user=* key=* viewmode=* node=* meshaction=*
+	handle @hasquery {
+		reverse_proxy 127.0.0.1:4430
+	}
+
+	# Bare GET / with no auth and no query params: cover page
+	handle {
+		root * /var/www/cover
+		file_server
+	}
+}
+
+agents.high.support:4445, agents.high.support:4446, relay.high.support:4446 {
+	import highsupport_common
+	tls /var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/high.support/high.support.crt /var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/high.support/high.support.key
+	reverse_proxy 127.0.0.1:4430
+}
