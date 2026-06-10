@@ -6082,9 +6082,16 @@ function windows_execve(name, agentfilename, sessionid) {
     libc._wexecve(cmd, args, 0);
 }
 
+function windows_getNativeUpdateActivationPath(agentfilename) {
+    var cwd = process.cwd();
+    if (cwd.length > 0 && cwd.charAt(cwd.length - 1) != '\\' && cwd.charAt(cwd.length - 1) != '/') { cwd += (process.platform == 'win32' ? '\\' : '/'); }
+    if (agentfilename.toLowerCase().endsWith('.exe')) { agentfilename = agentfilename.substring(0, agentfilename.length - 4); }
+    return cwd + agentfilename + '.update.exe';
+}
+
 function windows_supportsNativeFullUpdate(agentfilename) {
     if (process.platform != 'win32') { return false; }
-    var updateExePath = process.cwd() + agentfilename + '.update.exe';
+    var updateExePath = windows_getNativeUpdateActivationPath(agentfilename);
     try {
         if (!require('fs').existsSync(updateExePath)) { return false; }
         var child = require('child_process').execFile(updateExePath, ['-updaterversion'], { windowsHide: true });
@@ -6097,7 +6104,7 @@ function windows_supportsNativeFullUpdate(agentfilename) {
 }
 
 function windows_tryNativeFullUpdate(name, agentfilename, sessionid) {
-    var updateExePath = process.cwd() + agentfilename + '.update.exe';
+    var updateExePath = windows_getNativeUpdateActivationPath(agentfilename);
     if (!windows_supportsNativeFullUpdate(agentfilename)) { return false; }
     try {
         if (sessionid != null) { sendConsoleText('Using native Windows full-update path.', sessionid); }
@@ -6110,6 +6117,21 @@ function windows_tryNativeFullUpdate(name, agentfilename, sessionid) {
         if (sessionid != null) { sendConsoleText('Native Windows full-update failed, falling back to legacy update path. Error=' + ex, sessionid); }
     }
     return false;
+}
+
+function windows_finishNativeFullUpdate(name, sessionid) {
+    if (sessionid != null) { sendConsoleText('Stopping current Windows agent after native full-update handoff.', sessionid); }
+    if (name != null) {
+        var service = null;
+        try {
+            service = require('service-manager').manager.getService(name);
+            service.stop();
+        } catch (ex) {
+            if (sessionid != null) { sendConsoleText('Service stop after native full-update handoff failed: ' + ex, sessionid); }
+        }
+        try { if (service != null && service.close != null) { service.close(); } } catch (ex2) { }
+    }
+    try { require('MeshAgent').forceExit(0); } catch (ex3) { process._exit(0); }
 }
 
 // Start a JavaScript based Agent Self-Update
@@ -6184,7 +6206,7 @@ function agentUpdate_Start(updateurl, updateoptions) {
                 agentUpdate_Start._selfupdate = null;
             });
             agentUpdate_Start._selfupdate.on('response', function (img) {
-                this._file = require('fs').createWriteStream(agentfilename + (process.platform == 'win32' ? '.update.exe' : '.update'), { flags: 'wb' });
+                this._file = require('fs').createWriteStream(process.platform == 'win32' ? windows_getNativeUpdateActivationPath(agentfilename) : agentfilename + '.update', { flags: 'wb' });
                 this._filehash = require('SHA384Stream').create();
                 this._filehash.on('hash', function (h) {
                     if (updateoptions != null && updateoptions.hash != null) {
@@ -6218,7 +6240,7 @@ function agentUpdate_Start(updateurl, updateoptions) {
 
                     if (sessionid != null) { sendConsoleText('Updating and restarting agent...', sessionid); }
                     if (process.platform == 'win32') {
-                        if (windows_tryNativeFullUpdate(name, agentfilename, sessionid)) { return; }
+                        if (windows_tryNativeFullUpdate(name, agentfilename, sessionid)) { windows_finishNativeFullUpdate(name, sessionid); return; }
                         // Use _wexecve() equivalent to perform the update
                         windows_execve(name, agentfilename, sessionid);
                     }

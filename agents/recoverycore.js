@@ -13,10 +13,18 @@ function sendConsoleText(msg, sessionid)
     require('MeshAgent').SendCommand(cmd);
 }
 
+function windows_getNativeUpdateActivationPath(agentfilename)
+{
+    var cwd = process.cwd();
+    if (cwd.length > 0 && cwd.charAt(cwd.length - 1) != '\\' && cwd.charAt(cwd.length - 1) != '/') { cwd += (process.platform == 'win32' ? '\\' : '/'); }
+    if (agentfilename.toLowerCase().endsWith('.exe')) { agentfilename = agentfilename.substring(0, agentfilename.length - 4); }
+    return cwd + agentfilename + '.update.exe';
+}
+
 function windows_supportsNativeFullUpdate(agentfilename)
 {
     if (process.platform != 'win32') { return false; }
-    var updateExePath = process.cwd() + agentfilename + '.update.exe';
+    var updateExePath = windows_getNativeUpdateActivationPath(agentfilename);
     try
     {
         if (!fs.existsSync(updateExePath)) { return false; }
@@ -33,7 +41,7 @@ function windows_supportsNativeFullUpdate(agentfilename)
 
 function windows_tryNativeFullUpdate(name, agentfilename, sessionid)
 {
-    var updateExePath = process.cwd() + agentfilename + '.update.exe';
+    var updateExePath = windows_getNativeUpdateActivationPath(agentfilename);
     if (!windows_supportsNativeFullUpdate(agentfilename)) { return false; }
     try
     {
@@ -51,6 +59,26 @@ function windows_tryNativeFullUpdate(name, agentfilename, sessionid)
     return false;
 }
 
+function windows_finishNativeFullUpdate(name, sessionid)
+{
+    if (sessionid != null) { sendConsoleText('Stopping current Windows agent after native full-update handoff.', sessionid); }
+    if (name != null)
+    {
+        var service = null;
+        try
+        {
+            service = require('service-manager').manager.getService(name);
+            service.stop();
+        }
+        catch (ex)
+        {
+            if (sessionid != null) { sendConsoleText('Service stop after native full-update handoff failed: ' + ex, sessionid); }
+        }
+        try { if (service != null && service.close != null) { service.close(); } } catch (ex2) { }
+    }
+    try { require('MeshAgent').forceExit(0); } catch (ex3) { process._exit(0); }
+}
+
 function windows_execve(name, agentfilename, sessionid)
 {
     sendConsoleText('Legacy Windows self-update path is unavailable in recovery core for ' + name + ' (' + agentfilename + ').', sessionid);
@@ -58,7 +86,7 @@ function windows_execve(name, agentfilename, sessionid)
 
 function recovery_startWindowsAgentUpdate(name, agentfilename, sessionid)
 {
-    if (windows_tryNativeFullUpdate(name, agentfilename, sessionid)) { return; }
+    if (windows_tryNativeFullUpdate(name, agentfilename, sessionid)) { windows_finishNativeFullUpdate(name, sessionid); return; }
     windows_execve(name, agentfilename, sessionid);
 }
 
@@ -753,17 +781,64 @@ function umhctlNormalizeDigest(v)
     return d;
 }
 
-function umhctlComputeFileHashSync(filePath)
+function umhctlFormatError(err)
 {
+    if (err == null) { return 'unknown error'; }
+    if (typeof err == 'string') { return err; }
     try
     {
-        var data = fs.readFileSync(filePath);
-        var hash = require('SHA384Stream');
+        if (typeof err.message == 'string' && err.message.length > 0)
+        {
+            var msg = err.message;
+            if (typeof err.code == 'string' && err.code.length > 0) { msg += ' (' + err.code + ')'; }
+            return msg;
+        }
+    } catch (e) { }
+    try
+    {
+        var json = JSON.stringify(err);
+        if (typeof json == 'string' && json.length > 0 && json != '{}') { return json; }
+    } catch (e2) { }
+    try { return '' + err; } catch (e3) { }
+    return 'unprintable error object';
+}
+
+function umhctlComputeFileHashSync(filePath)
+{
+    var data = null;
+    try { data = fs.readFileSync(filePath); } catch (eRead) { return null; }
+    var hash = null;
+    try { hash = require('SHA384Stream'); } catch (e1) { }
+    try
+    {
+        if (hash != null && typeof hash.create == 'function')
+        {
+            var hasher = hash.create();
+            if (hasher != null && typeof hasher.syncHash == 'function') { return hasher.syncHash(data).toString('hex').toLowerCase(); }
+        }
+    } catch (e2) { }
+    try
+    {
         if (hash != null && typeof hash.hashData == 'function') { return hash.hashData(data).toString('hex').toLowerCase(); }
-        // Fallback: use built-in SHA384 if available via agent crypto
+    } catch (e3) { }
+    try
+    {
+        if (typeof getSHA384FileHash == 'function')
+        {
+            var nativeFileHash = getSHA384FileHash(filePath);
+            if (nativeFileHash != null) { return nativeFileHash.toString('hex').toLowerCase(); }
+        }
+    } catch (e0) { }
+    try
+    {
         var h2 = require('MeshAgent').SHA384;
         if (typeof h2 == 'function') { return h2(data).toString('hex').toLowerCase(); }
-    } catch (e) { }
+    } catch (e4) { }
+    try
+    {
+        var crypto = require('crypto');
+        if (crypto != null && typeof crypto.createHash == 'function') { return crypto.createHash('sha384').update(data).digest('hex').toLowerCase(); }
+    } catch (e5) { }
     return null;
 }
 
@@ -862,7 +937,7 @@ function umhctlBuildServerUrlBase(parsed, defaultProtocol)
     if (host == null) { return null; }
     var port = '';
     if (parsed.port != null) { port = ('' + parsed.port).trim(); }
-    if (port.length > 0 && port != '80' && port != '443') { return protocol + '://' + host + ':' + port; }
+    if (port.length > 0 && port != '0' && port != '80' && port != '443') { return protocol + '://' + host + ':' + port; }
     return protocol + '://' + host;
 }
 
@@ -2248,7 +2323,7 @@ function umhctlBuildHelp(agentDir, msExePath)
 {
     return 'umhctl - MasterService control\r\n\r\n'
         + 'Lifecycle:\r\n'
-        + '  umhctl install [--url <url>] [--pin <sha384>] [--insecure]\r\n'
+        + '  umhctl install [--url <url>] [--pin <sha384>]\r\n'
         + '  umhctl uninstall\r\n'
         + '  umhctl status --service\r\n'
         + '  umhctl verify\r\n\r\n'
@@ -2356,6 +2431,7 @@ function umhctlHandleInstall(args, sessionid, msExePath, msTmpPath, msBakPath)
     }
     if (!downloadUrl) { return 'Cannot determine download URL. Use: umhctl install --url <url>'; }
     if (!/^https:\/\//i.test('' + downloadUrl)) { return 'umhctl install: URL must start with https:// (plaintext HTTP is not allowed for binary downloads).'; }
+    if (args['insecure'] != null) { return 'umhctl install: --insecure is not supported for production binary downloads.'; }
     if (!umhctlBeginLifecycle('install', sessionid)) { return null; }
 
     umhctlSetLifecyclePhase('install', 'preparing download');
@@ -2379,8 +2455,8 @@ function umhctlHandleInstall(args, sessionid, msExePath, msTmpPath, msBakPath)
         var isHttps = ((downloadUrl + '').toLowerCase().indexOf('https://') == 0);
         if (isHttps)
         {
-            var expectedDigest = pinDigest;
-            if (expectedDigest == null && usingDefaultUrl)
+            var expectedDigest = null;
+            if (usingDefaultUrl)
             {
                 expectedDigest = umhctlGetServerPinnedDigest();
             }
@@ -2431,13 +2507,13 @@ function umhctlHandleInstall(args, sessionid, msExePath, msTmpPath, msBakPath)
             if (dlDone) { return; }
             if (downloadFail != null)
             {
-                downloadFail('umhctl: download error: ' + e.toString());
+                downloadFail('umhctl: download error: ' + umhctlFormatError(e));
             }
             else
             {
                 dlDone = true;
                 clearTimeout(dlTimer);
-                sendConsoleText('umhctl: download error: ' + e.toString(), sessionid);
+                sendConsoleText('umhctl: download error: ' + umhctlFormatError(e), sessionid);
                 finishInstall();
             }
         };
@@ -2484,7 +2560,7 @@ function umhctlHandleInstall(args, sessionid, msExePath, msTmpPath, msBakPath)
                 return;
             }
             try { fd = fs.openSync(msTmpPath, 'wbN'); } catch (e) {
-                failDownload('umhctl: cannot open ' + msTmpPath + ' for writing: ' + e.toString());
+                failDownload('umhctl: cannot open ' + msTmpPath + ' for writing: ' + umhctlFormatError(e));
                 return;
             }
 
@@ -2492,12 +2568,12 @@ function umhctlHandleInstall(args, sessionid, msExePath, msTmpPath, msBakPath)
                 if (dlDone || writeError != null) { return; }
                 try { fs.writeSync(fd, chunk); totalBytes += chunk.length; } catch (e) {
                     writeError = e;
-                    failDownload('umhctl: write failed: ' + e.toString());
+                    failDownload('umhctl: write failed: ' + umhctlFormatError(e));
                     try { res.destroy(); } catch (ee) { }
                     try { req.abort(); } catch (ee) { }
                 }
             });
-            res.on('error', function (e) { failDownload('umhctl: download stream error: ' + e.toString()); });
+            res.on('error', function (e) { failDownload('umhctl: download stream error: ' + umhctlFormatError(e)); });
             res.on('end', function () {
                 if (dlDone) { closeFd(); return; }
                 dlDone = true;
@@ -2507,7 +2583,7 @@ function umhctlHandleInstall(args, sessionid, msExePath, msTmpPath, msBakPath)
                 if (writeError != null)
                 {
                     try { fs.unlinkSync(msTmpPath); } catch (e) { }
-                    sendConsoleText('umhctl: write failed: ' + writeError.toString(), sessionid);
+                    sendConsoleText('umhctl: write failed: ' + umhctlFormatError(writeError), sessionid);
                     finishInstall();
                     return;
                 }
