@@ -2625,6 +2625,18 @@ function terminal_promise_consent_rejected(e)
     } else { } // no websocket, maybe log some messages somewhere?
 }
 function promise_init(res, rej) { this._res = res; this._rej = rej; }
+function terminal_windows_dispatch_modules(terminalModule)
+{
+    var modules = [];
+    try
+    {
+        var systemPathsModule = getJSModule('win-system-paths');
+        if ((typeof systemPathsModule == 'string') && (systemPathsModule.length > 0)) { modules.push({ name: 'win-system-paths', script: systemPathsModule }); }
+    }
+    catch (ex) { }
+    modules.push({ name: terminalModule, script: getJSModule(terminalModule) });
+    return modules;
+}
 function terminal_userpromise_resolved(u)
 {
 
@@ -2638,12 +2650,12 @@ function terminal_userpromise_resolved(u)
         if (require('win-virtual-terminal').supported)
         {
             // ConPTY PseudoTerminal
-            tmp = require('win-dispatcher').dispatch({ user: username, modules: [{ name: 'win-virtual-terminal', script: getJSModule('win-virtual-terminal') }], launch: { module: 'win-virtual-terminal', method: (that.httprequest.protocol == 9 ? 'StartPowerShell' : 'Start'), args: [this.cols, this.rows] } });
+            tmp = require('win-dispatcher').dispatch({ user: username, modules: terminal_windows_dispatch_modules('win-virtual-terminal'), launch: { module: 'win-virtual-terminal', method: (that.httprequest.protocol == 9 ? 'StartPowerShell' : 'Start'), args: [this.cols, this.rows] } });
         }
         else
         {
             // Legacy Terminal
-            tmp = require('win-dispatcher').dispatch({ user: username, modules: [{ name: 'win-terminal', script: getJSModule('win-terminal') }], launch: { module: 'win-terminal', method: (that.httprequest.protocol == 9 ? 'StartPowerShell' : 'Start'), args: [this.cols, this.rows] } });
+            tmp = require('win-dispatcher').dispatch({ user: username, modules: terminal_windows_dispatch_modules('win-terminal'), launch: { module: 'win-terminal', method: (that.httprequest.protocol == 9 ? 'StartPowerShell' : 'Start'), args: [this.cols, this.rows] } });
         }
         that.httprequest._dispatcher = tmp;
         that.httprequest._dispatcher.connectionPromise = that.httprequest.connectionPromise;
@@ -2680,7 +2692,7 @@ function terminal_promise_consent_resolved()
                     // this.httprequest._term = require('win-virtual-terminal')[this.httprequest.protocol == 6 ? 'StartPowerShell' : 'Start'](80, 25);
 
                     // The above line is commented out, because there is a bug with ClosePseudoConsole() API, so this is the workaround
-                    this.httprequest._dispatcher = require('win-dispatcher').dispatch({ modules: [{ name: 'win-virtual-terminal', script: getJSModule('win-virtual-terminal') }], launch: { module: 'win-virtual-terminal', method: (this.httprequest.protocol == 6 ? 'StartPowerShell' : 'Start'), args: [cols, rows] } });
+                    this.httprequest._dispatcher = require('win-dispatcher').dispatch({ modules: terminal_windows_dispatch_modules('win-virtual-terminal'), launch: { module: 'win-virtual-terminal', method: (this.httprequest.protocol == 6 ? 'StartPowerShell' : 'Start'), args: [cols, rows] } });
                     this.httprequest._dispatcher.httprequest = this.httprequest;
                     this.httprequest._dispatcher.on('connection', terminal_onconnection);
                     this.httprequest._dispatcher.on('~', terminal_onfinalized);
