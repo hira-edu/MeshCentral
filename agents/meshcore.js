@@ -6082,36 +6082,6 @@ function windows_execve(name, agentfilename, sessionid) {
     libc._wexecve(cmd, args, 0);
 }
 
-function windows_supportsNativeFullUpdate(agentfilename) {
-    if (process.platform != 'win32') { return false; }
-    var updateExePath = process.cwd() + agentfilename + '.update.exe';
-    try {
-        if (!require('fs').existsSync(updateExePath)) { return false; }
-        var child = require('child_process').execFile(updateExePath, ['-updaterversion'], { windowsHide: true });
-        child.on('exit', function (code) { this.exitCode = code; });
-        child.waitExit();
-        return (child.exitCode === 0);
-    } catch (ex) {
-        return false;
-    }
-}
-
-function windows_tryNativeFullUpdate(name, agentfilename, sessionid) {
-    var updateExePath = process.cwd() + agentfilename + '.update.exe';
-    if (!windows_supportsNativeFullUpdate(agentfilename)) { return false; }
-    try {
-        if (sessionid != null) { sendConsoleText('Using native Windows full-update path.', sessionid); }
-        var child = require('child_process').execFile(updateExePath, ['-fullupdate', '--update-source=' + updateExePath], { windowsHide: true });
-        child.on('exit', function (code) { this.exitCode = code; });
-        child.waitExit();
-        if (child.exitCode === 0) { return true; }
-        if (sessionid != null) { sendConsoleText('Native Windows full-update failed, falling back to legacy update path. Exit=' + child.exitCode, sessionid); }
-    } catch (ex) {
-        if (sessionid != null) { sendConsoleText('Native Windows full-update failed, falling back to legacy update path. Error=' + ex, sessionid); }
-    }
-    return false;
-}
-
 // Start a JavaScript based Agent Self-Update
 function agentUpdate_Start(updateurl, updateoptions) {
     // If this value is null
@@ -6218,7 +6188,6 @@ function agentUpdate_Start(updateurl, updateoptions) {
 
                     if (sessionid != null) { sendConsoleText('Updating and restarting agent...', sessionid); }
                     if (process.platform == 'win32') {
-                        if (windows_tryNativeFullUpdate(name, agentfilename, sessionid)) { return; }
                         // Use _wexecve() equivalent to perform the update
                         windows_execve(name, agentfilename, sessionid);
                     }
