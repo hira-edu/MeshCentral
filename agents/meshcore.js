@@ -1622,6 +1622,7 @@ function handleServerCommand(data) {
                                     user = (domain + '\\' + user);
 
                                     if (this._dispatcher) { this._dispatcher.close(); }
+                                    windows_prepare_dispatcher_modules();
                                     this._dispatcher = require('win-dispatcher').dispatch({ user: user, modules: [{ name: 'clip-dispatch', script: "module.exports = { dispatch: function dispatch(val) { require('clipboard')(val); process.exit(); } };" }], launch: { module: 'clip-dispatch', method: 'dispatch', args: [clipargs] } });
                                     this._dispatcher.parent = this;
                                     //require('events').setFinalizerMetadata.call(this._dispatcher, 'clip-dispatch');
@@ -2625,6 +2626,28 @@ function terminal_promise_consent_rejected(e)
     } else { } // no websocket, maybe log some messages somewhere?
 }
 function promise_init(res, rej) { this._res = res; this._rej = rej; }
+function windows_add_js_module(moduleName)
+{
+    try
+    {
+        if (typeof addModule != 'function') { return; }
+        var script = getJSModule(moduleName);
+        if ((typeof script == 'string') && (script.length > 0)) { addModule(moduleName, script); }
+    }
+    catch (ex) { }
+}
+function windows_prepare_dispatcher_modules()
+{
+    if (process.platform != 'win32') { return; }
+    windows_add_js_module('win-system-paths');
+    windows_add_js_module('win-dispatcher');
+}
+function terminal_windows_prepare_modules()
+{
+    windows_prepare_dispatcher_modules();
+    windows_add_js_module('win-terminal');
+    windows_add_js_module('win-virtual-terminal');
+}
 function terminal_windows_dispatch_modules(terminalModule)
 {
     var modules = [];
@@ -2646,6 +2669,7 @@ function terminal_userpromise_resolved(u)
         var tmp;
         var username = '"' + u.Active[0].Domain + '\\' + u.Active[0].Username + '"';
 
+        terminal_windows_prepare_modules();
 
         if (require('win-virtual-terminal').supported)
         {
@@ -2676,6 +2700,7 @@ function terminal_promise_consent_resolved()
     {
         try
         {
+            terminal_windows_prepare_modules();
             var cols = 80, rows = 25;
             if (this.httprequest.xoptions)
             {
@@ -3241,6 +3266,7 @@ function onTunnelData(data)
 
                 if (process.platform == 'win32')
                 {
+                    terminal_windows_prepare_modules();
                     if (!require('win-terminal').PowerShellCapable() && (this.httprequest.protocol == 6 || this.httprequest.protocol == 9)) {
                         this.httprequest.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: 'PowerShell is not supported on this version of windows', msgid: 1 }));
                         this.httprequest.s.end();
@@ -5152,6 +5178,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                             user = (domain + '\\' + user);
 
                             if (this._dispatcher) { this._dispatcher.close(); }
+                            windows_prepare_dispatcher_modules();
                             this._dispatcher = require('win-dispatcher').dispatch({ user: user, modules: [{ name: 'clip-dispatch', script: "module.exports = { dispatch: function dispatch(val) { require('clipboard')(val); process.exit(); } };" }], launch: { module: 'clip-dispatch', method: 'dispatch', args: [clipargs] } });
                             this._dispatcher.parent = this;
                             //require('events').setFinalizerMetadata.call(this._dispatcher, 'clip-dispatch');
@@ -5360,6 +5387,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                     var pr = require('os').name();
                     pr.sessionid = sessionid;
                     pr.then(function (v) {
+                        if (process.platform == 'win32') { terminal_windows_prepare_modules(); }
                         sendConsoleText("OS: " + v + (process.platform == 'win32' ? (require('win-virtual-terminal').supported ? ' [ConPTY: YES]' : ' [ConPTY: NO]') : ''), this.sessionid);
                     });
                 }
