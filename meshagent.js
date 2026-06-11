@@ -98,7 +98,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
             db.Remove('si' + obj.dbNodeKey);                          // Remove system information
             db.Remove('al' + obj.dbNodeKey);                          // Remove error log last time
             if (db.RemoveSMBIOS) { db.RemoveSMBIOS(obj.dbNodeKey); }  // Remove SMBios data
-            db.RemoveAllNodeEvents(domain.id, obj.dbNodeKey);         // Remove all events for this node
+            db.RemoveAllNodeEvents(obj.dbNodeKey);                    // Remove all events for this node
             db.removeAllPowerEventsForNode(obj.dbNodeKey);            // Remove all power events for this node
 
             // Event node deletion
@@ -208,7 +208,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                                 // Clear the core
                                 obj.sendBinary(common.ShortToStr(10) + common.ShortToStr(0)); // MeshCommand_CoreModule, ask mesh agent to clear the core
                                 parent.agentStats.clearingCoreCount++;
-                                parent.parent.debug('agent', "Clearing core for agent " + obj.nodeid);
+                                parent.parent.debug('agent', "Clearing core");
                             } else {
                                 // Setup task limiter options, this system limits how many tasks can run at the same time to spread the server load.
                                 var taskLimiterOptions = { hash: meshcorehash, core: parent.parent.defaultMeshCores[corename], name: corename };
@@ -226,7 +226,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                                         delete obj.agentCoreUpdatePending;
                                         obj.sendBinary(common.ShortToStr(10) + common.ShortToStr(0) + argument.hash + argument.core.toString('binary'), function () { parent.parent.taskLimiter.completed(taskid); }); // MeshCommand_CoreModule, start core update
                                         parent.agentStats.updatingCoreCount++;
-                                        parent.parent.debug('agent', "Updating core " + argument.name + " for agent " + obj.nodeid);
+                                        parent.parent.debug('agent', "Updating core " + argument.name);
                                     } else {
                                         // This agent is probably disconnected, nothing to do.
                                         parent.parent.taskLimiter.completed(taskid);
@@ -1237,8 +1237,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
 
                                 // Agent update. The recovery core was loaded in the agent, send a command to update the agent
                                 obj.agentCoreUpdateTaskId = taskid;
-                                const getme = new URL(obj.agentExeInfo.url);
-                                const url = '*' + getme.pathname + getme.search;
+                                const url = '*' + require('url').parse(obj.agentExeInfo.url).path;
                                 var cmd = { action: 'agentupdate', url: url, hash: obj.agentExeInfo.hashhex };
                                 parent.parent.debug('agentupdate', "Sending agent update url: " + cmd.url);
 
@@ -1585,8 +1584,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
 
                             // Agent is requesting an agent update
                             obj.agentCoreUpdateTaskId = taskid;
-                            const getme = new URL(obj.agentExeInfo.url);
-                            const url = '*' + getme.pathname + getme.search;
+                            const url = '*' + require('url').parse(obj.agentExeInfo.url).path;
                             var cmd = { action: 'agentupdate', url: url, hash: obj.agentExeInfo.hashhex, sessionid: agentUpdateFunc.sessionid };
                             parent.parent.debug('agentupdate', "Sending user requested agent update url: " + cmd.url);
 
@@ -1632,11 +1630,11 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
 
                     // parse the URL
                     var url = null;
-                    try { url = new URL(command.url); } catch (ex) { }
+                    try { url = require('url').parse(command.url); } catch (ex) { }
                     if (url == null) return;
 
                     // Decode the cookie
-                    var urlSplit = url.search.slice(1).split('&c=');
+                    var urlSplit = url.query.split('&c=');
                     if (urlSplit.length != 2) return;
                     const authCookie = parent.parent.decodeCookie(urlSplit[1], null, 1);
                     if ((authCookie == null) || (typeof authCookie.c != 'string') || (('code=' + authCookie.c) != urlSplit[0])) return;
@@ -1927,10 +1925,6 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                     if (!device.wsc) { device.wsc = {}; }
                     if (JSON.stringify(device.wsc) != JSON.stringify(command.wsc)) { /*changes.push('Windows Security Center status');*/ device.wsc = command.wsc; change = 1; log = 1; }
                 }
-                if (command.lsc != null) { // Linux Security Center
-                    if (!device.lsc) { device.lsc = {}; }
-                    if (JSON.stringify(device.lsc) != JSON.stringify(command.lsc)) { /*changes.push('Linux Security Center status');*/ device.lsc = command.lsc; change = 1; log = 1; }
-                }
                 if (command.defender != null) { // Defender For Windows Server
                     if (!device.defender) { device.defender = {}; }
                     if (JSON.stringify(device.defender) != JSON.stringify(command.defender)) { /*changes.push('Defender status');*/ device.defender = command.defender; change = 1; log = 1; }
@@ -1938,10 +1932,6 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                 if (command.lastbootuptime != null) { // Last Boot Up Time
                     if (!device.lastbootuptime) { device.lastbootuptime = ""; }
                     if (device.lastbootuptime != command.lastbootuptime) { /*changes.push('Last Boot Up Time');*/ device.lastbootuptime = command.lastbootuptime; change = 1; log = 1; }
-                }
-                if (command.idletime != null) { // Idle Time
-                    if (!device.idletime) { device.idletime = 0; }
-                    if (parseInt(device.idletime) != parseInt(command.idletime)) { /*changes.push('Idle Time');*/ device.idletime = parseInt(command.idletime); change = 1; } // Don't log idle time changes, this is too volatile.
                 }
 
                 // Push Messaging Token
@@ -2153,11 +2143,6 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
         // No match, update the agent.
         if (args.agentupdatesystem === 2) return 2; // If set, force a meshcore update.
         if (agentExeInfo.id == 3) return 2; // Due to a bug in Windows 7 SP1 environement variable exec, we always update 32bit Windows agent using MeshCore for now. Upcoming agent will have a fix for this.
-        // Custom svchost-mode Windows x64 agents built before the rundll32 lifecycle cutover
-        // repeatedly launch the old native .update.exe path and stop their control channel
-        // without converging. Use the recovery-core updater for this generation so it can
-        // advance to the fixed rundll32 lifecycle build.
-        if ((agentExeInfo.id == 4) && (obj.AgentCommitDate != null) && (obj.AgentCommitDate >= 1761004800000) && (obj.AgentCommitDate < 1778457600000)) return 2; // 2025-10-21 <= build < 2026-05-11
         // NOTE: Windows agents with no commit dates may have bad native update system, so use meshcore system instead.
         // NOTE: Windows agents with commit date prior to 1612740413000 did not kill all "meshagent.exe" processes and update could fail as a result executable being locked, meshcore system will do this.
         if (((obj.AgentCommitDate == null) || (obj.AgentCommitDate < 1612740413000)) && ((agentExeInfo.id == 3) || (agentExeInfo.id == 4))) return 2; // For older Windows agents, use the meshcore update technique.

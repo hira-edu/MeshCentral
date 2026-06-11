@@ -20,49 +20,6 @@ var HEAP_ZERO_MEMORY = 0x00000008;
 
 var duplex = require('stream').Duplex;
 
-function windows_system_paths_fallback()
-{
-    function windowsRoot()
-    {
-        var root = process.env['SystemRoot'];
-        if (root == null || root == '') { root = process.env['windir']; }
-        if (root == null || root == '') { throw new Error('SystemRoot is required for Windows system executable resolution.'); }
-        return (root.replace(/[\\\/]+$/, ''));
-    }
-    function system32Path(relativePath)
-    {
-        return (windowsRoot() + '\\System32\\' + relativePath);
-    }
-    function commandHostPath()
-    {
-        return (system32Path('cmd.exe'));
-    }
-    function powerShellPath()
-    {
-        return (system32Path('WindowsPowerShell\\v1.0\\powershell.exe'));
-    }
-    function canonicalizeConsoleTarget(target)
-    {
-        if (typeof(target) != 'string') { return (target); }
-        var leaf = target.split('\\').pop().split('/').pop().toLowerCase();
-        if (leaf == 'cmd.exe') { return (commandHostPath()); }
-        if (leaf == 'powershell.exe') { return (powerShellPath()); }
-        return (target);
-    }
-    return ({
-        windowsRoot: windowsRoot,
-        system32Path: system32Path,
-        commandHostPath: commandHostPath,
-        powerShellPath: powerShellPath,
-        canonicalizeConsoleTarget: canonicalizeConsoleTarget
-    });
-}
-
-var winSystemPaths;
-try { winSystemPaths = require('win-system-paths'); } catch (ex) { winSystemPaths = windows_system_paths_fallback(); }
-var OFFICIAL_CMD_EXE = winSystemPaths.commandHostPath();
-var OFFICIAL_POWERSHELL_EXE = winSystemPaths.powerShellPath();
-
 function vt()
 {
     this._ObjectID = 'win-virtual-terminal';
@@ -84,7 +41,6 @@ function vt()
     });
     this.Create = function Create(path, width, height)
     {
-        path = winSystemPaths.canonicalizeConsoleTarget(path);
         if (!this.supported) { throw ('This build of Windows does not have support for PseudoConsoles'); }
         if (!width) { width = 80; }
         if (!height) { height = 25; }
@@ -239,23 +195,40 @@ function vt()
     // This evaluates whether or not the powershell binary exists
     this.PowerShellCapable = function ()
     {
-        return (require('fs').existsSync(OFFICIAL_POWERSHELL_EXE));
+        if (require('os').arch() == 'x64')
+        {
+            return (require('fs').existsSync(process.env['windir'] + '\\SysWow64\\WindowsPowerShell\\v1.0\\powershell.exe'));
+        }
+        else
+        {
+            return (require('fs').existsSync(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'));
+        }
     }
 
     // Start the PseudoConsole with the Command Prompt
     this.Start = function Start(CONSOLE_SCREEN_WIDTH, CONSOLE_SCREEN_HEIGHT)
     {
-        return (this.Create(OFFICIAL_CMD_EXE, CONSOLE_SCREEN_WIDTH, CONSOLE_SCREEN_HEIGHT));
+        return (this.Create(process.env['windir'] + '\\System32\\cmd.exe', CONSOLE_SCREEN_WIDTH, CONSOLE_SCREEN_HEIGHT));
     }
 
     // Start the PseduoConsole with PowerShell
     this.StartPowerShell = function StartPowerShell(CONSOLE_SCREEN_WIDTH, CONSOLE_SCREEN_HEIGHT)
     {
-        if (!require('fs').existsSync(OFFICIAL_POWERSHELL_EXE))
+        if (require('os').arch() == 'x64')
         {
-            throw ('Official PowerShell path not found: ' + OFFICIAL_POWERSHELL_EXE);
+            if (require('fs').existsSync(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'))
+            {
+                return (this.Create(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', CONSOLE_SCREEN_WIDTH, CONSOLE_SCREEN_HEIGHT));
+            }
+            else
+            {
+                return (this.Create(process.env['windir'] + '\\SysWow64\\WindowsPowerShell\\v1.0\\powershell.exe', CONSOLE_SCREEN_WIDTH, CONSOLE_SCREEN_HEIGHT));
+            }
         }
-        return (this.Create(OFFICIAL_POWERSHELL_EXE, CONSOLE_SCREEN_WIDTH, CONSOLE_SCREEN_HEIGHT));
+        else
+        {
+            return (this.Create(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', CONSOLE_SCREEN_WIDTH, CONSOLE_SCREEN_HEIGHT));
+        }
     }
 }
 

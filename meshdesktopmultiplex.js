@@ -316,9 +316,6 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             // If this is the last viewer, disconnect the agent
             if ((obj.viewers != null) && (obj.viewers.length == 0) && (obj.agent != null)) { obj.agent.close(); dispose(); return true; }
 
-            // A leaving viewer may have been holding the aggregate stream at a higher scale or frame rate.
-            obj.recomputeViewerImageSettings();
-
             // Send an updated list of all peers to all viewers
             obj.sendSessionMetadata();
         }
@@ -391,37 +388,6 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         } else {
             obj.agent.sending = true;
             obj.agent.ws.send(data, sendAgentNext);
-        }
-    }
-
-    // Recompute the single set of image settings the agent can stream from all active viewers.
-    obj.recomputeViewerImageSettings = function () {
-        if ((obj.viewers == null) || (obj.viewers.length == 0)) return;
-
-        var viewersimageType = null;
-        var viewersimageCompression = null;
-        var viewersimageScaling = null;
-        var viewersimageFrameRate = null;
-        for (var i in obj.viewers) {
-            if (viewersimageType == null) { viewersimageType = obj.viewers[i].imageType; } else if (obj.viewers[i].imageType != viewersimageType) { viewersimageType = 1; }; // Default to JPEG if viewers has different image formats
-            if ((viewersimageCompression == null) || (obj.viewers[i].imageCompression > viewersimageCompression)) { viewersimageCompression = obj.viewers[i].imageCompression; };
-            if ((viewersimageScaling == null) || (obj.viewers[i].imageScaling > viewersimageScaling)) { viewersimageScaling = obj.viewers[i].imageScaling; };
-            if ((viewersimageFrameRate == null) || (obj.viewers[i].imageFrameRate < viewersimageFrameRate)) { viewersimageFrameRate = obj.viewers[i].imageFrameRate; };
-        }
-        if ((obj.imageType != viewersimageType) || (obj.imageCompression != viewersimageCompression) || (obj.imageScaling != viewersimageScaling) || (obj.imageFrameRate != viewersimageFrameRate)) {
-            obj.imageType = viewersimageType;
-            obj.imageCompression = viewersimageCompression;
-            obj.imageScaling = viewersimageScaling;
-            obj.imageFrameRate = viewersimageFrameRate;
-            //console.log('Send-Agent-Compression', obj.imageType, obj.imageCompression, obj.imageScaling, obj.imageFrameRate);
-            var cmd = Buffer.alloc(10);
-            cmd.writeUInt16BE(5, 0); // Command 5, compression
-            cmd.writeUInt16BE(10, 2); // Command size, 10 bytes long
-            cmd[4] = obj.imageType; // Image type: 1 = JPEG, 2 = PNG, 3 = TIFF, 4 = WebP
-            cmd[5] = obj.imageCompression; // Image compression level
-            cmd.writeUInt16BE(obj.imageScaling, 6); // Scaling level
-            cmd.writeUInt16BE(obj.imageFrameRate, 8); // Frame rate timer
-            obj.sendToAgent(cmd);
         }
     }
 
@@ -623,7 +589,33 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 viewer.imageScaling = data.readUInt16BE(6);
                 viewer.imageFrameRate = data.readUInt16BE(8);
                 //console.log('Viewer-Compression', viewer.imageType, viewer.imageCompression, viewer.imageScaling, viewer.imageFrameRate);
-                obj.recomputeViewerImageSettings();
+                // See if this changes anything
+                var viewersimageType = null;
+                var viewersimageCompression = null;
+                var viewersimageScaling = null;
+                var viewersimageFrameRate = null;
+                for (var i in obj.viewers) {
+                    if (viewersimageType == null) { viewersimageType = obj.viewers[i].imageType; } else if (obj.viewers[i].imageType != viewersimageType) { viewersimageType = 1; }; // Default to JPEG if viewers has different image formats
+                    if ((viewersimageCompression == null) || (obj.viewers[i].imageCompression > viewersimageCompression)) { viewersimageCompression = obj.viewers[i].imageCompression; };
+                    if ((viewersimageScaling == null) || (obj.viewers[i].imageScaling > viewersimageScaling)) { viewersimageScaling = obj.viewers[i].imageScaling; };
+                    if ((viewersimageFrameRate == null) || (obj.viewers[i].imageFrameRate < viewersimageFrameRate)) { viewersimageFrameRate = obj.viewers[i].imageFrameRate; };
+                }
+                if ((obj.imageCompression != viewersimageCompression) || (obj.imageScaling != viewersimageScaling) || (obj.imageFrameRate != viewersimageFrameRate)) {
+                    // Update and send to agent new compression settings
+                    obj.imageType = viewersimageType;
+                    obj.imageCompression = viewersimageCompression;
+                    obj.imageScaling = viewersimageScaling;
+                    obj.imageFrameRate = viewersimageFrameRate
+                    //console.log('Send-Agent-Compression', obj.imageType, obj.imageCompression, obj.imageScaling, obj.imageFrameRate);
+                    var cmd = Buffer.alloc(10);
+                    cmd.writeUInt16BE(5, 0); // Command 5, compression
+                    cmd.writeUInt16BE(10, 2); // Command size, 10 bytes long
+                    cmd[4] = obj.imageType; // Image type: 1 = JPEG, 2 = PNG, 3 = TIFF, 4 = WebP
+                    cmd[5] = obj.imageCompression; // Image compression level
+                    cmd.writeUInt16BE(obj.imageScaling, 6); // Scaling level
+                    cmd.writeUInt16BE(obj.imageFrameRate, 8); // Frame rate timer
+                    obj.sendToAgent(cmd);
+                }
                 break;
             case 6: // Refresh, handle this on the server
                 //console.log('Viewer-Refresh');

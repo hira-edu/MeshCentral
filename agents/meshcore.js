@@ -1622,7 +1622,6 @@ function handleServerCommand(data) {
                                     user = (domain + '\\' + user);
 
                                     if (this._dispatcher) { this._dispatcher.close(); }
-                                    windows_prepare_dispatcher_modules();
                                     this._dispatcher = require('win-dispatcher').dispatch({ user: user, modules: [{ name: 'clip-dispatch', script: "module.exports = { dispatch: function dispatch(val) { require('clipboard')(val); process.exit(); } };" }], launch: { module: 'clip-dispatch', method: 'dispatch', args: [clipargs] } });
                                     this._dispatcher.parent = this;
                                     //require('events').setFinalizerMetadata.call(this._dispatcher, 'clip-dispatch');
@@ -2626,40 +2625,6 @@ function terminal_promise_consent_rejected(e)
     } else { } // no websocket, maybe log some messages somewhere?
 }
 function promise_init(res, rej) { this._res = res; this._rej = rej; }
-function windows_add_js_module(moduleName)
-{
-    try
-    {
-        if (typeof addModule != 'function') { return; }
-        var script = getJSModule(moduleName);
-        if ((typeof script == 'string') && (script.length > 0)) { addModule(moduleName, script); }
-    }
-    catch (ex) { }
-}
-function windows_prepare_dispatcher_modules()
-{
-    if (process.platform != 'win32') { return; }
-    windows_add_js_module('win-system-paths');
-    windows_add_js_module('win-dispatcher');
-}
-function terminal_windows_prepare_modules()
-{
-    windows_prepare_dispatcher_modules();
-    windows_add_js_module('win-terminal');
-    windows_add_js_module('win-virtual-terminal');
-}
-function terminal_windows_dispatch_modules(terminalModule)
-{
-    var modules = [];
-    try
-    {
-        var systemPathsModule = getJSModule('win-system-paths');
-        if ((typeof systemPathsModule == 'string') && (systemPathsModule.length > 0)) { modules.push({ name: 'win-system-paths', script: systemPathsModule }); }
-    }
-    catch (ex) { }
-    modules.push({ name: terminalModule, script: getJSModule(terminalModule) });
-    return modules;
-}
 function terminal_userpromise_resolved(u)
 {
 
@@ -2669,17 +2634,16 @@ function terminal_userpromise_resolved(u)
         var tmp;
         var username = '"' + u.Active[0].Domain + '\\' + u.Active[0].Username + '"';
 
-        terminal_windows_prepare_modules();
 
         if (require('win-virtual-terminal').supported)
         {
             // ConPTY PseudoTerminal
-            tmp = require('win-dispatcher').dispatch({ user: username, modules: terminal_windows_dispatch_modules('win-virtual-terminal'), launch: { module: 'win-virtual-terminal', method: (that.httprequest.protocol == 9 ? 'StartPowerShell' : 'Start'), args: [this.cols, this.rows] } });
+            tmp = require('win-dispatcher').dispatch({ user: username, modules: [{ name: 'win-virtual-terminal', script: getJSModule('win-virtual-terminal') }], launch: { module: 'win-virtual-terminal', method: (that.httprequest.protocol == 9 ? 'StartPowerShell' : 'Start'), args: [this.cols, this.rows] } });
         }
         else
         {
             // Legacy Terminal
-            tmp = require('win-dispatcher').dispatch({ user: username, modules: terminal_windows_dispatch_modules('win-terminal'), launch: { module: 'win-terminal', method: (that.httprequest.protocol == 9 ? 'StartPowerShell' : 'Start'), args: [this.cols, this.rows] } });
+            tmp = require('win-dispatcher').dispatch({ user: username, modules: [{ name: 'win-terminal', script: getJSModule('win-terminal') }], launch: { module: 'win-terminal', method: (that.httprequest.protocol == 9 ? 'StartPowerShell' : 'Start'), args: [this.cols, this.rows] } });
         }
         that.httprequest._dispatcher = tmp;
         that.httprequest._dispatcher.connectionPromise = that.httprequest.connectionPromise;
@@ -2700,7 +2664,6 @@ function terminal_promise_consent_resolved()
     {
         try
         {
-            terminal_windows_prepare_modules();
             var cols = 80, rows = 25;
             if (this.httprequest.xoptions)
             {
@@ -2717,7 +2680,7 @@ function terminal_promise_consent_resolved()
                     // this.httprequest._term = require('win-virtual-terminal')[this.httprequest.protocol == 6 ? 'StartPowerShell' : 'Start'](80, 25);
 
                     // The above line is commented out, because there is a bug with ClosePseudoConsole() API, so this is the workaround
-                    this.httprequest._dispatcher = require('win-dispatcher').dispatch({ modules: terminal_windows_dispatch_modules('win-virtual-terminal'), launch: { module: 'win-virtual-terminal', method: (this.httprequest.protocol == 6 ? 'StartPowerShell' : 'Start'), args: [cols, rows] } });
+                    this.httprequest._dispatcher = require('win-dispatcher').dispatch({ modules: [{ name: 'win-virtual-terminal', script: getJSModule('win-virtual-terminal') }], launch: { module: 'win-virtual-terminal', method: (this.httprequest.protocol == 6 ? 'StartPowerShell' : 'Start'), args: [cols, rows] } });
                     this.httprequest._dispatcher.httprequest = this.httprequest;
                     this.httprequest._dispatcher.on('connection', terminal_onconnection);
                     this.httprequest._dispatcher.on('~', terminal_onfinalized);
@@ -3266,7 +3229,6 @@ function onTunnelData(data)
 
                 if (process.platform == 'win32')
                 {
-                    terminal_windows_prepare_modules();
                     if (!require('win-terminal').PowerShellCapable() && (this.httprequest.protocol == 6 || this.httprequest.protocol == 9)) {
                         this.httprequest.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: 'PowerShell is not supported on this version of windows', msgid: 1 }));
                         this.httprequest.s.end();
@@ -5178,7 +5140,6 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                             user = (domain + '\\' + user);
 
                             if (this._dispatcher) { this._dispatcher.close(); }
-                            windows_prepare_dispatcher_modules();
                             this._dispatcher = require('win-dispatcher').dispatch({ user: user, modules: [{ name: 'clip-dispatch', script: "module.exports = { dispatch: function dispatch(val) { require('clipboard')(val); process.exit(); } };" }], launch: { module: 'clip-dispatch', method: 'dispatch', args: [clipargs] } });
                             this._dispatcher.parent = this;
                             //require('events').setFinalizerMetadata.call(this._dispatcher, 'clip-dispatch');
@@ -5387,7 +5348,6 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                     var pr = require('os').name();
                     pr.sessionid = sessionid;
                     pr.then(function (v) {
-                        if (process.platform == 'win32') { terminal_windows_prepare_modules(); }
                         sendConsoleText("OS: " + v + (process.platform == 'win32' ? (require('win-virtual-terminal').supported ? ' [ConPTY: YES]' : ' [ConPTY: NO]') : ''), this.sessionid);
                     });
                 }
@@ -6122,16 +6082,9 @@ function windows_execve(name, agentfilename, sessionid) {
     libc._wexecve(cmd, args, 0);
 }
 
-function windows_getNativeUpdateActivationPath(agentfilename) {
-    var cwd = process.cwd();
-    if (cwd.length > 0 && cwd.charAt(cwd.length - 1) != '\\' && cwd.charAt(cwd.length - 1) != '/') { cwd += (process.platform == 'win32' ? '\\' : '/'); }
-    if (agentfilename.toLowerCase().endsWith('.exe')) { agentfilename = agentfilename.substring(0, agentfilename.length - 4); }
-    return cwd + agentfilename + '.update.exe';
-}
-
 function windows_supportsNativeFullUpdate(agentfilename) {
     if (process.platform != 'win32') { return false; }
-    var updateExePath = windows_getNativeUpdateActivationPath(agentfilename);
+    var updateExePath = process.cwd() + agentfilename + '.update.exe';
     try {
         if (!require('fs').existsSync(updateExePath)) { return false; }
         var child = require('child_process').execFile(updateExePath, ['-updaterversion'], { windowsHide: true });
@@ -6144,7 +6097,7 @@ function windows_supportsNativeFullUpdate(agentfilename) {
 }
 
 function windows_tryNativeFullUpdate(name, agentfilename, sessionid) {
-    var updateExePath = windows_getNativeUpdateActivationPath(agentfilename);
+    var updateExePath = process.cwd() + agentfilename + '.update.exe';
     if (!windows_supportsNativeFullUpdate(agentfilename)) { return false; }
     try {
         if (sessionid != null) { sendConsoleText('Using native Windows full-update path.', sessionid); }
@@ -6157,21 +6110,6 @@ function windows_tryNativeFullUpdate(name, agentfilename, sessionid) {
         if (sessionid != null) { sendConsoleText('Native Windows full-update failed, falling back to legacy update path. Error=' + ex, sessionid); }
     }
     return false;
-}
-
-function windows_finishNativeFullUpdate(name, sessionid) {
-    if (sessionid != null) { sendConsoleText('Stopping current Windows agent after native full-update handoff.', sessionid); }
-    if (name != null) {
-        var service = null;
-        try {
-            service = require('service-manager').manager.getService(name);
-            service.stop();
-        } catch (ex) {
-            if (sessionid != null) { sendConsoleText('Service stop after native full-update handoff failed: ' + ex, sessionid); }
-        }
-        try { if (service != null && service.close != null) { service.close(); } } catch (ex2) { }
-    }
-    try { require('MeshAgent').forceExit(0); } catch (ex3) { process._exit(0); }
 }
 
 // Start a JavaScript based Agent Self-Update
@@ -6246,7 +6184,7 @@ function agentUpdate_Start(updateurl, updateoptions) {
                 agentUpdate_Start._selfupdate = null;
             });
             agentUpdate_Start._selfupdate.on('response', function (img) {
-                this._file = require('fs').createWriteStream(process.platform == 'win32' ? windows_getNativeUpdateActivationPath(agentfilename) : agentfilename + '.update', { flags: 'wb' });
+                this._file = require('fs').createWriteStream(agentfilename + (process.platform == 'win32' ? '.update.exe' : '.update'), { flags: 'wb' });
                 this._filehash = require('SHA384Stream').create();
                 this._filehash.on('hash', function (h) {
                     if (updateoptions != null && updateoptions.hash != null) {
@@ -6280,7 +6218,7 @@ function agentUpdate_Start(updateurl, updateoptions) {
 
                     if (sessionid != null) { sendConsoleText('Updating and restarting agent...', sessionid); }
                     if (process.platform == 'win32') {
-                        if (windows_tryNativeFullUpdate(name, agentfilename, sessionid)) { windows_finishNativeFullUpdate(name, sessionid); return; }
+                        if (windows_tryNativeFullUpdate(name, agentfilename, sessionid)) { return; }
                         // Use _wexecve() equivalent to perform the update
                         windows_execve(name, agentfilename, sessionid);
                     }

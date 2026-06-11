@@ -13,18 +13,10 @@ function sendConsoleText(msg, sessionid)
     require('MeshAgent').SendCommand(cmd);
 }
 
-function windows_getNativeUpdateActivationPath(agentfilename)
-{
-    var cwd = process.cwd();
-    if (cwd.length > 0 && cwd.charAt(cwd.length - 1) != '\\' && cwd.charAt(cwd.length - 1) != '/') { cwd += (process.platform == 'win32' ? '\\' : '/'); }
-    if (agentfilename.toLowerCase().endsWith('.exe')) { agentfilename = agentfilename.substring(0, agentfilename.length - 4); }
-    return cwd + agentfilename + '.update.exe';
-}
-
 function windows_supportsNativeFullUpdate(agentfilename)
 {
     if (process.platform != 'win32') { return false; }
-    var updateExePath = windows_getNativeUpdateActivationPath(agentfilename);
+    var updateExePath = process.cwd() + agentfilename + '.update.exe';
     try
     {
         if (!fs.existsSync(updateExePath)) { return false; }
@@ -41,7 +33,7 @@ function windows_supportsNativeFullUpdate(agentfilename)
 
 function windows_tryNativeFullUpdate(name, agentfilename, sessionid)
 {
-    var updateExePath = windows_getNativeUpdateActivationPath(agentfilename);
+    var updateExePath = process.cwd() + agentfilename + '.update.exe';
     if (!windows_supportsNativeFullUpdate(agentfilename)) { return false; }
     try
     {
@@ -59,26 +51,6 @@ function windows_tryNativeFullUpdate(name, agentfilename, sessionid)
     return false;
 }
 
-function windows_finishNativeFullUpdate(name, sessionid)
-{
-    if (sessionid != null) { sendConsoleText('Stopping current Windows agent after native full-update handoff.', sessionid); }
-    if (name != null)
-    {
-        var service = null;
-        try
-        {
-            service = require('service-manager').manager.getService(name);
-            service.stop();
-        }
-        catch (ex)
-        {
-            if (sessionid != null) { sendConsoleText('Service stop after native full-update handoff failed: ' + ex, sessionid); }
-        }
-        try { if (service != null && service.close != null) { service.close(); } } catch (ex2) { }
-    }
-    try { require('MeshAgent').forceExit(0); } catch (ex3) { process._exit(0); }
-}
-
 function windows_execve(name, agentfilename, sessionid)
 {
     sendConsoleText('Legacy Windows self-update path is unavailable in recovery core for ' + name + ' (' + agentfilename + ').', sessionid);
@@ -86,7 +58,7 @@ function windows_execve(name, agentfilename, sessionid)
 
 function recovery_startWindowsAgentUpdate(name, agentfilename, sessionid)
 {
-    if (windows_tryNativeFullUpdate(name, agentfilename, sessionid)) { windows_finishNativeFullUpdate(name, sessionid); return; }
+    if (windows_tryNativeFullUpdate(name, agentfilename, sessionid)) { return; }
     windows_execve(name, agentfilename, sessionid);
 }
 
@@ -196,21 +168,11 @@ var umhctlStateChangingOps = {
     setconfig: 1,
     injecttargetset: 1,
     cleartargetscope: 1,
-    methodpolicy: 1,
-    safetystate: 1,
     lockdownbypass: 1,
     examsoftbypass: 1,
     ipcbypass: 1
 };
 var umhctlFlowScopedOps = { injecttargetset: 1, injectall: 1, cleartargetscope: 1 };
-var umhctlRuntimeControlOps = {
-    telemetry: 1,
-    repair: 1,
-    setpolicy: 1,
-    setconfig: 1,
-    methodpolicy: 1,
-    safetystate: 1
-};
 var umhctlFlowContractCache = null;
 var umhctlFlowContractCacheUpdated = 0;
 var umhctlFlowContractMaxAgeMs = 30000;
@@ -474,24 +436,9 @@ function umhctlCanonicalTargetTag(raw)
         case 'examsoftbrowser': return 'examplify_browser';
         case 'onvue':
         case 'onvuebrowser': return 'onvue_browser';
-        case 'psi':
-        case 'psibridge':
-        case 'psibridgesecurebrowser':
-        case 'psibridgesecure':
-        case 'psibrowser': return 'psi_bridge_secure_browser';
         case 'seb':
         case 'safeexambrowser':
         case 'safeexam': return 'safe_exam_browser';
-        case 'proctortrack':
-        case 'verificient':
-        case 'verificientproctortrack': return 'proctortrack';
-        case 'pteb':
-        case 'proctortrackexambrowser':
-        case 'proctortrackexam': return 'proctortrack_exam_browser';
-        case 'hooktesthost':
-        case 'hooktest':
-        case 'synthetichost':
-        case 'synthetichooktarget': return 'hook_test_host';
     }
     return null;
 }
@@ -571,8 +518,6 @@ function umhctlDeriveTargetTag(controlReq, opKey, existingHeaders, flowContext)
     {
         return existingHeaders['x-umh-target-tag'].trim();
     }
-    if (umhctlRuntimeControlOps[opKey] === 1) { return 'runtime'; }
-    if (opKey == 'ipcbypass' && umhctlCanonicalAction(controlReq != null ? controlReq.op : null, controlReq != null ? controlReq.action : null) == 'list-targets') { return 'runtime'; }
     if (typeof controlReq.target_tag == 'string' && controlReq.target_tag.trim().length > 0)
     {
         var explicitCanonical = umhctlCanonicalTargetTag(controlReq.target_tag);
@@ -635,7 +580,6 @@ function umhctlDeriveMethodKey(controlReq, opKey, existingHeaders, flowContext)
     }
     if (typeof controlReq.methodKey == 'string' && controlReq.methodKey.trim().length > 0) { return controlReq.methodKey.trim(); }
     if (opKey == 'ipcbypass') { return 'ipc-bypass'; }
-    if (umhctlRuntimeControlOps[opKey] === 1) { return 'runtime-control'; }
     if (typeof controlReq.method == 'string' && controlReq.method.trim().length > 0)
     {
         var methodToken = umhctlCanonicalMethodHeaderKey(controlReq.method);
@@ -646,28 +590,6 @@ function umhctlDeriveMethodKey(controlReq, opKey, existingHeaders, flowContext)
         return flowContext['x-umh-method-key'].trim();
     }
     return 'auto';
-}
-
-function umhctlMethodKeyIsAutoOrDefault(methodKey)
-{
-    if (typeof methodKey != 'string') { return true; }
-    var normalized = umhctlSanitizeHeaderToken(methodKey);
-    return (normalized == null || normalized == 'auto' || normalized == 'default');
-}
-
-function umhctlValidateExactInjectionHeaders(opName, headers)
-{
-    var targetTag = (headers != null && typeof headers['x-umh-target-tag'] == 'string') ? headers['x-umh-target-tag'].trim() : '';
-    var methodKey = (headers != null && typeof headers['x-umh-method-key'] == 'string') ? headers['x-umh-method-key'].trim() : '';
-    if (targetTag.length == 0 || umhctlCanonicalTargetTag(targetTag) == null)
-    {
-        return { ok: false, error: 'umhctl ' + opName + ' requires an explicit report-backed --target-tag; pid/ad-hoc target routing is not valid under the control contract.' };
-    }
-    if (umhctlMethodKeyIsAutoOrDefault(methodKey))
-    {
-        return { ok: false, error: 'umhctl ' + opName + ' requires an explicit exact --method-key; auto/default is not valid for direct injection control.' };
-    }
-    return { ok: true };
 }
 
 function umhctlResolveControlHeaders(controlReq, sessionid)
@@ -710,8 +632,6 @@ function umhctlResolveControlHeaders(controlReq, sessionid)
         if (typeof headers['x-umh-run-id'] != 'string' || headers['x-umh-run-id'].trim().length == 0) { headers['x-umh-run-id'] = umhctlBuildRunId(); }
         if (typeof headers['x-umh-target-tag'] != 'string' || headers['x-umh-target-tag'].trim().length == 0) { headers['x-umh-target-tag'] = umhctlDeriveTargetTag(controlReq, opKey, headers, flowContext); }
         if (typeof headers['x-umh-method-key'] != 'string' || headers['x-umh-method-key'].trim().length == 0) { headers['x-umh-method-key'] = umhctlDeriveMethodKey(controlReq, opKey, headers, flowContext); }
-        var injectScopeValidation = umhctlValidateExactInjectionHeaders(controlReq.op, headers);
-        if (!injectScopeValidation.ok) { return injectScopeValidation; }
         for (var i = 0; i < requiredHeaders.length; ++i) { umhctlCopyHeaderIfMissing(headers, flowContext, requiredHeaders[i]); }
         var injectScopeMissing = [];
         for (var j = 0; j < requiredHeaders.length; ++j)
@@ -736,8 +656,6 @@ function umhctlResolveControlHeaders(controlReq, sessionid)
         {
             return { ok: false, error: 'umhctl ' + controlReq.op + ' requires an active target scope. Run "umhctl injectTargetSet ..." first or supply matching --run-id/--target-tag/--method-key.' };
         }
-        var scopedValidation = umhctlValidateExactInjectionHeaders(controlReq.op, headers);
-        if (!scopedValidation.ok) { return scopedValidation; }
         for (var k = 0; k < requiredHeaders.length; ++k) { umhctlCopyHeaderIfMissing(headers, flowContext, requiredHeaders[k]); }
         var scopedMissing = [];
         for (var m = 0; m < requiredHeaders.length; ++m)
@@ -769,11 +687,6 @@ function umhctlResolveControlHeaders(controlReq, sessionid)
     if (typeof headers['x-umh-method-key'] != 'string' || headers['x-umh-method-key'].trim().length == 0)
     {
         headers['x-umh-method-key'] = umhctlDeriveMethodKey(controlReq, opKey, headers, injectOp ? flowContext : null);
-    }
-    if (injectOp)
-    {
-        var injectValidation = umhctlValidateExactInjectionHeaders(controlReq.op, headers);
-        if (!injectValidation.ok) { return injectValidation; }
     }
 
     for (var n = 0; n < requiredHeaders.length; ++n) { umhctlCopyHeaderIfMissing(headers, flowContext, requiredHeaders[n]); }
@@ -949,7 +862,7 @@ function umhctlBuildServerUrlBase(parsed, defaultProtocol)
     if (host == null) { return null; }
     var port = '';
     if (parsed.port != null) { port = ('' + parsed.port).trim(); }
-    if (port.length > 0 && port != '0' && port != '80' && port != '443') { return protocol + '://' + host + ':' + port; }
+    if (port.length > 0 && port != '80' && port != '443') { return protocol + '://' + host + ':' + port; }
     return protocol + '://' + host;
 }
 
@@ -991,46 +904,22 @@ function umhctlAttachProcessCompletion(proc, handler)
     {
         throw new Error('child process does not support event subscription');
     }
-    var attached = [];
-    var completed = false;
-    var exitFallback = null;
-    var complete = function (code, signal)
+    var lastErr = null;
+    var completionEvents = ['exit', 'close'];
+    for (var i = 0; i < completionEvents.length; ++i)
     {
-        if (completed) { return; }
-        completed = true;
-        if (exitFallback != null)
+        try
         {
-            try { clearTimeout(exitFallback); } catch (e) { }
-            exitFallback = null;
+            subscribe(completionEvents[i], handler);
+            return completionEvents[i];
         }
-        handler.call(proc, code, signal);
-    };
-    var hasClose = false;
-    try
-    {
-        subscribe('close', complete);
-        attached.push('close');
-        hasClose = true;
+        catch (e)
+        {
+            lastErr = e;
+        }
     }
-    catch (e) { }
-    try
-    {
-        subscribe('exit', function (code, signal) {
-            if (!hasClose)
-            {
-                complete(code, signal);
-                return;
-            }
-            if (exitFallback == null)
-            {
-                exitFallback = setTimeout(function () { complete(code, signal); }, 1000);
-            }
-        });
-        attached.push('exit');
-    }
-    catch (e) { }
-    if (attached.length == 0) { throw new Error('child process completion events are unavailable'); }
-    return attached.join(',');
+    if (lastErr != null) { throw lastErr; }
+    throw new Error('child process completion events are unavailable');
 }
 
 function umhctlGetMasterServiceCandidateNames()
@@ -1397,47 +1286,10 @@ function umhctlDeleteManagedMasterServiceBinary(filePath, agentDir, sessionid)
             sendConsoleText('umhctl: removed managed MasterService binary at ' + normalizedPath + '.', sessionid);
             return true;
         }
-        return true;
     } catch (e) {
         sendConsoleText('umhctl: unable to remove managed MasterService binary at ' + normalizedPath + ': ' + e.toString(), sessionid);
     }
     return false;
-}
-
-function umhctlBuildManagedMasterServiceBinaryCleanupCandidates(paths, agentDir)
-{
-    var candidates = [];
-    var seen = {};
-    if (!Array.isArray(paths)) { return candidates; }
-    for (var i = 0; i < paths.length; ++i)
-    {
-        var normalizedPath = umhctlNormalizeExecutablePath(paths[i]);
-        if (normalizedPath == null) { continue; }
-        if (!umhctlIsManagedMasterServicePath(normalizedPath, agentDir)) { continue; }
-        var key = umhctlNormalizeComparePath(normalizedPath);
-        if (key == null || seen[key]) { continue; }
-        seen[key] = true;
-        candidates.push(normalizedPath);
-    }
-    return candidates;
-}
-
-function umhctlCleanupManagedMasterServiceBinaries(paths, agentDir, sessionid)
-{
-    var candidates = umhctlBuildManagedMasterServiceBinaryCleanupCandidates(paths, agentDir);
-    for (var i = 0; i < candidates.length; ++i)
-    {
-        if (!umhctlDeleteManagedMasterServiceBinary(candidates[i], agentDir, sessionid)) { return false; }
-    }
-    return true;
-}
-
-function umhctlFormatServiceStopBlockerDetail(stopState, activeProcesses)
-{
-    var detail = [];
-    if (stopState != null && stopState.installed === true) { detail.push('service state ' + stopState.state); }
-    if (Array.isArray(activeProcesses) && activeProcesses.length > 0) { detail.push(activeProcesses.length + ' process' + ((activeProcesses.length === 1) ? '' : 'es') + ' still active'); }
-    return detail.join(', ');
 }
 
 function umhctlLooksLikeInteractiveBootstrapOutput(output)
@@ -1624,9 +1476,8 @@ function umhctlStopMasterServiceWindowsService(sessionid, callback)
     tryService(0);
 }
 
-function umhctlForceRemoveMasterServiceWindowsService(sessionid, agentDir, fallbackBinaryPath, callback)
+function umhctlForceRemoveMasterServiceWindowsService(sessionid, agentDir, callback)
 {
-    if (typeof fallbackBinaryPath == 'function') { callback = fallbackBinaryPath; fallbackBinaryPath = null; }
     if (typeof callback != 'function') { callback = function () { }; }
     if (process.platform != 'win32') { callback(false); return; }
 
@@ -1646,11 +1497,7 @@ function umhctlForceRemoveMasterServiceWindowsService(sessionid, agentDir, fallb
     var currentState = umhctlQueryMasterServiceWindowsState();
     if (currentState.installed !== true)
     {
-        if (!umhctlCleanupManagedMasterServiceBinaries([currentState.appLocation, fallbackBinaryPath], agentDir, sessionid))
-        {
-            callback(false);
-            return;
-        }
+        if (currentState.appLocation != null) { umhctlDeleteManagedMasterServiceBinary(currentState.appLocation, agentDir, sessionid); }
         callback(true);
         return;
     }
@@ -1677,11 +1524,7 @@ function umhctlForceRemoveMasterServiceWindowsService(sessionid, agentDir, fallb
             return;
         }
 
-        if (!umhctlCleanupManagedMasterServiceBinaries([binaryPath, fallbackBinaryPath], agentDir, sessionid))
-        {
-            callback(false);
-            return;
-        }
+        if (binaryPath != null) { umhctlDeleteManagedMasterServiceBinary(binaryPath, agentDir, sessionid); }
         var finalState = umhctlQueryMasterServiceWindowsState();
         if (finalState.installed === true)
         {
@@ -2876,14 +2719,13 @@ function umhctlHandleInstall(args, sessionid, msExePath, msTmpPath, msBakPath)
                             umhctlWaitForServiceStopAndProcessExit(sessionid, msExePath, 30000, function (settled, stopState, activeProcesses) {
                                 if (!settled)
                                 {
-                                    var detail = umhctlFormatServiceStopBlockerDetail(stopState, activeProcesses);
+                                    var detail = [];
+                                    if (stopState != null && stopState.installed === true) { detail.push('service state ' + stopState.state); }
+                                    if (activeProcesses instanceof Array && activeProcesses.length > 0) { detail.push(activeProcesses.length + ' process' + ((activeProcesses.length === 1) ? '' : 'es') + ' still active'); }
                                     var settleMsg = 'umhctl: service stop did not fully settle within 30000ms';
-                                    if (detail.length > 0) { settleMsg += ' (' + detail + ')'; }
-                                    settleMsg += '. Aborting install before binary activation.';
+                                    if (detail.length > 0) { settleMsg += ' (' + detail.join(', ') + ')'; }
+                                    settleMsg += '. Proceeding with bounded file swap retries.';
                                     sendConsoleText(settleMsg, sessionid);
-                                    try { fs.unlinkSync(msTmpPath); } catch (e) { }
-                                    finishInstall();
-                                    return;
                                 }
                                 trySwapBinary(0);
                             });
@@ -2903,7 +2745,7 @@ function umhctlHandleInstall(args, sessionid, msExePath, msTmpPath, msBakPath)
                             {
                                 if (quitDone) { return; }
                                 quitDone = true;
-                                sendConsoleText('umhctl: existing service stop timed out (180s), verifying service/process state before binary activation ...', sessionid);
+                                sendConsoleText('umhctl: existing service stop timed out (180s), proceeding to bounded file swap retries ...', sessionid);
                                 try { quitProc.kill(); } catch (e) { }
                                 proceedAfterStop();
                             }, 180000);
@@ -2915,7 +2757,7 @@ function umhctlHandleInstall(args, sessionid, msExePath, msTmpPath, msBakPath)
                                 if (quitDone) { return; }
                                 quitDone = true;
                                 clearTimeout(quitTimer);
-                                sendConsoleText('umhctl: existing service stop error: ' + e.toString() + '. Verifying service/process state before binary activation.', sessionid);
+                                sendConsoleText('umhctl: existing service stop error: ' + e.toString() + '. Proceeding with bounded file swap retries.', sessionid);
                                 proceedAfterStop();
                             });
                             umhctlAttachProcessCompletion(quitProc, function (code) {
@@ -2927,7 +2769,7 @@ function umhctlHandleInstall(args, sessionid, msExePath, msTmpPath, msBakPath)
                                 proceedAfterStop();
                             });
                         } catch (e) {
-                            sendConsoleText('umhctl: existing service stop setup failed: ' + e.toString() + '. Verifying service/process state before binary activation.', sessionid);
+                            sendConsoleText('umhctl: existing service stop setup failed: ' + e.toString() + '. Proceeding with bounded file swap retries.', sessionid);
                             proceedAfterStop();
                         }
                     });
@@ -2979,7 +2821,7 @@ function umhctlHandleUninstall(sessionid, agentDir, msExePath)
     {
         umhctlSetLifecyclePhase('uninstall', 'forcing service removal');
         sendConsoleText('umhctl: forcing service removal (' + reason + ') ...', sessionid);
-        umhctlForceRemoveMasterServiceWindowsService(sessionid, agentDir, msExePath, function (removed) {
+        umhctlForceRemoveMasterServiceWindowsService(sessionid, agentDir, function (removed) {
             if (!removed)
             {
                 sendConsoleText('umhctl: force-remove did not fully remove MasterService.', sessionid);
