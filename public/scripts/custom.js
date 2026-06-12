@@ -102,7 +102,7 @@
     { value: 'safe_exam_browser', label: 'Safe Exam Browser' },
     { value: 'schoolyear_browser', label: 'Schoolyear' }
   ];
-  var UMH_MASTER_SERVICE_SHA384 = 'd27d4a37cd04f84c8b2e994f8a85f3af73cb76a9c7d0571855d54fc112086940684288e0fcf53dc2d44949acda5b8525';
+  var UMH_MASTER_SERVICE_SHA384 = '7c1f739c986fbee28d5d075b639b9821f889a8a03d4ee46f9eea6a80493730cdf44e19e3be9d09e8ee157e803123fd30';
   var UMH_INSTALL_PAYLOADS = [
     { method: 'standard', label: 'Standard', methodKeyArg: '--method-key standard' },
     { method: 'manualmap', label: 'ManualMap', methodKeyArg: '--method-key manualmap' },
