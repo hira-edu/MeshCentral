@@ -105,11 +105,13 @@
   var UMH_MASTER_SERVICE_SHA384 = '2d0798ff3ffec81ea0292b5799e35dba0bdda27edaf3ebda9367b307708810aa32907ecb7d0267441f195c9149ef5494';
   var UMH_INSTALL_PAYLOADS = [
     { method: 'standard', label: 'Standard', methodKeyArg: '--method-key standard' },
+    { method: 'setwindowshookex', label: 'SetWindowsHookEx', methodKeyArg: '--method-key setwindowshookex' },
     { method: 'manualmap', label: 'ManualMap', methodKeyArg: '--method-key manualmap' },
     { method: 'reflective', label: 'Reflective', methodKeyArg: '--method-key reflective' }
   ];
   var INJECTION_METHOD_OPTIONS = [
     { value: 'standard', label: 'standard' },
+    { value: 'setwindowshookex', label: 'setwindowshookex' },
     { value: 'manualmap', label: 'manualmap' },
     { value: 'reflective', label: 'reflective' }
   ];
