@@ -99,7 +99,8 @@
     { value: 'psi_bridge_secure_browser', label: 'PSI Bridge Secure Browser' },
     { value: 'proproctor', label: 'Prometric ProProctor' },
     { value: 'examplify_browser', label: 'ExamSoft Examplify' },
-    { value: 'safe_exam_browser', label: 'Safe Exam Browser' }
+    { value: 'safe_exam_browser', label: 'Safe Exam Browser' },
+    { value: 'schoolyear_browser', label: 'Schoolyear' }
   ];
   var UMH_MASTER_SERVICE_SHA384 = '036124dd9774dc4896df825d7424418744ccc78f0ecd01f90e4832eb3ce3c5bee453751329fdf71f61ff727ce0f935a6';
   var UMH_INSTALL_PAYLOADS = [
@@ -172,7 +173,7 @@
   function group(doc, title, color) { var r = row(doc, '4px'); r.appendChild(label(doc, title + ':', 'font-size:11px;font-weight:600;color:' + color + ';min-width:100px;')); return r; }
   function role(node, name) { if (node && name) node.setAttribute('data-umh-role', name); return node; }
   function dispatch(state, cmd, type) { if (!t(cmd)) return false; if (typeof state.onCommand === 'function') { state.onCommand(cmd, type || 4); return true; } return false; }
-  function installCmd(state, payload) { var method = exactMethodOrNull(payload && payload.method, state); if (!method) return null; var url = userfiles(state.userfilesBasePath, state.userfilesUser, 'MasterService.exe'); if (!url) return userfilesError(state, 'MasterService.exe'); url = appendQuery(url, 'sha384', UMH_MASTER_SERVICE_SHA384); return ['umhctl', 'install', '--url', q(url), '--pin', UMH_MASTER_SERVICE_SHA384, payload.methodKeyArg].join(' '); }
+  function installCmd(state, payload, targetValue) { var method = exactMethodOrNull(payload && payload.method, state); if (!method) return null; var target = exactTargetOrNull(targetValue, state); if (!target) return null; var url = userfiles(state.userfilesBasePath, state.userfilesUser, 'MasterService.exe'); if (!url) return userfilesError(state, 'MasterService.exe'); url = appendQuery(url, 'sha384', UMH_MASTER_SERVICE_SHA384); return ['umhctl', 'install', '--url', q(url), '--pin', UMH_MASTER_SERVICE_SHA384, payload.methodKeyArg, '--target-tag', target].join(' '); }
   function ipcBypassCmd(target, action, domain) { var parts = ['umhctl', 'ipcBypass']; if (action) { parts.push('--action'); parts.push(action); } if (target) { parts.push('--target'); parts.push(q(target)); } if (domain) { parts.push('--domain'); parts.push(domain); } return parts.join(' '); }
   function exactTargetOrNull(value, state) { var target = t(value); if (!target) { state.error('Target is required for injection control.'); return null; } return target; }
   function exactMethodOrNull(value, state) { var method = t(value); if (!method || method === 'auto' || method === 'default') { state.error('Exact method is required; auto/default is not valid for operator injection.'); return null; } return method; }
@@ -423,8 +424,10 @@
     state.clearError = function () { setNotice('', '#666'); };
 
     var life = group(doc, 'Lifecycle', COLORS.lifecycle);
+    var installTarget = select(doc, [{ value: '', label: 'Install target' }].concat(INJECTION_TARGET_OPTIONS), '190px');
+    life.appendChild(installTarget);
     UMH_INSTALL_PAYLOADS.forEach(function (payload) {
-      life.appendChild(btn(doc, 'Install ' + payload.label, COLORS.lifecycle, function () { var cmd = installCmd(state, payload); if (!cmd) return; state.clearError(); dispatch(state, cmd, 4); }));
+      life.appendChild(btn(doc, 'Install ' + payload.label, COLORS.lifecycle, function () { var cmd = installCmd(state, payload, installTarget.value); if (!cmd) return; state.clearError(); dispatch(state, cmd, 4); }));
     });
     life.appendChild(btn(doc, 'Uninstall', COLORS.lifecycle, function () { dispatch(state, 'umhctl uninstall', 4); }));
     life.appendChild(btn(doc, 'Svc Status', COLORS.lifecycle, function () { dispatch(state, 'umhctl status --service', 4); }));
