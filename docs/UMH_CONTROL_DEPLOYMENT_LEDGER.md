@@ -4,6 +4,32 @@ Last Updated: 2026-06-12
 Owner: Codex + User
 Status: Active deployment ledger for the MeshCentral UMH UI override and live core publication inventory
 
+## 2026-06-12 d27 Agent Module Source Sync
+
+- Trigger: live VPS `umhctl.js` core publication copies already carried the current MeshAgent installer module SHA256 `75b8e10b9e3ed8406fae39b5e1cae7e7eae4a7a51b2e449ff8abb0b6e288178f`, but the tracked MeshCentral `agents/modules_meshcore/umhctl.js` and `agents/modules_meshcore_min/umhctl.js` source copies still carried older SHA256 `d3bd8bec741ac208d4a773c79d455a079825e1b81ce9e2b63e967bff45336a16`.
+- Source fix: synced both tracked MeshCentral module copies from `C:\Users\Workstation\Documents\GitHub\MeshAgent\modules\umhctl.js` so source now includes:
+  - Schoolyear target aliases.
+  - stale lifecycle lock expiry for stuck `install` / `uninstall` operations.
+  - robust ProgramData resolution.
+  - install-contract write fallback for the legacy file API shape.
+  - install-pending ownership detection that avoids rolling back when Service Control Manager already owns the new `MasterService.exe`.
+  - explicit `target_scope=runtime_profile_dynamic` install-contract log text.
+- Local validation:
+  - `node --check agents\modules_meshcore\umhctl.js`: passed.
+  - `node --check agents\modules_meshcore_min\umhctl.js`: passed.
+  - `node --check meshcentral-data\modules_meshcore\umhctl.js`: passed.
+  - `node --check meshcentral-data\modules_meshcore_min\umhctl.js`: passed.
+  - `git diff --check -- agents/modules_meshcore/umhctl.js agents/modules_meshcore_min/umhctl.js meshcentral-data/modules_meshcore/umhctl.js meshcentral-data/modules_meshcore_min/umhctl.js`: passed with CRLF warnings only.
+- Live VPS verification:
+  - `/opt/meshcentral/node_modules/meshcentral/agents/modules_meshcore/umhctl.js`: SHA256 `75b8e10b9e3ed8406fae39b5e1cae7e7eae4a7a51b2e449ff8abb0b6e288178f`.
+  - `/opt/meshcentral/node_modules/meshcentral/agents/modules_meshcore_min/umhctl.js`: SHA256 `75b8e10b9e3ed8406fae39b5e1cae7e7eae4a7a51b2e449ff8abb0b6e288178f`.
+  - `/opt/meshcentral/meshcentral-data/modules_meshcore/umhctl.js`: SHA256 `75b8e10b9e3ed8406fae39b5e1cae7e7eae4a7a51b2e449ff8abb0b6e288178f`.
+  - `/opt/meshcentral/meshcentral-data/modules_meshcore_min/umhctl.js`: SHA256 `75b8e10b9e3ed8406fae39b5e1cae7e7eae4a7a51b2e449ff8abb0b6e288178f`.
+  - `meshcentral` service: `ActiveState=active`, `NRestarts=0`.
+  - `https://high.support/scripts/custom.js?verify=module_source_sync_check`: HTTP 200, size `39403`, SHA256 `9d9e785d7b9c93ca49ca288885d6a8aea7dc344c0c522cb1945fcbf2624db27d`, pin `d27d4a37cd04f84c8b2e994f8a85f3af73cb76a9c7d0571855d54fc112086940684288e0fcf53dc2d44949acda5b8525`.
+- Install-button contract remains method-scoped and target-dynamic. This sync does not add an install-time browser lock, target allowlist, method fallback, or method remap.
+- Status: `SOURCE_SYNCED_TO_LIVE_D27_MODULES_ENDPOINT_INSTALL_STILL_PENDING`.
+
 ## 2026-06-12 cf34 Single-Payload Source Sync (current)
 
 - Trigger: live VPS and public `custom.js` already exposed the current section-backed ManualMap payload pin, but the tracked `public/scripts/custom.js` source still carried stale SHA-384 `036124dd9774dc4896df825d7424418744ccc78f0ecd01f90e4832eb3ce3c5bee453751329fdf71f61ff727ce0f935a6`. That source drift could cause a future UI publication to point install buttons back at an old payload.
