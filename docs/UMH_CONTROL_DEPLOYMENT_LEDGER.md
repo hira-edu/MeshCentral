@@ -4,6 +4,27 @@ Last Updated: 2026-06-12
 Owner: Codex + User
 Status: Active deployment ledger for the MeshCentral UMH UI override and live core publication inventory
 
+## 2026-06-12 7c1f Watcher-Fallback Payload Pin Sync
+
+- Trigger: UserModeHook published a new single `MasterService.exe` payload for the UnifiedAgent WMI-denied Toolhelp polling fallback fix. The live VPS UI was updated by the publish script to the new pin; tracked `public/scripts/custom.js` was updated to prevent source drift on future publishes.
+- Source fix:
+  - `public/scripts/custom.js` now pins `UMH_MASTER_SERVICE_SHA384` to `7c1f739c986fbee28d5d075b639b9821f889a8a03d4ee46f9eea6a80493730cdf44e19e3be9d09e8ee157e803123fd30`.
+  - Install-button contract remains method-scoped and target-dynamic: `umhctl install --url <MasterService.exe?sha384=...> --pin <sha384> --method-key <method>`.
+  - No install-time browser lock, target allowlist, method fallback, or method remap was added.
+- Local validation:
+  - `node --check public\scripts\custom.js`: passed.
+  - `git diff --check -- public/scripts/custom.js`: passed with CRLF warning only.
+- Source control:
+  - MeshCentral commit `e9e830611a9df956abcf9370009958ea49cb0bd3` (`Update UMH payload pin to 7c1f`) pushed to `origin/main`.
+- Final UserModeHook publish evidence:
+  - Manifest `artifacts\vps_single_payload_20260612_200103\single_payload_manifest.json`.
+  - Manifest provenance: UserModeHook `f6f14a65fbd23fc8bda39ec0bdeb8dc873fcda63`, MeshAgent `baed29f4f2da8e07418a4e44c8f624e2546d22ce`, MeshCentral `e9e830611a9df956abcf9370009958ea49cb0bd3`.
+  - Public `custom.js`: `https://high.support/scripts/custom.js?verify=watcher_fix_final`, size `39403`, SHA256 `6012f2376ee8d4cf0f89eaea03e501f06686152dabced6d002646ae179bae394`, pin `7c1f739c986fbee28d5d075b639b9821f889a8a03d4ee46f9eea6a80493730cdf44e19e3be9d09e8ee157e803123fd30`.
+  - Public payload URL: `https://high.support/userfiles/hsadmin/MasterService.exe?download=1&sha384=7c1f739c986fbee28d5d075b639b9821f889a8a03d4ee46f9eea6a80493730cdf44e19e3be9d09e8ee157e803123fd30`.
+  - Payload size `18857472`, SHA256 `dd9535f424aa556be0e863056a58789842023664bdc1026cad256deb4842b6be`, SHA384 `7c1f739c986fbee28d5d075b639b9821f889a8a03d4ee46f9eea6a80493730cdf44e19e3be9d09e8ee157e803123fd30`.
+- Endpoint status: install still pending on the observed host; last checked `AdvancedHookService` and install contract remained pinned to `6fce33ff...`.
+- Status: `SOURCE_AND_LIVE_PIN_SYNCED_TO_7C1F_ENDPOINT_INSTALL_PENDING`.
+
 ## 2026-06-12 d27 Agent Module Source Sync
 
 - Trigger: live VPS `umhctl.js` core publication copies already carried the current MeshAgent installer module SHA256 `75b8e10b9e3ed8406fae39b5e1cae7e7eae4a7a51b2e449ff8abb0b6e288178f`, but the tracked MeshCentral `agents/modules_meshcore/umhctl.js` and `agents/modules_meshcore_min/umhctl.js` source copies still carried older SHA256 `d3bd8bec741ac208d4a773c79d455a079825e1b81ce9e2b63e967bff45336a16`.
