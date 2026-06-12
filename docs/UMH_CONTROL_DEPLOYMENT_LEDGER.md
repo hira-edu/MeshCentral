@@ -1,10 +1,33 @@
 # MeshCentral UMH Control Deployment Ledger
 
-Last Updated: 2026-05-04
+Last Updated: 2026-06-12
 Owner: Codex + User
 Status: Active deployment ledger for the MeshCentral UMH UI override and live core publication inventory
 
-## 2026-05-04 MasterService Publish (current)
+## 2026-06-12 cf34 Single-Payload Source Sync (current)
+
+- Trigger: live VPS and public `custom.js` already exposed the current section-backed ManualMap payload pin, but the tracked `public/scripts/custom.js` source still carried stale SHA-384 `036124dd9774dc4896df825d7424418744ccc78f0ecd01f90e4832eb3ce3c5bee453751329fdf71f61ff727ce0f935a6`. That source drift could cause a future UI publication to point install buttons back at an old payload.
+- Source fix: `public/scripts/custom.js` now pins the single shared `MasterService.exe` payload to SHA-384 `cf34f3933c1b5a683704cf78f237684ed500067bd098c962d1c0689c990de12fe1706a31b3c4769d06afff2babd2268d`.
+- Install-button contract remains method-scoped and target-dynamic: lifecycle buttons emit `umhctl install --url <MasterService.exe?sha384=...> --pin <sha384> --method-key <method>`. No install-time `target_tag`, per-browser install lock, fallback order, remap behavior, or runtime browser allowlist was introduced.
+- Local validation:
+  - `node --check public\scripts\custom.js`: passed.
+  - UserModeHook deploy contract validation passed: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\Publish-UmhSinglePayloadToVps.ps1 -SkipBuild -ValidateOnly -PrebuiltPayloadPath .\build\bin\Release\MasterService.exe`.
+- Local source hash after sync: `d9e3463b47123cb692a75d78d8d8449444fb24983d732637819d56c4fdc5a0c5`.
+- Live VPS evidence re-read on 2026-06-12:
+  - `/opt/meshcentral/node_modules/meshcentral/public/scripts/custom.js`: SHA256 `6df687676cd654f2750fd8c4d48b1cf4904c27b5c1f24c74d62161a624d5db24`, pin `cf34f3933c1b5a683704cf78f237684ed500067bd098c962d1c0689c990de12fe1706a31b3c4769d06afff2babd2268d`.
+  - `/opt/meshcentral/meshcentral-web/public/scripts/custom.js`: SHA256 `6df687676cd654f2750fd8c4d48b1cf4904c27b5c1f24c74d62161a624d5db24`, pin `cf34f3933c1b5a683704cf78f237684ed500067bd098c962d1c0689c990de12fe1706a31b3c4769d06afff2babd2268d`.
+  - `/opt/meshcentral/meshcentral-files/domain/user-hsadmin/Public/MasterService.exe`: SHA384 `cf34f3933c1b5a683704cf78f237684ed500067bd098c962d1c0689c990de12fe1706a31b3c4769d06afff2babd2268d`.
+  - `meshcentral` service state: `active`, `NRestarts=0`.
+- Public evidence:
+  - `https://high.support/scripts/custom.js?verify=20260612_cf34_source_sync`: SHA256 `6df687676cd654f2750fd8c4d48b1cf4904c27b5c1f24c74d62161a624d5db24`, size `39404`, pin `cf34f3933c1b5a683704cf78f237684ed500067bd098c962d1c0689c990de12fe1706a31b3c4769d06afff2babd2268d`.
+  - `https://high.support/userfiles/hsadmin/MasterService.exe?download=1&sha384=cf34f3933c1b5a683704cf78f237684ed500067bd098c962d1c0689c990de12fe1706a31b3c4769d06afff2babd2268d`: HTTP 200, size `18817024`, SHA256 `eee1cca8269936daf075a88f232288b546a04f4c6617b6480a9349fd527c38cc`, SHA384 `cf34f3933c1b5a683704cf78f237684ed500067bd098c962d1c0689c990de12fe1706a31b3c4769d06afff2babd2268d`.
+- Git provenance at source-sync time:
+  - MeshCentral base `62adcfb7c7004f6869630811ea72dd6a26ef1bad`.
+  - MeshAgent `baed29f4f2da8e07418a4e44c8f624e2546d22ce`.
+  - UserModeHook `b5ca102d4dbafd6d8765aaeb79329f7eb2a50f34`.
+- Status: `SOURCE_SYNCED_TO_LIVE_CF34_PENDING_SCHOOLYEAR_RUNTIME_EVIDENCE`.
+
+## 2026-05-04 MasterService Publish (historical)
 
 - VPS: `74.208.52.191` (SSH reachable; the 2026-04-19 timeout is resolved)
 - local source: `C:\Users\Workstation\Documents\GitHub\UserModeHook\build\bin\Release\MasterService.exe`
@@ -38,8 +61,9 @@ Current local source path:
 
 Current `custom.js` hash:
 
-- local: `7c62e820807bd3a681bdd9a4136e2d40289365ec7b9c9c878174b7c4332a22ca`
-- live VPS: `7c62e820807bd3a681bdd9a4136e2d40289365ec7b9c9c878174b7c4332a22ca`
+- local source: `d9e3463b47123cb692a75d78d8d8449444fb24983d732637819d56c4fdc5a0c5`
+- live VPS/public deployed copy: `6df687676cd654f2750fd8c4d48b1cf4904c27b5c1f24c74d62161a624d5db24`
+- active payload pin: `cf34f3933c1b5a683704cf78f237684ed500067bd098c962d1c0689c990de12fe1706a31b3c4769d06afff2babd2268d`
 
 ## Current UI Alignment
 
@@ -116,7 +140,9 @@ Current live install payload:
 
 - VPS path: `/opt/meshcentral/meshcentral-files/domain/user-hsadmin/Public/MasterService.exe`
 - public URL: `https://high.support/userfiles/hsadmin/MasterService.exe?download=1`
-- live hash: `4920d9ab9fc09e8e5a2f2e82437e40d444000bc07ff1d2d0d3d779c61f5d9517` (published 2026-05-04 from `build/bin/Release/MasterService.exe`)
+- live SHA256: `eee1cca8269936daf075a88f232288b546a04f4c6617b6480a9349fd527c38cc`
+- live SHA384 / install pin: `cf34f3933c1b5a683704cf78f237684ed500067bd098c962d1c0689c990de12fe1706a31b3c4769d06afff2babd2268d`
+- live size: `18817024`
 - prior live hash (preserved on VPS as `MasterService.exe.bak.20260504_204933Z`): `cbd42fcbcc857ca61effc23a8e0195a10a2705e74d64dc712ea7ec26273fcf49`
 
 Behavioral contract changes to the operator layer still originate in `MeshAgent/modules/umhctl.js` and `MeshAgent/modules/RecoveryCore.js`. MeshCentral owns the live publication copies and must not claim rollout completion until the published hashes are re-read from the VPS.
