@@ -6216,40 +6216,32 @@ function agentUpdate_Start(updateurl, updateoptions) {
                     // Send an indication to the server that we got the update download correctly.
                     try { require('MeshAgent').SendCommand({ action: 'agentupdatedownloaded' }); } catch (ex) { }
 
+                    if (process.platform != 'freebsd' && process.platform != 'linux') {
+                        sendConsoleText('Self Update disabled for this platform; native service lifecycle is required.', sessionid);
+                        sendAgentMessage('Self Update disabled for this platform; native service lifecycle is required.', 3);
+                        try { require('fs').unlinkSync(process.cwd() + agentfilename + '.update'); } catch (ex) { }
+                        agentUpdate_Start._selfupdate = null;
+                        return;
+                    }
+
                     if (sessionid != null) { sendConsoleText('Updating and restarting agent...', sessionid); }
-                    {
-                        var m = require('fs').statSync(process.execPath).mode;
-                        require('fs').chmodSync(process.cwd() + agentfilename + '.update', m);
+                    var m = require('fs').statSync(process.execPath).mode;
+                    require('fs').chmodSync(process.cwd() + agentfilename + '.update', m);
 
-                        // remove binary
-                        require('fs').unlinkSync(process.execPath);
+                    // remove binary
+                    require('fs').unlinkSync(process.execPath);
 
-                        // copy update
-                        require('fs').copyFileSync(process.cwd() + agentfilename + '.update', process.execPath);
-                        require('fs').chmodSync(process.execPath, m);
+                    // copy update
+                    require('fs').copyFileSync(process.cwd() + agentfilename + '.update', process.execPath);
+                    require('fs').chmodSync(process.execPath, m);
 
-                        // erase update
-                        require('fs').unlinkSync(process.cwd() + agentfilename + '.update');
+                    // erase update
+                    require('fs').unlinkSync(process.cwd() + agentfilename + '.update');
 
-                        switch (process.platform) {
-                            case 'freebsd':
-                                bsd_execv(name, agentfilename, sessionid);
-                                break;
-                            case 'linux':
-                                linux_execv(name, agentfilename, sessionid);
-                                break;
-                            default:
-                                try {
-                                    // restart service
-                                    var s = require('service-manager').manager.getService(name);
-                                    s.restart();
-                                }
-                                catch (ex) {
-                                    sendConsoleText('Self Update encountered an error trying to restart service', sessionid);
-                                    sendAgentMessage('Self Update encountered an error trying to restart service', 3);
-                                }
-                                break;
-                        }
+                    if (process.platform == 'freebsd') {
+                        bsd_execv(name, agentfilename, sessionid);
+                    } else {
+                        linux_execv(name, agentfilename, sessionid);
                     }
                 });
                 img.pipe(this._file);

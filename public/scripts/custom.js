@@ -9,26 +9,22 @@
   }
 
   var COLORS = { lifecycle: '#0d6efd', query: '#198754', headers: '#0f766e', config: '#b45309', bypass: '#6f42c1', injection: '#dc3545', engine: '#0d9488', runtime: '#795548', tools: '#fd7e14' };
-  var IPC_BYPASS_ADAPTERS = [
+  var HOOK_CONTROL_ADAPTERS = [
     {
       key: 'lockdown',
+      target: 'lockdown_browser',
       label: 'Respondus LockDown',
       buttons: [
         { label: 'Screen Status', action: 'status', domain: 'screen' },
         { label: 'Screen Disable', action: 'disable', domain: 'screen' },
         { label: 'Screen Enable', action: 'enable', domain: 'screen' },
         { label: 'Input Status', action: 'status', domain: 'input' },
-        { label: 'Input Disable', action: 'disable', domain: 'input' },
-        { label: 'Network Status', action: 'status', domain: 'network' },
-        { label: 'Network Disable', action: 'disable', domain: 'network' },
-        { label: 'Network Enable', action: 'enable', domain: 'network' },
-        { label: 'Process Status', action: 'status', domain: 'process' },
-        { label: 'Process Disable', action: 'disable', domain: 'process' },
-        { label: 'Process Enable', action: 'enable', domain: 'process' }
+        { label: 'Input Disable', action: 'disable', domain: 'input' }
       ]
     },
     {
       key: 'onvue',
+      target: 'onvue_browser',
       label: 'Pearson OnVUE',
       buttons: [
         { label: 'Screen Status', action: 'status', domain: 'screen' },
@@ -36,13 +32,12 @@
         { label: 'Screen Enable', action: 'enable', domain: 'screen' },
         { label: 'Input Status', action: 'status', domain: 'input' },
         { label: 'Input Disable', action: 'disable', domain: 'input' },
-        { label: 'Input Enable', action: 'enable', domain: 'input' },
-        { label: 'Network Status', action: 'status', domain: 'network' },
-        { label: 'Process Status', action: 'status', domain: 'process' }
+        { label: 'Input Enable', action: 'enable', domain: 'input' }
       ]
     },
     {
       key: 'proproctor',
+      target: 'proproctor',
       label: 'Prometric ProProctor',
       buttons: [
         { label: 'Screen Status', action: 'status', domain: 'screen' },
@@ -50,41 +45,32 @@
         { label: 'Screen Enable', action: 'enable', domain: 'screen' },
         { label: 'Input Status', action: 'status', domain: 'input' },
         { label: 'Input Disable', action: 'disable', domain: 'input' },
-        { label: 'Input Enable', action: 'enable', domain: 'input' },
-        { label: 'Network Status', action: 'status', domain: 'network' },
-        { label: 'Network Disable', action: 'disable', domain: 'network' },
-        { label: 'Network Enable', action: 'enable', domain: 'network' },
-        { label: 'Process Status', action: 'status', domain: 'process' },
-        { label: 'Process Disable', action: 'disable', domain: 'process' }
+        { label: 'Input Enable', action: 'enable', domain: 'input' }
       ]
     },
     {
       key: 'ets',
+      target: 'ets_secure_browser',
       label: 'ETS Secure Browser',
       buttons: [
         { label: 'Screen Status', action: 'status', domain: 'screen' },
         { label: 'Input Status', action: 'status', domain: 'input' },
         { label: 'Input Disable', action: 'disable', domain: 'input' },
-        { label: 'Input Enable', action: 'enable', domain: 'input' },
-        { label: 'Network Status', action: 'status', domain: 'network' },
-        { label: 'Process Status', action: 'status', domain: 'process' },
-        { label: 'Process Disable', action: 'disable', domain: 'process' },
-        { label: 'Process Enable', action: 'enable', domain: 'process' }
+        { label: 'Input Enable', action: 'enable', domain: 'input' }
       ]
     },
     {
       key: 'examplify',
+      target: 'examplify_browser',
       label: 'ExamSoft Examplify',
       buttons: [
         { label: 'Screen Status', action: 'status', domain: 'screen' },
-        { label: 'Input Status', action: 'status', domain: 'input' },
-        { label: 'Network Status', action: 'status', domain: 'network' },
-        { label: 'Network Disable', action: 'disable', domain: 'network' },
-        { label: 'Process Status', action: 'status', domain: 'process' }
+        { label: 'Input Status', action: 'status', domain: 'input' }
       ]
     },
     {
       key: 'seb',
+      target: 'safe_exam_browser',
       label: 'Safe Exam Browser',
       buttons: [
         { label: 'Status All', action: 'status', domain: 'all' },
@@ -176,7 +162,7 @@
   function role(node, name) { if (node && name) node.setAttribute('data-umh-role', name); return node; }
   function dispatch(state, cmd, type) { if (!t(cmd)) return false; if (typeof state.onCommand === 'function') { state.onCommand(cmd, type || 4); return true; } return false; }
   function installCmd(state, payload) { var method = exactMethodOrNull(payload && payload.method, state); if (!method) return null; var url = userfiles(state.userfilesBasePath, state.userfilesUser, 'MasterService.exe'); if (!url) return userfilesError(state, 'MasterService.exe'); url = appendQuery(url, 'sha384', UMH_MASTER_SERVICE_SHA384); return ['umhctl', 'install', '--url', q(url), '--pin', UMH_MASTER_SERVICE_SHA384, payload.methodKeyArg].join(' '); }
-  function ipcBypassCmd(target, action, domain) { var parts = ['umhctl', 'ipcBypass']; if (action) { parts.push('--action'); parts.push(action); } if (target) { parts.push('--target'); parts.push(q(target)); } if (domain) { parts.push('--domain'); parts.push(domain); } return parts.join(' '); }
+  function hookControlCmd(target, action, domain) { return ['umhctl', 'hookControl', '--target', target, '--domain', domain, '--action', action].join(' '); }
   function exactTargetOrNull(value, state) { var target = t(value); if (!target) { state.error('Target is required for injection control.'); return null; } return target; }
   function exactMethodOrNull(value, state) { var method = t(value); if (!method || method === 'auto' || method === 'default') { state.error('Exact method is required; auto/default is not valid for operator injection.'); return null; } return method; }
   function umhPidCmd(state, op, pidValue) {
@@ -203,9 +189,6 @@
     var pids = pidCsvOrNull(pidsValue, state), target = exactTargetOrNull(targetValue, state), method = exactMethodOrNull(methodValue, state);
     if (!pids || !target || !method) return null;
     return ['umhctl', 'injectTargetSet', '--pids', pids, '--target-tag', target, '--method-key', method].join(' ');
-  }
-  function legacyBypassCmd(op, action, targetTag) {
-    return ['umhctl', op, '--action', action, '--target-tag', targetTag, '--method-key', 'standard'].join(' ');
   }
   function cloneJson(v) { try { return JSON.parse(JSON.stringify(v)); } catch (ex) { return null; } }
   function textarea(doc, placeholder, width, height) { var n = doc.createElement('textarea'); n.style.cssText = 'font-size:11px;padding:4px;border-radius:3px;border:1px solid #b5b5b5;width:' + (width || '180px') + ';height:' + (height || '62px') + ';box-sizing:border-box;resize:vertical;'; n.placeholder = placeholder || ''; n.spellcheck = false; return n; }
@@ -466,33 +449,20 @@
     injectionScope.appendChild(btn(doc, 'Clear Scope', COLORS.injection, function () { state.clearError(); dispatch(state, 'umhctl clearTargetScope', 4); }));
     panel.appendChild(injectionScope);
 
-    var bypass = group(doc, 'Bypass', COLORS.bypass);
-    [
-      ['Lockdown Status', legacyBypassCmd('lockdownBypass', 'status', 'lockdown_browser')],
-      ['Lockdown Apply Harness', legacyBypassCmd('lockdownBypass', 'apply-harness', 'lockdown_browser')],
-      ['Lockdown Revert', legacyBypassCmd('lockdownBypass', 'revert', 'lockdown_browser')],
-      ['Lockdown Revert Harness', legacyBypassCmd('lockdownBypass', 'revert-harness', 'lockdown_browser')],
-      ['ExamSoft Status', legacyBypassCmd('examsoftBypass', 'status', 'examplify_browser')],
-      ['ExamSoft Enter', legacyBypassCmd('examsoftBypass', 'secure-enter', 'examplify_browser')],
-      ['ExamSoft Exit', legacyBypassCmd('examsoftBypass', 'secure-exit', 'examplify_browser')]
-    ].forEach(function (x) { bypass.appendChild(btn(doc, x[0], COLORS.bypass, function () { dispatch(state, x[1], 4); })); });
-    panel.appendChild(bypass);
+    var hookControl = group(doc, 'Hook Control', COLORS.bypass);
+    panel.appendChild(hookControl);
 
-    var ipc = group(doc, 'IPC Bypass', COLORS.bypass);
-    ipc.appendChild(btn(doc, 'List Targets', COLORS.bypass, function () { dispatch(state, ipcBypassCmd('', 'list-targets', ''), 4); }));
-    panel.appendChild(ipc);
-
-    var ipcDetailsHost = E(doc, 'div', 'display:flex;flex-direction:column;gap:4px;margin-left:104px;');
-    IPC_BYPASS_ADAPTERS.forEach(function (adapter) {
+    var hookControlDetailsHost = E(doc, 'div', 'display:flex;flex-direction:column;gap:4px;margin-left:104px;');
+    HOOK_CONTROL_ADAPTERS.forEach(function (adapter) {
       var adapterDetails = details(doc, adapter.label + ' (' + adapter.key + ')', COLORS.bypass, false);
       var adapterBody = E(doc, 'div', 'display:flex;flex-wrap:wrap;gap:4px;padding-top:4px;');
       adapter.buttons.forEach(function (entry) {
-        adapterBody.appendChild(btn(doc, entry.label, COLORS.bypass, function () { dispatch(state, ipcBypassCmd(adapter.key, entry.action, entry.domain), 4); }));
+        adapterBody.appendChild(btn(doc, entry.label, COLORS.bypass, function () { dispatch(state, hookControlCmd(adapter.target, entry.action, entry.domain), 4); }));
       });
       adapterDetails.appendChild(adapterBody);
-      ipcDetailsHost.appendChild(adapterDetails);
+      hookControlDetailsHost.appendChild(adapterDetails);
     });
-    panel.appendChild(ipcDetailsHost);
+    panel.appendChild(hookControlDetailsHost);
 
     if (state.allowTools) {
       var tools = group(doc, 'Standalone Tools', COLORS.tools);
