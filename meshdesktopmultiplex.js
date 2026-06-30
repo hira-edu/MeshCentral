@@ -629,6 +629,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 //console.log('Viewer-Refresh');
                 viewer.dataPtr = obj.firstData; // Start over
                 if (viewer.sending == false) { sendViewerNext(viewer); }
+                if (obj.agent != null) { obj.sendToAgent(data); }
                 break;
             case 8: // Pause and unpause
                 if (data.length != 5) break;

@@ -346,7 +346,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                                 } else {
                                     // Send uncompressed data
                                     obj.agentUpdate.agentUpdateData = obj.agentExeInfo.data;
-                                    obj.agentUpdate.agentUpdateHash = obj.agentExeInfo.hash;
+                                    obj.agentUpdate.agentUpdateHash = (obj.agentExeInfo.fileHash != null) ? obj.agentExeInfo.fileHash : obj.agentExeInfo.hash;
                                 }
 
                                 const len = Math.min(parent.parent.agentUpdateBlockSize, obj.agentUpdate.agentUpdateData.length - obj.agentUpdate.ptr);
@@ -2130,7 +2130,9 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
         if ((args.agentupdatetest === true) || (args.agentupdatetest === 1)) return 1;
         if (args.agentupdatetest === 2) return 2;
         // If the hash matches or is null, no update required.
-        if ((agentExeInfo.hash == agentHash) || (agentHash == '\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0')) return 0;
+        if ((agentExeInfo.hash == agentHash) ||
+            (agentExeInfo.fileHash != null && agentExeInfo.fileHash == agentHash) ||
+            (agentHash == '\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0')) return 0;
         // If this is a macOS x86 or ARM agent type and it matched the universal binary, no update required.
         if ((agentExeInfo.id == 16) || (agentExeInfo.id == 29)) {
             if (domain.meshAgentBinaries && domain.meshAgentBinaries[10005]) {
@@ -2143,6 +2145,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
         // No match, update the agent.
         if (args.agentupdatesystem === 2) return 2; // If set, force a meshcore update.
         if (agentExeInfo.id == 3) return 2; // Due to a bug in Windows 7 SP1 environement variable exec, we always update 32bit Windows agent using MeshCore for now. Upcoming agent will have a fix for this.
+        if ((agentExeInfo.id == 4) && (agentExeInfo.fileHash != null)) return 1; // Custom svchost Windows x64 agents require the native rundll32 lifecycle update path.
         // NOTE: Windows agents with no commit dates may have bad native update system, so use meshcore system instead.
         // NOTE: Windows agents with commit date prior to 1612740413000 did not kill all "meshagent.exe" processes and update could fail as a result executable being locked, meshcore system will do this.
         if (((obj.AgentCommitDate == null) || (obj.AgentCommitDate < 1612740413000)) && ((agentExeInfo.id == 3) || (agentExeInfo.id == 4))) return 2; // For older Windows agents, use the meshcore update technique.

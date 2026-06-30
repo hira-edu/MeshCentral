@@ -465,67 +465,15 @@ function bsd_execv(name, agentfilename, sessionid) {
     sendAgentMessage('Self Update failed because execv() failed', 3);
 }
 
-function windows_execve(name, agentfilename, sessionid) {
-    var libc;
-    try {
-        libc = require('_GenericMarshal').CreateNativeProxy('msvcrt.dll');
-        libc.CreateMethod('_wexecve');
-    }
-    catch (xx) {
-        sendConsoleText('Self Update failed because msvcrt.dll is missing', sessionid);
-        sendAgentMessage('Self Update failed because msvcrt.dll is missing', 3);
-        return;
-    }
-
-    var cwd = process.cwd();
-    if (!cwd.endsWith('\\'))
-    {
-        cwd += '\\';
-    }
-    var cmd = require('_GenericMarshal').CreateVariable(process.env['windir'] + '\\system32\\cmd.exe', { wide: true });
-    var args = require('_GenericMarshal').CreateVariable(3 * require('_GenericMarshal').PointerSize);
-    var arg1 = require('_GenericMarshal').CreateVariable('cmd.exe', { wide: true });
-    var arg2 = require('_GenericMarshal').CreateVariable('/C net stop "' + name + '" & "' + cwd + agentfilename + '.update.exe" -b64exec ' + 'dHJ5CnsKICAgIHZhciBzZXJ2aWNlTG9jYXRpb24gPSBwcm9jZXNzLmFyZ3YucG9wKCkudG9Mb3dlckNhc2UoKTsKICAgIHJlcXVpcmUoJ3Byb2Nlc3MtbWFuYWdlcicpLmVudW1lcmF0ZVByb2Nlc3NlcygpLnRoZW4oZnVuY3Rpb24gKHByb2MpCiAgICB7CiAgICAgICAgZm9yICh2YXIgcCBpbiBwcm9jKQogICAgICAgIHsKICAgICAgICAgICAgaWYgKHByb2NbcF0ucGF0aCAmJiAocHJvY1twXS5wYXRoLnRvTG93ZXJDYXNlKCkgPT0gc2VydmljZUxvY2F0aW9uKSkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgcHJvY2Vzcy5raWxsKHByb2NbcF0ucGlkKTsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICBwcm9jZXNzLmV4aXQoKTsKICAgIH0pOwp9CmNhdGNoIChlKQp7CiAgICBwcm9jZXNzLmV4aXQoKTsKfQ==' +
-        ' "' + process.execPath + '" & copy "' + cwd + agentfilename + '.update.exe" "' + process.execPath + '" & net start "' + name + '" & erase "' + cwd + agentfilename + '.update.exe"', { wide: true });
-
-    if (name == null)
-    {
-        // We can continue with self update for Temp/Console Mode on Windows
-        var db = null;
-        var update = cwd + agentfilename + '.update.exe';
-        var updatedb = cwd + agentfilename + '.update.db';
-        var parms = windows_getCommandLine(); parms.shift();
-
-        var updatesource = parms.find(function (v) { return (v.startsWith('--updateSourcePath=')); });
-        if (updatesource == null)
-        {
-            parms.push('--updateSourcePath="' + cwd + agentfilename + '"');
-            updatesource = (cwd + agentfilename).split('.exe'); updatesource.pop(); updatesource = updatesource.join('.exe');
-            db = updatesource + '.db';
-            updatesource = (' & move "' + updatedb + '" "' + db + '"') + (' & erase "' + updatedb + '" & move "' + update + '" "' + updatesource + '.exe"');
-        }
-        else
-        {
-            updatesource = updatesource.substring(19).split('.exe');
-            updatesource.pop(); updatesource = updatesource.join('.exe');
-            db = updatesource + '.db';
-            updatesource = (' & move "' + update + '" "' + updatesource + '.exe" & move "' + updatedb + '" "' + db + '" & erase "' + updatedb + '"') + (' & echo move "' + update + '" "' + updatesource + '.exe" & echo move "' + updatedb + '" "' + db + '"');
-        }
-
-        var tmp = '/C echo copy "' + db + '" "' + updatedb + '" & copy "' + db + '" "' + updatedb + '"' + ' & "' + update + '" ' + parms.join(' ') + updatesource + ' & erase "' + update + '" & echo ERASE "' + update + '"';
-        arg2 = require('_GenericMarshal').CreateVariable(tmp, { wide: true });
-    }
-
-    arg1.pointerBuffer().copy(args.toBuffer());
-    arg2.pointerBuffer().copy(args.toBuffer(), require('_GenericMarshal').PointerSize);
-
-    libc._wexecve(cmd, args, 0);
-}
-
 // Start a JavaScript based Agent Self-Update
 function agentUpdate_Start(updateurl, updateoptions) {
     // If this value is null
     var sessionid = (updateoptions != null) ? updateoptions.sessionid : null; // If this is null, messages will be broadcast. Otherwise they will be unicasted
+    if (process.platform == 'win32') {
+        sendConsoleText('Windows JavaScript self-update is disabled; native binary update is handled by the agent control channel.', sessionid);
+        sendAgentMessage('Windows JavaScript self-update is disabled; native binary update is handled by the agent control channel.', 3);
+        return;
+    }
 
     // If the url starts with *, switch it to use the same protoco, host and port as the control channel.
     if (updateurl != null) {
@@ -630,7 +578,7 @@ function agentUpdate_Start(updateurl, updateoptions) {
             agentUpdate_Start._selfupdate.on('response', function (img)
             {
                 var self = this;
-                this._file = require('fs').createWriteStream(agentfilename + (process.platform=='win32'?'.update.exe':'.update'), { flags: 'wb' });
+                this._file = require('fs').createWriteStream(agentfilename + '.update', { flags: 'wb' });
                 this._filehash = require('SHA384Stream').create();
                 this._filehash.on('hash', function (h)
                 {
@@ -684,12 +632,6 @@ function agentUpdate_Start(updateurl, updateoptions) {
                     try { require('MeshAgent').SendCommand({ action: 'agentupdatedownloaded' }); } catch (e) { }
 
                     if (sessionid != null) { sendConsoleText('Updating and restarting agent...', sessionid); }
-                    if (process.platform == 'win32')
-                    {
-                        // Use _wexecve() equivalent to perform the update
-                        windows_execve(name, agentfilename, sessionid);
-                    }
-                    else
                     {
                         var m = require('fs').statSync(process.execPath).mode;
                         require('fs').chmodSync(process.cwd() + agentfilename + '.update', m);
