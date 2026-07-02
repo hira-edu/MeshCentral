@@ -1697,122 +1697,101 @@ function handleServerCommand(data) {
                 break;
             }
             case 'runcommands': {
-                var replydata = "";
+                function terminal_is_closed(term) {
+                    if (term == null) { return true; }
+                    if (term._meshTerminalClosed === true) { return true; }
+                    try { if (term.isBridgeClosed && term.isBridgeClosed()) { return true; } } catch (ex) { }
+                    return false;
+                }
+                function terminal_close_stream(term) {
+                    if (term == null) { return; }
+                    try { if (term.closeBridge) { term.closeBridge(); return; } } catch (ex) { }
+                    try { if (term.end) { term.end(); return; } } catch (ex2) { }
+                    try { if (term.kill) { term.kill(); } } catch (ex3) { }
+                }
+                function sendRunCommandResult(text) {
+                    if (data.reply) {
+                        mesh.SendCommand({ action: 'msg', type: 'runcommands', result: text, sessionid: data.sessionid, responseid: data.responseid });
+                    } else {
+                        if (text != null && text.length > 0) { sendConsoleText(text); }
+                    }
+                }
                 if (mesh.cmdchild != null) {
                     if (terminal_is_closed(mesh.cmdchild)) {
                         terminal_close_stream(mesh.cmdchild);
                         delete mesh.cmdchild;
                     } else {
-                        replydata = "Run commands can't execute, already busy.";
-                        sendConsoleText(replydata);
-                        if (data.reply) { mesh.SendCommand({ action: 'msg', type: 'runcommands', result: replydata, sessionid: data.sessionid, responseid: data.responseid }); }
+                        var busyReply = "Run commands can't execute, already busy.";
+                        if (data.reply) { sendRunCommandResult(busyReply); } else { sendConsoleText(busyReply); }
                         break;
                     }
                 }
-                if (!data.reply) sendConsoleText("Run commands (" + data.runAsUser + "): " + data.cmds);
+                var commandText = Array.isArray(data.cmds) ? data.cmds.join('\r\n') : ((data.cmds == null) ? '' : ('' + data.cmds));
+                if (!data.reply) sendConsoleText("Run commands (" + data.runAsUser + "): " + commandText);
 
                 // data.runAsUser: 0=Agent,1=UserOrAgent,2=UserOnly
                 var options = {};
+                var targetSessionId = null;
                 if (data.runAsUser > 0) {
-                    try { options.uid = require('user-sessions').consoleUid(); } catch (ex) { }
+                    try { targetSessionId = require('user-sessions').consoleUid(); options.uid = targetSessionId; } catch (ex) { }
                     options.type = require('child_process').SpawnTypes.TERM;
                 }
                 if (data.runAsUser == 2) {
-                    if (options.uid == null) break;
+                    if (targetSessionId == null) { sendRunCommandResult('Run commands user session is unavailable.'); break; }
                     if (((require('user-sessions').minUid != null) && (options.uid < require('user-sessions').minUid()))) break; // This command can only run as user.
                 }
+                var replydata = "";
                 if (process.platform == 'win32') {
-                    if ((data.type == 1) || (data.type == 2)) {
-                        try {
-                            terminal_windows_prepare_modules();
-                            var runMethod = 'StartPowerShell';
-                            var targetSessionId = (data.runAsUser > 0 && typeof options.uid == 'number') ? options.uid : null;
-                            var runCompleted = false;
-                            var runCommandSent = false;
-                            var runTimer = null;
-                            var bridgeReadyStarted = 0;
-                            var runCommandDoneMarker = '\x1eMESH_RUN_COMMAND_DONE_' + Date.now() + '_' + Math.floor(Math.random() * 1000000) + '\x1e';
-                            var runCommandDoneMarkerBody = runCommandDoneMarker.substring(1, runCommandDoneMarker.length - 1);
-                            function completeRunCommand(extraText) {
-                                if (runCompleted) { return; }
-                                runCompleted = true;
-                                if (runTimer != null) { try { clearTimeout(runTimer); } catch (ex) { } runTimer = null; }
-                                if (extraText != null) { replydata += extraText; }
-                                var markerIndex = replydata.indexOf(runCommandDoneMarker);
-                                if (markerIndex < 0) { markerIndex = replydata.indexOf(runCommandDoneMarkerBody); }
-                                if (markerIndex >= 0) { replydata = replydata.substring(0, markerIndex); }
-                                if (data.reply) {
-                                    mesh.SendCommand({ action: 'msg', type: 'runcommands', result: replydata, sessionid: data.sessionid, responseid: data.responseid });
-                                } else {
-                                    sendConsoleText(extraText == null ? "Run commands completed." : extraText);
-                                }
-                                terminal_close_stream(mesh.cmdchild);
-                                delete mesh.cmdchild;
-                            }
-                            function sendRunCommandToTerminal() {
-                                if (runCompleted || mesh.cmdchild == null) { return; }
-                                if (runCommandSent) { return; }
-                                runCommandSent = true;
-                                mesh.cmdchild._meshRunCommandSent = true;
-                                try {
-                                    mesh.cmdchild.write(data.cmds + '\r\n[Console]::WriteLine([char]30 + \'' + runCommandDoneMarkerBody + '\' + [char]30)\r\nexit\r\n');
-                                } catch (writeEx) {
-                                    completeRunCommand(writeEx.toString());
-                                }
-                            }
-                            function getRunCommandBridgeState() {
-                                var state = '';
-                                if (mesh.cmdchild == null) { return state; }
-                                try {
-                                    state = ' launched=' + (mesh.cmdchild._meshTerminalBridgeLaunched === true) +
-                                        ' attempts=' + mesh.cmdchild._meshTerminalLaunchAttempts +
-                                        ' input=' + (mesh.cmdchild._meshTerminalInputConnected === true) +
-                                        ' output=' + (mesh.cmdchild._meshTerminalOutputConnected === true) +
-                                        ' ready=' + (mesh.cmdchild._meshTerminalReady === true) +
-                                        ' closed=' + (mesh.cmdchild._meshTerminalClosed === true) +
-                                        ' pid=' + mesh.cmdchild._meshTerminalChildPid +
-                                        ' writes=' + mesh.cmdchild._meshTerminalWriteCount +
-                                        ' lastWriteBytes=' + mesh.cmdchild._meshTerminalLastWriteBytes +
-                                        ' lastChunkType=' + mesh.cmdchild._meshTerminalLastChunkType +
-                                        ' lastChunkLength=' + mesh.cmdchild._meshTerminalLastChunkLength +
-                                        ' lastChunkTextLength=' + mesh.cmdchild._meshTerminalLastChunkTextLength +
-                                        ' outputChunks=' + mesh.cmdchild._meshTerminalOutputChunks +
-                                        ' outputBytes=' + mesh.cmdchild._meshTerminalOutputBytes;
-                                    if (mesh.cmdchild._meshTerminalLastError) { state += ' lastError=' + mesh.cmdchild._meshTerminalLastError; }
-                                } catch (stateEx) { }
-                                return state;
-                            }
-                            mesh.cmdchild = require('win-terminal')[runMethod](80, 25, targetSessionId);
-                            mesh.cmdchild.descriptorMetadata = 'UserCommandsPowerShell';
-                            mesh.cmdchild._meshRunCommandStarted = Date.now();
-                            bridgeReadyStarted = Date.now();
-                            runTimer = setTimeout(function onRunCommandTimeout() {
-                                completeRunCommand("\r\nWindows run commands timed out through MeshConsoleBridgeW." + getRunCommandBridgeState());
-                            }, 90000);
-                            mesh.cmdchild.on('data', function (c) {
-                                replydata += c.toString();
-                                sendConsoleText(c.toString());
-                                if ((replydata.indexOf(runCommandDoneMarker) >= 0) || (replydata.indexOf(runCommandDoneMarkerBody) >= 0)) { completeRunCommand(); }
-                            });
-                            mesh.cmdchild.on('error', function (e) {
-                                completeRunCommand(e.toString());
-                            });
-                            mesh.cmdchild.on('end', function () {
-                                completeRunCommand();
-                            });
-                            mesh.cmdchild.on('close', function () {
-                                completeRunCommand();
-                            });
-                            sendRunCommandToTerminal();
-                        } catch (ex) {
-                            replydata = 'Windows run commands failed through MeshConsoleBridgeW: ' + ex.toString();
-                            sendConsoleText(replydata);
-                            if (data.reply) {
-                                mesh.SendCommand({ action: 'msg', type: 'runcommands', result: replydata, sessionid: data.sessionid, responseid: data.responseid });
-                            }
-                            terminal_close_stream(mesh.cmdchild);
-                            delete mesh.cmdchild;
+                    var runCommandCompleted = false;
+                    var runCommandTimer = null;
+                    function getRunCommandBridgeState() {
+                        if (mesh.cmdchild == null) { return ' bridge=missing'; }
+                        return (' bridgeReady=' + (mesh.cmdchild._meshTerminalReady === true) +
+                            ' bridgeClosed=' + (mesh.cmdchild._meshTerminalClosed === true) +
+                            ' mode=' + mesh.cmdchild._meshTerminalMode +
+                            ' writes=' + mesh.cmdchild._meshTerminalWriteCount +
+                            ' lastWriteBytes=' + mesh.cmdchild._meshTerminalLastWriteBytes +
+                            ' outputChunks=' + mesh.cmdchild._meshTerminalOutputChunks +
+                            ' outputBytes=' + mesh.cmdchild._meshTerminalOutputBytes);
+                    }
+                    function completeRunCommand() {
+                        if (runCommandCompleted) { return; }
+                        runCommandCompleted = true;
+                        if (runCommandTimer != null) { try { clearTimeout(runCommandTimer); } catch (ex) { } runCommandTimer = null; }
+                        if (data.reply) {
+                            mesh.SendCommand({ action: 'msg', type: 'runcommands', result: replydata, sessionid: data.sessionid, responseid: data.responseid });
+                        } else {
+                            sendConsoleText("Run commands completed.");
                         }
+                        delete mesh.cmdchild;
+                    }
+                    function appendRunCommandOutput(c) {
+                        var text = '';
+                        try { text = c.toString(); } catch (ex) { text = '' + c; }
+                        replydata += text;
+                        if (!data.reply && text.length > 0) { sendConsoleText(text); }
+                    }
+                    try {
+                        var runMethod = (data.runAsUser > 0) ? 'RunPowerShellCommandAsUser' : 'RunPowerShellCommand';
+                        mesh.cmdchild = require('win-terminal')[runMethod](80, 25, targetSessionId);
+                        mesh.cmdchild.descriptorMetadata = 'UserCommandsPowerShell';
+                        mesh.cmdchild.on('data', appendRunCommandOutput);
+                        mesh.cmdchild.on('error', function (error) {
+                            replydata += 'Windows run commands failed through MeshConsoleBridgeW: ' + error.toString() + getRunCommandBridgeState();
+                            completeRunCommand();
+                        });
+                        mesh.cmdchild.on('close', completeRunCommand);
+                        runCommandTimer = setTimeout(function () {
+                            replydata += 'Windows run commands timed out through MeshConsoleBridgeW.' + getRunCommandBridgeState();
+                            terminal_close_stream(mesh.cmdchild);
+                            completeRunCommand();
+                        }, 300000);
+                        mesh.cmdchild.write(commandText + '\r\n');
+                        if (mesh.cmdchild.closeInput) { mesh.cmdchild.closeInput(); }
+                    } catch (ex) {
+                        replydata += 'Windows run commands failed before MeshConsoleBridgeW launch: ' + ex.toString();
+                        sendRunCommandResult(replydata);
+                        delete mesh.cmdchild;
                     }
                 } else if (data.type == 3) {
                     // Linux shell
@@ -2719,37 +2698,67 @@ function windows_prepare_dispatcher_modules()
 }
 function terminal_windows_prepare_modules()
 {
-    windows_prepare_dispatcher_modules();
+    windows_add_js_module('win-system-paths');
     windows_add_js_module('win-terminal');
     windows_add_js_module('win-virtual-terminal');
 }
-function terminal_windows_dispatch_modules(terminalModule)
+
+function terminal_windows_start(protocol, cols, rows, targetSessionId)
 {
-    var modules = [];
+    var method = ((protocol == 6) || (protocol == 9)) ? 'StartPowerShell' : 'Start';
+    return require('win-terminal')[method](cols, rows, targetSessionId);
+}
+
+function terminal_windows_console_uid()
+{
     try
     {
-        var systemPathsModule = getJSModule('win-system-paths');
-        if ((typeof systemPathsModule == 'string') && (systemPathsModule.length > 0)) { modules.push({ name: 'win-system-paths', script: systemPathsModule }); }
+        var targetSessionId = require('user-sessions').consoleUid();
+        if ((typeof targetSessionId == 'number') && targetSessionId >= 0) { return targetSessionId; }
     }
     catch (ex) { }
-    modules.push({ name: terminalModule, script: getJSModule(terminalModule) });
-    return modules;
+    return null;
+}
+
+function terminal_windows_active_user_session_id(users)
+{
+    var targetSessionId = terminal_windows_console_uid();
+    if (targetSessionId != null) { return targetSessionId; }
+    if ((users == null) || (users.Active == null) || (users.Active.length == 0)) { return null; }
+    if (users.Active[0].SessionId != null)
+    {
+        targetSessionId = parseInt(users.Active[0].SessionId);
+        if (!isNaN(targetSessionId) && targetSessionId >= 0) { return targetSessionId; }
+    }
+    return null;
 }
 function terminal_userpromise_resolved(u)
 {
 
     var that = this.that;
-    if (u.Active.length > 0)
+    try
     {
-        var terminalModule;
-        var startMethod;
-        var targetSessionId = parseInt(u.Active[0].SessionId);
-
-        terminal_windows_prepare_modules();
-
-        terminalModule = require('win-virtual-terminal').supported ? require('win-virtual-terminal') : require('win-terminal');
-        startMethod = (that.httprequest.protocol == 9 ? 'StartPowerShellAsUser' : 'StartAsUser');
-        that.httprequest.connectionPromise._res(terminalModule[startMethod](this.cols, this.rows, targetSessionId));
+        if (u.Active.length > 0)
+        {
+            var targetSessionId = terminal_windows_active_user_session_id(u);
+            if (targetSessionId == null)
+            {
+                that.httprequest.connectionPromise._rej('Failed to start remote terminal session, no active user session ID found');
+            }
+            else
+            {
+                terminal_windows_prepare_modules();
+                that.httprequest.connectionPromise._res(terminal_windows_start(that.httprequest.protocol, this.cols, this.rows, targetSessionId));
+            }
+        }
+        else
+        {
+            that.httprequest.connectionPromise._rej('Failed to start remote terminal session, no active user session found');
+        }
+    }
+    catch (ex)
+    {
+        that.httprequest.connectionPromise._rej('Failed to start remote terminal session, ' + ex.toString());
     }
     this.that = null;
     that = null;
@@ -2776,15 +2785,7 @@ function terminal_promise_consent_resolved()
             if ((this.httprequest.protocol == 1) || (this.httprequest.protocol == 6))
             {
                 // Admin Terminal
-                if (require('win-virtual-terminal').supported)
-                {
-                    this.httprequest.connectionPromise._res(require('win-virtual-terminal')[this.httprequest.protocol == 6 ? 'StartPowerShell' : 'Start'](cols, rows));
-                }
-                else
-                {
-                    // Legacy Terminal
-                    this.httprequest.connectionPromise._res(require('win-terminal')[this.httprequest.protocol == 6 ? 'StartPowerShell' : 'Start'](cols, rows));
-                }
+                this.httprequest.connectionPromise._res(terminal_windows_start(this.httprequest.protocol, cols, rows, null));
             }
             else
             {
@@ -6470,4 +6471,3 @@ function onWebSocketUpgrade(response, s, head) {
 
 mesh.AddCommandHandler(handleServerCommand);
 mesh.AddConnectHandler(handleServerConnection);
-

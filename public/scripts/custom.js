@@ -105,6 +105,17 @@
   function t(v) { return (v == null) ? '' : String(v).trim(); }
   function norm(v) { return t(v).toLowerCase().replace(/[^a-z0-9]+/g, ''); }
   function q(v) { return '"' + String(v).split('\\').join('\\\\').split('"').join('\\"') + '"'; }
+  function psq(v) { return "'" + String(v).replace(/'/g, "''") + "'"; }
+  function utf16leBase64(v) {
+    var s = String(v), bytes = '', i, code;
+    for (i = 0; i < s.length; i++) {
+      code = s.charCodeAt(i);
+      bytes += String.fromCharCode(code & 255, (code >> 8) & 255);
+    }
+    if (typeof window !== 'undefined' && typeof window.btoa === 'function') return window.btoa(bytes);
+    if (typeof btoa === 'function') return btoa(bytes);
+    throw new Error('Base64 encoder is unavailable.');
+  }
   function appendQuery(url, key, value) { return String(url) + (String(url).indexOf('?') >= 0 ? '&' : '?') + encodeURIComponent(key) + '=' + encodeURIComponent(value); }
   function isDigits(v) { return (/^[0-9]+$/).test(t(v)); }
   function isNumberText(v) { return (/^-?(?:\d+|\d*\.\d+)$/).test(t(v)); }
@@ -149,7 +160,22 @@
     if (/\/Public$/i.test(p)) p = p.substring(0, p.length - 7);
     return origin() + p + '/' + encodeURIComponent(file) + '?download=1';
   }
-  function psDownload(state, remote, local, args) { var url = userfiles(state.userfilesBasePath, state.userfilesUser, remote); if (!url) return userfilesError(state, remote); var argText = args.map(function (a) { return "'" + String(a).replace(/'/g, "''") + "'"; }).join(' '); var script = "New-Item -ItemType Directory -Path '%TEMP%\\UMH' -Force | Out-Null; " + "(New-Object Net.WebClient).DownloadFile('" + url + "','%TEMP%\\UMH\\" + local + "'); " + "& '%TEMP%\\UMH\\" + local + "'" + (argText ? ' ' + argText : ''); return 'powershell -NoProfile -ExecutionPolicy Bypass -Command ' + q(script); }
+  function psDownload(state, remote, local, args) {
+    var url = userfiles(state.userfilesBasePath, state.userfilesUser, remote), localName = t(local), argText, script;
+    if (!url) return userfilesError(state, remote);
+    if (!localName) { if (state && typeof state.error === 'function') state.error('Local file name is required.'); return null; }
+    argText = (args || []).map(function (a) { return psq(a); }).join(' ');
+    script = [
+      "$ErrorActionPreference='Stop'",
+      "$umhDir=Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath 'UMH'",
+      'New-Item -ItemType Directory -Path $umhDir -Force | Out-Null',
+      '$target=Join-Path -Path $umhDir -ChildPath ' + psq(localName),
+      '$wc=New-Object System.Net.WebClient',
+      'try { $wc.DownloadFile(' + psq(url) + ', $target) } finally { if ($wc) { $wc.Dispose() } }',
+      '& $target' + (argText ? ' ' + argText : '')
+    ].join('; ');
+    return 'powershell -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand ' + utf16leBase64(script);
+  }
   function E(doc, tag, css) { var n = doc.createElement(tag); if (css) n.style.cssText = css; return n; }
   function row(doc, gap) { return E(doc, 'div', 'display:flex;flex-wrap:wrap;align-items:center;gap:' + (gap || '4px') + ';'); }
   function label(doc, text, css) { var n = E(doc, 'span', css); n.textContent = text; return n; }
