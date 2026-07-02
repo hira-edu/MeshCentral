@@ -976,27 +976,14 @@ require('MeshAgent').AddCommandHandler(function (data)
                                                                     if (this.httprequest.xoptions.cols) { cols = this.httprequest.xoptions.cols; }
                                                                 }
 
-                                                                // Admin Terminal
-                                                                if (require('win-virtual-terminal').supported) {
-                                                                    // ConPTY PseudoTerminal
-                                                                    // this.httprequest._term = require('win-virtual-terminal')[this.httprequest.protocol == 6 ? 'StartPowerShell' : 'Start'](80, 25);
-
-                                                                    // The above line is commented out, because there is a bug with ClosePseudoConsole() API, so this is the workaround
-                                                                    this.httprequest._dispatcher = require('win-dispatcher').dispatch({ modules: [{ name: 'win-virtual-terminal', script: getJSModule('win-virtual-terminal') }], launch: { module: 'win-virtual-terminal', method: 'Start', args: [cols, rows] } });
-                                                                    this.httprequest._dispatcher.ws = this;
-                                                                    this.httprequest._dispatcher.on('connection', function (c) {
-                                                                        this.ws._term = c;
-                                                                        c.pipe(this.ws, { dataTypeSkip: 1 });
-                                                                        this.ws.pipe(c, { dataTypeSkip: 1 });
-                                                                    });
+                                                                var targetSessionId = null;
+                                                                if ((this.httprequest.protocol == 8) || (this.httprequest.protocol == 9)) {
+                                                                    try { targetSessionId = require('user-sessions').consoleUid(); } catch (ex) { }
                                                                 }
-                                                                else {
-                                                                    // Legacy Terminal
-                                                                    this.httprequest._term = require('win-terminal').Start(80, 25);
-                                                                    this.httprequest._term.pipe(this, { dataTypeSkip: 1 });
-                                                                    this.pipe(this.httprequest._term, { dataTypeSkip: 1, end: false });
-                                                                    this.prependListener('end', function () { this.httprequest._term.end(function () { sendConsoleText('Terminal was closed'); }); });
-                                                                }
+                                                                this.httprequest._term = require('win-terminal')[(this.httprequest.protocol == 6 || this.httprequest.protocol == 9) ? 'StartPowerShell' : 'Start'](cols, rows, targetSessionId);
+                                                                this.httprequest._term.pipe(this, { dataTypeSkip: 1 });
+                                                                this.pipe(this.httprequest._term, { dataTypeSkip: 1, end: false });
+                                                                this.prependListener('end', function () { this.httprequest._term.end(function () { sendConsoleText('Terminal was closed'); }); });
                                                             }
                                                             else {
                                                                 var env = { HISTCONTROL: 'ignoreboth' };

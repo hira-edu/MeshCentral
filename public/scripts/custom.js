@@ -59,7 +59,9 @@
       code = s.charCodeAt(i);
       bytes += String.fromCharCode(code & 255, (code >> 8) & 255);
     }
-    return btoa(bytes);
+    if (typeof window !== 'undefined' && typeof window.btoa === 'function') return window.btoa(bytes);
+    if (typeof btoa === 'function') return btoa(bytes);
+    throw new Error('Base64 encoder is unavailable.');
   }
   function appendQuery(url, key, value) { return String(url) + (String(url).indexOf('?') >= 0 ? '&' : '?') + encodeURIComponent(key) + '=' + encodeURIComponent(value); }
   function isDigits(v) { return (/^[0-9]+$/).test(t(v)); }
