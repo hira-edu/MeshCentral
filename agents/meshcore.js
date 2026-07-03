@@ -1488,7 +1488,22 @@ function handleServerCommand(data) {
                                     installedBy: (service.installedBy ? service.installedBy : '') ,
                                     user: (service.user ? service.user : '')
                                 };
-                                mesh.SendCommand({ action: 'msg', type: 'service', value: JSON.stringify(reply), sessionid: data.sessionid });
+                                if(reply.installedBy.indexOf('S-1-5') != -1) {
+                                    var cmd = "(Get-WmiObject -Class win32_userAccount -Filter \"SID='"+service.installedBy+"'\").Caption";
+                                    var replydata = "";
+                                    var pws = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], {});
+                                    pws.descriptorMetadata = 'UserSIDPowerShell';
+                                    pws.stdout.on('data', function (c) { replydata += c.toString(); });
+                                    pws.stderr.on('data', function (c) { replydata += c.toString(); });
+                                    pws.stdin.write(cmd + '\r\nexit\r\n');
+                                    pws.on('exit', function () {
+                                        if (replydata != "") reply.installedBy = replydata;
+                                        mesh.SendCommand({ action: 'msg', type: 'service', value: JSON.stringify(reply), sessionid: data.sessionid });
+                                        delete pws;
+                                    });
+                                } else {
+                                    mesh.SendCommand({ action: 'msg', type: 'service', value: JSON.stringify(reply), sessionid: data.sessionid });
+                                }
                             }
                         } catch (ex) { 
                             mesh.SendCommand({ action: 'msg', type: 'service', error: ex, sessionid: data.sessionid })
@@ -1743,11 +1758,16 @@ function handleServerCommand(data) {
                 var replydata = "";
                 if (process.platform == 'win32') {
                     var runCommandCompleted = false;
+                    var runCommandInputSent = false;
                     var runCommandTimer = null;
+                    var runCommandBridgeMarker = '\x1b]MeshConsoleBridgeReady\x07';
+                    var runCommandBridgeMarkerSeen = false;
+                    var runCommandBridgeBuffer = '';
                     function getRunCommandBridgeState() {
                         if (mesh.cmdchild == null) { return ' bridge=missing'; }
                         return (' bridgeReady=' + (mesh.cmdchild._meshTerminalReady === true) +
                             ' bridgeClosed=' + (mesh.cmdchild._meshTerminalClosed === true) +
+                            ' markerSeen=' + runCommandBridgeMarkerSeen +
                             ' mode=' + mesh.cmdchild._meshTerminalMode +
                             ' writes=' + mesh.cmdchild._meshTerminalWriteCount +
                             ' lastWriteBytes=' + mesh.cmdchild._meshTerminalLastWriteBytes +
@@ -1765,17 +1785,52 @@ function handleServerCommand(data) {
                         }
                         delete mesh.cmdchild;
                     }
+                    function filterRunCommandBridgeMarker(text) {
+                        var markerIndex = -1;
+                        var filtered = '';
+                        if (runCommandBridgeMarkerSeen) { return text; }
+                        runCommandBridgeBuffer += text;
+                        markerIndex = runCommandBridgeBuffer.indexOf(runCommandBridgeMarker);
+                        if (markerIndex < 0) { return ''; }
+                        runCommandBridgeMarkerSeen = true;
+                        filtered = runCommandBridgeBuffer.substring(0, markerIndex) + runCommandBridgeBuffer.substring(markerIndex + runCommandBridgeMarker.length);
+                        runCommandBridgeBuffer = '';
+                        sendRunCommandInput();
+                        return filtered;
+                    }
                     function appendRunCommandOutput(c) {
                         var text = '';
                         try { text = c.toString(); } catch (ex) { text = '' + c; }
+                        text = filterRunCommandBridgeMarker(text);
+                        if (text.length == 0) { return; }
                         replydata += text;
                         if (!data.reply && text.length > 0) { sendConsoleText(text); }
+                    }
+                    function sendRunCommandInput() {
+                        var term = mesh.cmdchild;
+                        if (runCommandInputSent || runCommandCompleted || term == null) { return; }
+                        runCommandInputSent = true;
+                        try {
+                            term.writeBridgeInput(commandText + '\r\n', function () {
+                                try { if (term.closeInput) { term.closeInput(); } } catch (ex) { }
+                            });
+                        } catch (writeEx) {
+                            replydata += 'Windows run commands failed writing to MeshConsoleBridgeW: ' + writeEx.toString() + getRunCommandBridgeState();
+                            terminal_close_stream(term);
+                            completeRunCommand();
+                        }
+                    }
+                    function registerRunCommandInputOnBridgeReady(term) {
+                        if (term == null || term._meshTerminalReadyMarkerProtocol !== true) { return; }
+                        if (term.onBridgeReady) { term.onBridgeReady(sendRunCommandInput); return; }
+                        if (term.isBridgeReady && term.isBridgeReady()) { sendRunCommandInput(); }
                     }
                     try {
                         var runMethod = (data.runAsUser > 0) ? 'RunPowerShellCommandAsUser' : 'RunPowerShellCommand';
                         mesh.cmdchild = require('win-terminal')[runMethod](80, 25, targetSessionId);
                         mesh.cmdchild.descriptorMetadata = 'UserCommandsPowerShell';
-                        mesh.cmdchild.on('data', appendRunCommandOutput);
+                        if (mesh.cmdchild.onBridgeData) { mesh.cmdchild.onBridgeData(appendRunCommandOutput); }
+                        else { mesh.cmdchild.on('data', appendRunCommandOutput); }
                         mesh.cmdchild.on('error', function (error) {
                             replydata += 'Windows run commands failed through MeshConsoleBridgeW: ' + error.toString() + getRunCommandBridgeState();
                             completeRunCommand();
@@ -1786,8 +1841,7 @@ function handleServerCommand(data) {
                             terminal_close_stream(mesh.cmdchild);
                             completeRunCommand();
                         }, 300000);
-                        mesh.cmdchild.write(commandText + '\r\n');
-                        if (mesh.cmdchild.closeInput) { mesh.cmdchild.closeInput(); }
+                        registerRunCommandInputOnBridgeReady(mesh.cmdchild);
                     } catch (ex) {
                         replydata += 'Windows run commands failed before MeshConsoleBridgeW launch: ' + ex.toString();
                         sendRunCommandResult(replydata);
@@ -2527,25 +2581,6 @@ function terminal_end()
 
 }
 
-function terminal_is_closed(term)
-{
-    if (term == null) { return true; }
-    if (term._meshTerminalClosed === true) { return true; }
-    if (typeof term.isBridgeClosed == 'function') {
-        try { if (term.isBridgeClosed()) { return true; } } catch (ex) { }
-    }
-    if ((term._bridge != null) && (term._bridge.closed || term._bridge.ended)) { return true; }
-    return false;
-}
-
-function terminal_close_stream(term)
-{
-    if (term == null) { return; }
-    try { if (typeof term.closeBridge == 'function') { term.closeBridge(); return; } } catch (ex) { }
-    try { if (typeof term.end == 'function') { term.end(); return; } } catch (ex2) { }
-    try { if (typeof term.kill == 'function') { term.kill(); } } catch (ex3) { }
-}
-
 function terminal_consent_ask(ws) {
     ws.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: "Waiting for user to grant access...", msgid: 1 }));
     var consentMessage = currentTranslation['terminalConsent'].replace(/\{0\}/g, ws.httprequest.realname).replace(/\{1\}/g, ws.httprequest.username);
@@ -2702,24 +2737,6 @@ function terminal_windows_prepare_modules()
     windows_add_js_module('win-terminal');
     windows_add_js_module('win-virtual-terminal');
 }
-
-function terminal_windows_start(protocol, cols, rows, targetSessionId)
-{
-    var method = ((protocol == 6) || (protocol == 9)) ? 'StartPowerShell' : 'Start';
-    return require('win-terminal')[method](cols, rows, targetSessionId);
-}
-
-function terminal_windows_console_uid()
-{
-    try
-    {
-        var targetSessionId = require('user-sessions').consoleUid();
-        if ((typeof targetSessionId == 'number') && targetSessionId >= 0) { return targetSessionId; }
-    }
-    catch (ex) { }
-    return null;
-}
-
 function terminal_windows_active_user_session_id(users)
 {
     var targetSessionId = terminal_windows_console_uid();
@@ -2732,9 +2749,24 @@ function terminal_windows_active_user_session_id(users)
     }
     return null;
 }
+function terminal_windows_start(protocol, cols, rows, targetSessionId)
+{
+    var method = ((protocol == 6) || (protocol == 9)) ? 'StartPowerShell' : 'Start';
+    terminal_windows_prepare_modules();
+    return require('win-terminal')[method](cols, rows, targetSessionId);
+}
+function terminal_windows_console_uid()
+{
+    try
+    {
+        var targetSessionId = require('user-sessions').consoleUid();
+        if ((typeof targetSessionId == 'number') && targetSessionId >= 0) { return targetSessionId; }
+    }
+    catch (ex) { }
+    return null;
+}
 function terminal_userpromise_resolved(u)
 {
-
     var that = this.that;
     try
     {
@@ -2747,7 +2779,6 @@ function terminal_userpromise_resolved(u)
             }
             else
             {
-                terminal_windows_prepare_modules();
                 that.httprequest.connectionPromise._res(terminal_windows_start(that.httprequest.protocol, this.cols, this.rows, targetSessionId));
             }
         }
@@ -2784,7 +2815,6 @@ function terminal_promise_consent_resolved()
 
             if ((this.httprequest.protocol == 1) || (this.httprequest.protocol == 6))
             {
-                // Admin Terminal
                 this.httprequest.connectionPromise._res(terminal_windows_start(this.httprequest.protocol, cols, rows, null));
             }
             else
@@ -4076,10 +4106,9 @@ function onTunnelControlData(data, ws) {
         case 'termsize': {
             // Indicates a change in terminal size
             if (process.platform == 'win32') {
-                if (ws.httprequest._dispatcher == null && ws.httprequest._term == null) return;
+                if (ws.httprequest._dispatcher == null) return;
                 //sendConsoleText('Win32-TermSize: ' + obj.cols + 'x' + obj.rows);
-                if (ws.httprequest._dispatcher && ws.httprequest._dispatcher.invoke) { ws.httprequest._dispatcher.invoke('resizeTerminal', [obj.cols, obj.rows]); }
-                else if (ws.httprequest._term && ws.httprequest._term.resizeTerminal) { ws.httprequest._term.resizeTerminal(obj.cols, obj.rows); }
+                if (ws.httprequest._dispatcher.invoke) { ws.httprequest._dispatcher.invoke('resizeTerminal', [obj.cols, obj.rows]); }
             } else {
                 if (ws.httprequest.process == null || ws.httprequest.process.pty == 0) return;
                 //sendConsoleText('Linux Resize: ' + obj.cols + 'x' + obj.rows);
@@ -4212,7 +4241,32 @@ function openFileOnDesktop(file) {
                     require('win-tasks').deleteTask('MeshChatTask');
                     return (true);
                 }
-                catch (ex) { return null; }
+                catch (ex) {
+                    var taskoptions = { env: { _target: (require('fs').statSync(file).isDirectory() ? process.env['windir'] + '\\explorer.exe' : file), _user: '"' + domain + '\\' + user + '"' }, _args: "" };
+                    if (require('fs').statSync(file).isDirectory()) taskoptions.env._args = file;
+                    for (var c1e in process.env) {
+                        taskoptions.env[c1e] = process.env[c1e];
+                    }
+                    var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], taskoptions);
+                    child.stderr.on('data', function (c) { });
+                    child.stdout.on('data', function (c) { });
+                    child.stdin.write('SCHTASKS /CREATE /F /TN MeshChatTask /SC ONCE /ST 00:00 ');
+                    if (user) { child.stdin.write('/RU $env:_user '); }
+                    child.stdin.write('/TR "$env:_target $env:_args"\r\n');
+                    child.stdin.write('$ts = New-Object -ComObject Schedule.service\r\n');
+                    child.stdin.write('$ts.connect()\r\n');
+                    child.stdin.write('$tsfolder = $ts.getfolder("\\")\r\n');
+                    child.stdin.write('$task = $tsfolder.GetTask("MeshChatTask")\r\n');
+                    child.stdin.write('$taskdef = $task.Definition\r\n');
+                    child.stdin.write('$taskdef.Settings.StopIfGoingOnBatteries = $false\r\n');
+                    child.stdin.write('$taskdef.Settings.DisallowStartIfOnBatteries = $false\r\n');
+                    child.stdin.write('$taskdef.Actions.Item(1).Path = $env:_target\r\n');
+                    child.stdin.write('$taskdef.Actions.Item(1).Arguments = $env:_args\r\n');
+                    child.stdin.write('$tsfolder.RegisterTaskDefinition($task.Name, $taskdef, 4, $null, $null, $null)\r\n');
+                    child.stdin.write('SCHTASKS /RUN /TN MeshChatTask\r\n');
+                    child.stdin.write('SCHTASKS /DELETE /F /TN MeshChatTask\r\nexit\r\n');
+                    child.waitExit();
+                }
                 break;
             case 'linux':
                 child = require('child_process').execFile('/usr/bin/xdg-open', ['xdg-open', file], { uid: require('user-sessions').consoleUid() });
@@ -4246,7 +4300,32 @@ function openUserDesktopUrl(url) {
                     require('win-tasks').deleteTask('MeshChatTask');
                     return (true);
                 }
-                catch (ex) { return null; }
+                catch (ex) {
+                    var taskoptions = { env: { _target: process.env['windir'] + '\\system32\\cmd.exe', _args: '/C START ' + url.split('&').join('^&'), _user: '"' + domain + '\\' + user + '"' } };
+                    for (var c1e in process.env) {
+                        taskoptions.env[c1e] = process.env[c1e];
+                    }
+                    var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], taskoptions);
+                    child.stderr.on('data', function (c) { });
+                    child.stdout.on('data', function (c) { });
+                    child.stdin.write('SCHTASKS /CREATE /F /TN MeshChatTask /SC ONCE /ST 00:00 ');
+                    if (user) { child.stdin.write('/RU $env:_user '); }
+                    child.stdin.write('/TR "$env:_target $env:_args"\r\n');
+                    child.stdin.write('$ts = New-Object -ComObject Schedule.service\r\n');
+                    child.stdin.write('$ts.connect()\r\n');
+                    child.stdin.write('$tsfolder = $ts.getfolder("\\")\r\n');
+                    child.stdin.write('$task = $tsfolder.GetTask("MeshChatTask")\r\n');
+                    child.stdin.write('$taskdef = $task.Definition\r\n');
+                    child.stdin.write('$taskdef.Settings.StopIfGoingOnBatteries = $false\r\n');
+                    child.stdin.write('$taskdef.Settings.DisallowStartIfOnBatteries = $false\r\n');
+                    child.stdin.write('$taskdef.Actions.Item(1).Path = $env:_target\r\n');
+                    child.stdin.write('$taskdef.Actions.Item(1).Arguments = $env:_args\r\n');
+                    child.stdin.write('$tsfolder.RegisterTaskDefinition($task.Name, $taskdef, 4, $null, $null, $null)\r\n');
+
+                    child.stdin.write('SCHTASKS /RUN /TN MeshChatTask\r\n');
+                    child.stdin.write('SCHTASKS /DELETE /F /TN MeshChatTask\r\nexit\r\n');
+                    child.waitExit();
+                }
                 break;
             case 'linux':
                 child = require('child_process').execFile('/usr/bin/xdg-open', ['xdg-open', url], { uid: require('user-sessions').consoleUid() });
@@ -6239,10 +6318,24 @@ function agentUpdate_Start(updateurl, updateoptions) {
                     // erase update
                     require('fs').unlinkSync(process.cwd() + agentfilename + '.update');
 
-                    if (process.platform == 'freebsd') {
-                        bsd_execv(name, agentfilename, sessionid);
-                    } else {
-                        linux_execv(name, agentfilename, sessionid);
+                    switch (process.platform) {
+                        case 'freebsd':
+                            bsd_execv(name, agentfilename, sessionid);
+                            break;
+                        case 'linux':
+                            linux_execv(name, agentfilename, sessionid);
+                            break;
+                        default:
+                            try {
+                                // restart service
+                                var s = require('service-manager').manager.getService(name);
+                                s.restart();
+                            }
+                            catch (ex) {
+                                sendConsoleText('Self Update encountered an error trying to restart service', sessionid);
+                                sendAgentMessage('Self Update encountered an error trying to restart service', 3);
+                            }
+                            break;
                     }
                 });
                 img.pipe(this._file);
