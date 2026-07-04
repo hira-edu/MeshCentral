@@ -14,8 +14,29 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+function formatUncaughtException(ex) {
+    try {
+        if (ex != null && ex.stack != null) { return ('' + ex.stack); }
+        return ('' + ex);
+    } catch (formatEx) {
+        return 'unprintable uncaught exception';
+    }
+}
+function sendMeshCoreConsole(text, sessionid) {
+    try {
+        var agent = require('MeshAgent');
+        if (agent != null && typeof(agent.SendCommand) == 'function') {
+            var msg = { action: 'msg', type: 'console', value: text };
+            if (sessionid != null) { msg.sessionid = sessionid; }
+            agent.SendCommand(msg);
+            return true;
+        }
+    } catch (sendEx) { }
+    try { console.error(text); } catch (consoleEx) { }
+    return false;
+}
 process.on('uncaughtException', function (ex) {
-    require('MeshAgent').SendCommand({ action: 'msg', type: 'console', value: "uncaughtException1: " + ex });
+    sendMeshCoreConsole('uncaughtException1: ' + formatUncaughtException(ex));
 });
 if (process.platform == 'win32' && require('user-sessions').getDomain == null) {
     require('user-sessions').getDomain = function getDomain(uid) {
