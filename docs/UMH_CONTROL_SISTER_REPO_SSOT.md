@@ -97,10 +97,12 @@ Current expected live partial on a healthy canary:
 
 Current live evidence recorded across the sister ledgers:
 
-- live `custom.js` hash: `7c62e820807bd3a681bdd9a4136e2d40289365ec7b9c9c878174b7c4332a22ca`
+- live `custom.js` SHA256: `fd4544d4eca48bf01d76ef3d554e33bdecfb33646db7627a72e7572261fdd2b9`
 - live published `MasterService.exe` path: `/opt/meshcentral/meshcentral-files/domain/user-hsadmin/Public/MasterService.exe`
-- live published `MasterService.exe` URL: `https://high.support/userfiles/hsadmin/MasterService.exe?download=1`
-- live published `MasterService.exe` hash: `2fa49647a68116ff89e10058f5c67b847989a74d5adea6c72c6a967f4db51482`
+- rolled-back-agent-compatible `MasterService.exe` URL: `https://agents.high.support/userfiles/hsadmin/MasterService.exe?download=1`
+- live published `MasterService.exe` SHA256: `e7784af6e6849ec11c8bf1ae5555a31d6adaa3f2da610b3635429c5bd8893bbd`
+- live published `MasterService.exe` SHA384 / install pin: `86f0b4828b36ac88351ceb687fc61b8b6d608aa3d6d1406b79061518ba07b27af99c3334c30d9b00464c5a61c6277903`
+- live published `MasterService.exe` size: `17078784`
 - requested node `Sal` was offline during the 2026-04-14 validation tranche
 - representative live validation used `DESKTOP-TONBSMQ` on the same core lineage (`Apr 9 2026, 3220172809`)
 

@@ -10,7 +10,7 @@
 	}
 }
 
-high.support, agents.high.support, relay.high.support, cfrelay.high.support {
+agents.high.support, relay.high.support {
 	import highsupport_common
 
 	# Stealth: rewrite agent telemetry path to MeshCentral agent endpoint
@@ -51,8 +51,13 @@ high.support, agents.high.support, relay.high.support, cfrelay.high.support {
 	}
 }
 
-agents.high.support:4445, agents.high.support:4446, relay.high.support:4446 {
+agents.high.support:4445, agents.high.support:4446 {
 	import highsupport_common
-	tls /var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/high.support/high.support.crt /var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/high.support/high.support.key
+	tls /etc/caddy/tls/meshcentral-agent-tls.crt /etc/caddy/tls/meshcentral-agent-tls.key
+	reverse_proxy 127.0.0.1:4430
+}
+
+relay.high.support:4446 {
+	import highsupport_common
 	reverse_proxy 127.0.0.1:4430
 }

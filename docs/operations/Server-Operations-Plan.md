@@ -7,7 +7,7 @@ Scope: MeshCentral deployment wrapper repo at `C:\Users\Workstation\Documents\Gi
 Keep the local repo aligned with the actual live VPS deployment, keep a repeatable local backup of deployment-critical state, and treat Cloudflare as part of the documented production surface instead of an external assumption.
 
 ## Current Verified State
-- direct SSH administration target after the April 19, 2026 VPS move: `meshcentral` -> `74.208.52.191` (fresh SSH validation is still blocked by timeout; the last successfully captured VPS endpoint was `167.88.44.65`)
+- direct SSH administration target after the April 19, 2026 VPS move: `meshcentral` -> `74.208.52.191` (verified by a July 26 direct capture; a later read-only recheck timed out)
 - live host name: `srv1057130`
 - live edge stack: `Caddy + cloudflared`
 - live application root: `/opt/meshcentral`

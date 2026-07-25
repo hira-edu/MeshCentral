@@ -1,8 +1,17 @@
 # MeshCentral UMH Control Deployment Ledger
 
-Last Updated: 2026-06-12
+Last Updated: 2026-07-26
 Owner: Codex + User
 Status: Active deployment ledger for the MeshCentral UMH UI override and live core publication inventory
+
+## 2026-07-26 Rolled-Back Agent TLS Download Contract Repair
+
+- Trigger: after the 2026-07-25 known-good rollback, `umhctl install` on the rolled-back MeshAgent failed with `TLS Handshake Error` when the MeshCentral UI emitted the portal-origin `https://high.support/userfiles/...` URL.
+- Root-cause proof: the same agent and `rejectUnauthorized=1` download path failed before HTTP through the Cloudflare-backed `high.support` endpoint, then downloaded all `17078784` bytes successfully through the existing Caddy-backed `agents.high.support` endpoint. The control download produced SHA384 `86f0b4828b36ac88351ceb687fc61b8b6d608aa3d6d1406b79061518ba07b27af99c3334c30d9b00464c5a61c6277903`, matching the unchanged VPS payload and installed local file.
+- Contract repair: `public/scripts/custom.js` now uses `https://agents.high.support` only for `MasterService.exe` install commands and pins the verified live SHA384 above. Other userfiles downloads continue to use the active portal origin.
+- Deployment: only the two live `custom.js` copies were replaced; prior SHA256 `a347814cb2793a95441562ba2509b09ca62eca55d008c95dd5b7d8675d738b89` copies are preserved under `/opt/meshcentral/backups/20260726_umh_tls_fix`. MeshCentral remained active with unchanged PID `2260321`; no service restart, MeshAgent binary deployment, MasterService binary replacement, or database change occurred.
+- Validation: local and live `node --check` passed; focused command generation emitted the exact direct URL and pin; `node test_umhctl_e2e.js` passed; both live and cache-busted public `custom.js` copies hash to SHA256 `fd4544d4eca48bf01d76ef3d554e33bdecfb33646db7627a72e7572261fdd2b9`.
+- Status: `LIVE_STATIC_UI_REPAIRED_OLD_AGENT_DIRECT_TLS_DOWNLOAD_PROVEN`.
 
 ## 2026-06-12 7c1f Watcher-Fallback Payload Pin Sync
 
@@ -186,10 +195,10 @@ Current recorded canary conditions:
 Current live install payload:
 
 - VPS path: `/opt/meshcentral/meshcentral-files/domain/user-hsadmin/Public/MasterService.exe`
-- public URL: `https://high.support/userfiles/hsadmin/MasterService.exe?download=1`
-- live SHA256: `eee1cca8269936daf075a88f232288b546a04f4c6617b6480a9349fd527c38cc`
-- live SHA384 / install pin: `cf34f3933c1b5a683704cf78f237684ed500067bd098c962d1c0689c990de12fe1706a31b3c4769d06afff2babd2268d`
-- live size: `18817024`
+- agent-compatible public URL: `https://agents.high.support/userfiles/hsadmin/MasterService.exe?download=1`
+- live SHA256: `e7784af6e6849ec11c8bf1ae5555a31d6adaa3f2da610b3635429c5bd8893bbd`
+- live SHA384 / install pin: `86f0b4828b36ac88351ceb687fc61b8b6d608aa3d6d1406b79061518ba07b27af99c3334c30d9b00464c5a61c6277903`
+- live size: `17078784`
 - prior live hash (preserved on VPS as `MasterService.exe.bak.20260504_204933Z`): `cbd42fcbcc857ca61effc23a8e0195a10a2705e74d64dc712ea7ec26273fcf49`
 
 Behavioral contract changes to the operator layer still originate in `MeshAgent/modules/umhctl.js` and `MeshAgent/modules/RecoveryCore.js`. MeshCentral owns the live publication copies and must not claim rollout completion until the published hashes are re-read from the VPS.

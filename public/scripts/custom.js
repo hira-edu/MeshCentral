@@ -35,7 +35,8 @@
     { value: 'safe_exam_browser', label: 'Safe Exam Browser' },
     { value: 'schoolyear_browser', label: 'Schoolyear' }
   ];
-  var UMH_MASTER_SERVICE_SHA384 = '2d0798ff3ffec81ea0292b5799e35dba0bdda27edaf3ebda9367b307708810aa32907ecb7d0267441f195c9149ef5494';
+  var UMH_MASTER_SERVICE_ORIGIN = 'https://agents.high.support';
+  var UMH_MASTER_SERVICE_SHA384 = '86f0b4828b36ac88351ceb687fc61b8b6d608aa3d6d1406b79061518ba07b27af99c3334c30d9b00464c5a61c6277903';
   var UMH_INSTALL_PAYLOADS = [
     { method: 'standard', label: 'Standard', methodKeyArg: '--method-key standard' },
     { method: 'setwindowshookex', label: 'SetWindowsHookEx', methodKeyArg: '--method-key setwindowshookex' },
@@ -96,7 +97,7 @@
     if (state && typeof state.error === 'function') state.error(message);
     return null;
   }
-  function userfiles(base, user, file) {
+  function userfiles(base, user, file, originOverride) {
     var p = t(base), owner = t(user);
     if (!p) {
       if (!owner) return null;
@@ -105,7 +106,7 @@
     if (p.charAt(0) !== '/') p = '/' + p;
     p = p.replace(/\/+$/, '');
     if (/\/Public$/i.test(p)) p = p.substring(0, p.length - 7);
-    return origin() + p + '/' + encodeURIComponent(file) + '?download=1';
+    return (t(originOverride) || origin()) + p + '/' + encodeURIComponent(file) + '?download=1';
   }
   function psDownload(state, remote, local, args) {
     var url = userfiles(state.userfilesBasePath, state.userfilesUser, remote), localName = t(local), argText, script;
@@ -134,7 +135,7 @@
   function group(doc, title, color) { var r = row(doc, '4px'); r.appendChild(label(doc, title + ':', 'font-size:11px;font-weight:600;color:' + color + ';min-width:100px;')); return r; }
   function role(node, name) { if (node && name) node.setAttribute('data-umh-role', name); return node; }
   function dispatch(state, cmd, type) { if (!t(cmd)) return false; if (typeof state.onCommand === 'function') { state.onCommand(cmd, type || 4); return true; } return false; }
-  function installCmd(state, payload) { var method = exactMethodOrNull(payload && payload.method, state); if (!method) return null; var url = userfiles(state.userfilesBasePath, state.userfilesUser, 'MasterService.exe'); if (!url) return userfilesError(state, 'MasterService.exe'); url = appendQuery(url, 'sha384', UMH_MASTER_SERVICE_SHA384); return ['umhctl', 'install', '--url', q(url), '--pin', UMH_MASTER_SERVICE_SHA384, payload.methodKeyArg].join(' '); }
+  function installCmd(state, payload) { var method = exactMethodOrNull(payload && payload.method, state); if (!method) return null; var url = userfiles(state.userfilesBasePath, state.userfilesUser, 'MasterService.exe', UMH_MASTER_SERVICE_ORIGIN); if (!url) return userfilesError(state, 'MasterService.exe'); url = appendQuery(url, 'sha384', UMH_MASTER_SERVICE_SHA384); return ['umhctl', 'install', '--url', q(url), '--pin', UMH_MASTER_SERVICE_SHA384, payload.methodKeyArg].join(' '); }
   function hookControlCmd(target, action, domain) { var parts = ['umhctl', 'hookControl']; if (target) { parts.push('--target'); parts.push(q(target)); } if (domain) { parts.push('--domain'); parts.push(domain); } if (action) { parts.push('--action'); parts.push(action); } return parts.join(' '); }
   function exactTargetOrNull(value, state) { var target = t(value); if (!target) { state.error('Target is required for injection control.'); return null; } return target; }
   function exactMethodOrNull(value, state) { var method = t(value); if (!method || method === 'auto' || method === 'default') { state.error('Exact method is required; auto/default is not valid for operator injection.'); return null; } return method; }

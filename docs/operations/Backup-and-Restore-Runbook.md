@@ -17,9 +17,9 @@ Date: April 13, 2026
 
 ### Live VPS Snapshot
 - `server-backups/meshcentral-live-20260413-153810`
-- source: last successful direct SSH capture from `meshcentral` -> `167.88.44.65`
-- operator-designated replacement SSH target after the April 19, 2026 VPS move: `meshcentral` -> `74.208.52.191`
-- current blocker: direct SSH to `74.208.52.191:22` timed out from the workstation, so a fresh live snapshot is still pending
+- source: last complete repository backup set captured from `meshcentral` -> `167.88.44.65`
+- current SSH target after the April 19, 2026 VPS move: `meshcentral` -> `74.208.52.191`, verified by a July 26 direct capture
+- remaining gap: no new complete backup set is recorded for the current VPS; a later read-only SSH recheck timed out
 - verified captured evidence:
   - `/etc/caddy/Caddyfile`
   - `/etc/cloudflared/config.yml`

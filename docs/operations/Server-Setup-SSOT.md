@@ -3,6 +3,34 @@
 Date: April 13, 2026
 Repo: `C:\Users\Workstation\Documents\GitHub\MeshCentral`
 
+Last runtime reconciliation: July 26, 2026
+
+## 2026-07-26 Agent Relay Regression Evidence
+
+- The first captured Files failure stopped at outbound TCP: the agent's new Cloudflare IPv6 flow remained in `SYN-SENT`. TLS, HTTP, WebSocket upgrade, and MeshCentral relay-pairing code were not reached.
+- The behavior change is bounded to ignored MeshAgent provisioning state that changed `MeshServer` from the historical direct agent origin to the Cloudflare-backed `high.support:443` origin; ignored files have no attributable Git author or commit. The active destination-selection and relay route were compared with refreshed upstream refs (`MeshAgent` `ebff7fb7`, `MeshCentral` `9c872e94`) and contain no candidate-specific alternate destination or relay race. This does not claim that either full fork file is byte-for-byte upstream.
+- The replacement candidate contains one endpoint, `wss://agents.high.support:443/agent.ashx`, with URL-derived Host/SNI and no IP fallback, race, proxy discovery, added retry, delay, TLS bypass, or hash allowlist.
+- The public `agents.high.support:443` certificate validates, and 20 immediate sequential unauthenticated WebSocket upgrades plus peer-confirmed clean closes passed. That proves TLS, HTTP `101`, and WebSocket closure only; live MeshCentral correctly rejects the candidate agent command-1 certificate hash because it matches neither the current domain certificate nor the current default certificate.
+- Live rollout is therefore blocked until the existing MeshCentral domain/default certificate contract safely overlaps already deployed `high.support` agents and new `agents.high.support` agents. `ignoreAgentHashCheck` remains `false`.
+- No live certificate, Caddy route, package, service, or database was changed during this investigation. The local Caddy reference below was reconciled to the captured live file only.
+
+Proven certificate acceptance matrix:
+
+| State | Existing `high.support` agents | Candidate `agents.high.support` agents |
+|---|---:|---:|
+| Current domain + current default | accepted | rejected |
+| Phase 1: current domain + `agents.high.support` default | accepted | accepted |
+| Phase 2: `agents.high.support` domain + matching default | rejected | accepted |
+
+Phase 1 replaces only the default `webserver-cert-public.crt` and
+`webserver-cert-private.key` with the matching certificate/key currently used
+by Caddy for `agents.high.support`; `certurl` remains `https://high.support/`.
+After observed inventory proves migration is complete, phase 2 changes only
+`certurl` to `https://agents.high.support/`. Each phase needs one MeshCentral
+restart and explicit approval. The copied phase-1 certificate is a snapshot and
+does not follow Caddy renewal, so phase 1 is temporary. No Caddy reload or route
+change is required for this certificate migration.
+
 ## 2026-04-19 VPS Move Addendum
 - operator-designated replacement SSH target: `meshcentral` -> `74.208.52.191`
 - direct SSH probes to `74.208.52.191:22` from the workstation timed out on April 19, 2026, so any host/runtime facts not explicitly updated below remain the last successfully captured pre-migration values
@@ -42,7 +70,7 @@ Authoritative local evidence used for this document:
 - `server-backups/meshcentral-live-20260413-153810/manifests/backup-manifest.json`
 
 Non-authoritative or still blocked:
-- `HISTORICAL_NOTE`: `72.60.233.29:22` and `167.88.44.65:22` are prior VPS endpoints; the operator-designated replacement target is `meshcentral` -> `74.208.52.191`, but fresh SSH capture is still blocked by timeout.
+- `HISTORICAL_NOTE`: `72.60.233.29:22` and `167.88.44.65:22` are prior VPS endpoints. A July 26 capture succeeded against `74.208.52.191`; a later read-only recheck timed out, so no claim is made about changes after the successful capture.
 - `PARTIAL_SCOPE`: the current token can read the zone, settings, page rules, firewall rules, and custom firewall phase, but some phase exports remain unauthorized.
 - `UNVERIFIED_DASHBOARD`: dashboard-only settings not exposed by the current token/API surface are still not exported locally.
 
@@ -70,8 +98,10 @@ Verified from direct SSH capture:
 - `cloudflared`: active, with listener on `127.0.0.1:20241`
 
 ### Runtime Identity
-Sanitized current runtime settings from local `meshcentral-data/config.json`:
+Sanitized runtime settings from the July 26 live capture:
 - domain certificate host: `high.support`
+- default-domain certificate URL: `https://high.support/`
+- ignore agent certificate-hash checks: `false`
 - WAN only: `true`
 - public alias port: `443`
 - internal MeshCentral bind port: `4430`
@@ -124,20 +154,21 @@ Verified from direct SSH capture:
   - admin/API on `127.0.0.1:2019`
 
 Verified live Caddy behavior:
-- `high.support`, `agents.high.support`, `relay.high.support`, and `cfrelay.high.support` are handled in the main site block
+- `agents.high.support` and `relay.high.support` are handled by the public standard-port Caddy site block
+- `high.support` and `cfrelay.high.support` enter through cloudflared and do not use that Caddy site block
 - requests generally reverse proxy to `127.0.0.1:4430`
 - `/api/v2/telemetry` is rewritten to `/agent.ashx`
 - bare unauthenticated `GET /` serves a cover page from `/var/www/cover`
 - explicit listeners:
-  - `agents.high.support:4445`
-  - `agents.high.support:4446`
+  - `agents.high.support:4445` and `agents.high.support:4446`
   - `relay.high.support:4446`
-- explicit certificate files on the explicit-port listeners:
-  - `/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/high.support/high.support.crt`
-  - `/var/lib/caddy/.local/share/caddy/certificates/acme-v02.api.letsencrypt.org-directory/high.support/high.support.key`
+- certificate files on the legacy agent listeners:
+  - `/etc/caddy/tls/meshcentral-agent-tls.crt`
+  - `/etc/caddy/tls/meshcentral-agent-tls.key`
+- the legacy listeners remain migration compatibility state and are not present in new provisioning metadata
 
 Tracked local reference:
-- `infra/caddy/Caddyfile.live` is the current repo-tracked copy of the verified live `/etc/caddy/Caddyfile`
+- `infra/caddy/Caddyfile.live` is reconciled to the July 26 capture of `/etc/caddy/Caddyfile`
 
 ### Verified Live Cloudflared State
 Verified from direct SSH capture and the VPS-resident `cloudflared` CLI:
@@ -147,7 +178,7 @@ Verified from direct SSH capture and the VPS-resident `cloudflared` CLI:
 - tunnel name: `meshcentral`
 - cloudflared version: `2026.3.0`
 - connector architecture: `linux_amd64`
-- connector origin IP: `74.208.52.191` (operator-designated post-migration target; live re-capture pending because SSH to the new VPS timed out)
+- connector origin IP: `74.208.52.191` (verified by the successful July 26 direct SSH capture; a later read-only recheck timed out)
 - ingress:
   - `high.support` -> `http://127.0.0.1:4430`
   - `cfrelay.high.support` -> `http://127.0.0.1:4430`
@@ -261,14 +292,14 @@ This file contains the UMH control UI and console bridge, including commands suc
 - `umhctl ipcBypass`
 
 ### Runtime Core Override
-Recovered from the live VPS and currently present locally as ignored runtime state:
+Runtime copies retained outside Git:
 - `meshcentral-data/meshcore.js`
 - `server-backups/meshcentral-live-20260413-153810/opt/meshcentral/meshcentral-data/meshcore.js`
 
 Status:
-- it differs from `agents/meshcore.js`
-- it does not carry direct UMH command tokens in the current local inspection
-- it should be treated as runtime override state until reviewed and intentionally promoted or discarded
+- on 2026-07-26, the local datapath core was reviewed and its relay-only experimental drift was intentionally discarded
+- `meshcentral-data/meshcore.js` is byte-for-byte identical to `agents/meshcore.js` at SHA256 `281ef72c93fd7696085d0c87669decc1ea081e82a7cc9181ee11ee085d5f0ae3`
+- the retained server-backup copy is recovery evidence and must not be treated as current runtime state without a fresh comparison
 
 ## Service and Host Layout
 ### Verified Live Remote Paths
