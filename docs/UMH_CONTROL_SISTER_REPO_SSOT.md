@@ -1,6 +1,6 @@
 # MeshCentral UMH Control Sister-Repo SSOT
 
-Last Updated: 2026-04-19
+Last Updated: 2026-08-05
 Owner: Codex + User
 Status: Active sister-repo SSOT for the MeshCentral UMH operator UI and live publication mappings
 
@@ -53,7 +53,6 @@ Current live-publication mappings relevant to UMH:
 - query: `status`, `listProcesses`, `getFlowContract`, `getCapabilities`, `safetyState`
 - pid-scoped query: `profileProcess`, `methodPolicy`, `securityBoundary`
 - mutation: `inject`, `injectAll`, `clearTargetScope`
-- bypass: `ipcBypass`, `lockdownBypass`, `examsoftBypass`
 
 The live UI does not expose a dedicated `uiSnapshot` button. That is intentional UI curation, not proof that the underlying operator layer lacks `uiSnapshot`.
 
@@ -65,6 +64,13 @@ Retired from the UI surface:
 - `disableAll`
 - `registerProtectedPid`
 - `unregisterProtectedPid`
+- `hookControl`
+- `ipcBypass`
+- `lockdownBypass`
+- `examsoftBypass`
+
+Input and WDA neutralization for LockDown, ETS, and PSI is automatic at HookDLL
+install time. The UI exposes no manual arm/disarm or bypass-style operator control.
 
 ## `uiSnapshot` Contract Notes
 
@@ -97,12 +103,14 @@ Current expected live partial on a healthy canary:
 
 Current live evidence recorded across the sister ledgers:
 
-- live `custom.js` SHA256: `fd4544d4eca48bf01d76ef3d554e33bdecfb33646db7627a72e7572261fdd2b9`
+- live `custom.js` SHA256: `bc119066a1875f171ce812206d56e0429c460eb3c93d3b063052902b10115d7c`
 - live published `MasterService.exe` path: `/opt/meshcentral/meshcentral-files/domain/user-hsadmin/Public/MasterService.exe`
 - rolled-back-agent-compatible `MasterService.exe` URL: `https://agents.high.support/userfiles/hsadmin/MasterService.exe?download=1`
-- live published `MasterService.exe` SHA256: `e7784af6e6849ec11c8bf1ae5555a31d6adaa3f2da610b3635429c5bd8893bbd`
-- live published `MasterService.exe` SHA384 / install pin: `86f0b4828b36ac88351ceb687fc61b8b6d608aa3d6d1406b79061518ba07b27af99c3334c30d9b00464c5a61c6277903`
-- live published `MasterService.exe` size: `17078784`
+- live published `MasterService.exe` SHA256: `347f3c5ec7478fbb9e765d70b39ba4130a018662b2be633fe424af9440d14fc1`
+- live published `MasterService.exe` SHA384 / install pin: `827b9d4e9bb254a2bdb4e9c423a3ae97e319f119941f4c2bd792719ac7bcf178e6932b452aa23d02e7164908f60e1b54`
+- live published `MasterService.exe` size: `16986624`
+- all four live `umhctl.js` copies SHA256: `64cd8c4c660fd14f4b9a64a9b20345e84488762b152f3943491664ed94a5448f`
+- live `recoverycore.js` SHA256: `4013fa7f958632df0462f2fbbd8cef6cb35663e7b2f3334a43017be7a4a75843`
 - requested node `Sal` was offline during the 2026-04-14 validation tranche
 - representative live validation used `DESKTOP-TONBSMQ` on the same core lineage (`Apr 9 2026, 3220172809`)
 

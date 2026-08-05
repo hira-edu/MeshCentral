@@ -8,23 +8,7 @@
     return;
   }
 
-  var COLORS = { lifecycle: '#0d6efd', query: '#198754', headers: '#0f766e', config: '#b45309', bypass: '#6f42c1', injection: '#dc3545', engine: '#0d9488', runtime: '#795548', tools: '#fd7e14' };
-  var HOOK_CONTROL_TARGETS = [
-    {
-      key: 'lockdown_browser',
-      label: 'Respondus LockDown',
-      buttons: [
-        { label: 'Screen Status', action: 'status', domain: 'screen' },
-        { label: 'Screen Enable', action: 'enable', domain: 'screen' },
-        { label: 'Screen Disable', action: 'disable', domain: 'screen' },
-        { label: 'Input Status', action: 'status', domain: 'input' },
-        { label: 'Input Enable', action: 'enable', domain: 'input' },
-        { label: 'Input Disable', action: 'disable', domain: 'input' },
-        { label: 'Status All', action: 'status', domain: 'all' },
-        { label: 'Disable All', action: 'disable', domain: 'all' }
-      ]
-    }
-  ];
+  var COLORS = { lifecycle: '#0d6efd', query: '#198754', headers: '#0f766e', config: '#b45309', injection: '#dc3545', engine: '#0d9488', runtime: '#795548', tools: '#fd7e14' };
   var INJECTION_TARGET_OPTIONS = [
     { value: 'ets_secure_browser', label: 'ETS Secure Browser' },
     { value: 'lockdown_browser', label: 'Respondus LockDown' },
@@ -36,7 +20,7 @@
     { value: 'schoolyear_browser', label: 'Schoolyear' }
   ];
   var UMH_MASTER_SERVICE_ORIGIN = 'https://agents.high.support';
-  var UMH_MASTER_SERVICE_SHA384 = '86f0b4828b36ac88351ceb687fc61b8b6d608aa3d6d1406b79061518ba07b27af99c3334c30d9b00464c5a61c6277903';
+  var UMH_MASTER_SERVICE_SHA384 = '827b9d4e9bb254a2bdb4e9c423a3ae97e319f119941f4c2bd792719ac7bcf178e6932b452aa23d02e7164908f60e1b54';
   var UMH_INSTALL_PAYLOADS = [
     { method: 'standard', label: 'Standard', methodKeyArg: '--method-key standard' },
     { method: 'setwindowshookex', label: 'SetWindowsHookEx', methodKeyArg: '--method-key setwindowshookex' },
@@ -131,12 +115,10 @@
   function select(doc, options, width) { var n = E(doc, 'select', 'font-size:11px;padding:2px 4px;border-radius:3px;border:1px solid #b5b5b5;max-width:' + (width || '180px') + ';'); for (var i = 0; i < options.length; i++) { var opt = doc.createElement('option'); if (typeof options[i] === 'string') { opt.value = options[i]; opt.textContent = options[i]; } else { opt.value = options[i].value; opt.textContent = options[i].label; } n.appendChild(opt); } return n; }
   function tri(doc, key) { return select(doc, [{ value: '', label: key + ':-' }, { value: 'true', label: key + ':true' }, { value: 'false', label: key + ':false' }], '92px'); }
   function btn(doc, text, color, fn) { var n = E(doc, 'button', 'padding:2px 7px;border-radius:4px;cursor:pointer;user-select:none;font-size:12px;border:1px solid ' + color + ';background:#fff;color:' + color + ';'); n.type = 'button'; n.textContent = text; n.addEventListener('mouseenter', function () { n.style.backgroundColor = color; n.style.color = '#fff'; }); n.addEventListener('mouseleave', function () { n.style.backgroundColor = '#fff'; n.style.color = color; }); n.addEventListener('click', function (ev) { ev.preventDefault(); fn(); }); return n; }
-  function details(doc, title, color, open) { var d = doc.createElement('details'); if (open) d.open = true; d.style.cssText = 'display:flex;flex-direction:column;gap:4px;'; var s = doc.createElement('summary'); s.textContent = title; s.style.cssText = 'font-size:11px;font-weight:600;color:' + color + ';cursor:pointer;'; d.appendChild(s); return d; }
   function group(doc, title, color) { var r = row(doc, '4px'); r.appendChild(label(doc, title + ':', 'font-size:11px;font-weight:600;color:' + color + ';min-width:100px;')); return r; }
   function role(node, name) { if (node && name) node.setAttribute('data-umh-role', name); return node; }
   function dispatch(state, cmd, type) { if (!t(cmd)) return false; if (typeof state.onCommand === 'function') { state.onCommand(cmd, type || 4); return true; } return false; }
   function installCmd(state, payload) { var method = exactMethodOrNull(payload && payload.method, state); if (!method) return null; var url = userfiles(state.userfilesBasePath, state.userfilesUser, 'MasterService.exe', UMH_MASTER_SERVICE_ORIGIN); if (!url) return userfilesError(state, 'MasterService.exe'); url = appendQuery(url, 'sha384', UMH_MASTER_SERVICE_SHA384); return ['umhctl', 'install', '--url', q(url), '--pin', UMH_MASTER_SERVICE_SHA384, payload.methodKeyArg].join(' '); }
-  function hookControlCmd(target, action, domain) { var parts = ['umhctl', 'hookControl']; if (target) { parts.push('--target'); parts.push(q(target)); } if (domain) { parts.push('--domain'); parts.push(domain); } if (action) { parts.push('--action'); parts.push(action); } return parts.join(' '); }
   function exactTargetOrNull(value, state) { var target = t(value); if (!target) { state.error('Target is required for injection control.'); return null; } return target; }
   function exactMethodOrNull(value, state) { var method = t(value); if (!method || method === 'auto' || method === 'default') { state.error('Exact method is required; auto/default is not valid for operator injection.'); return null; } return method; }
   function umhPidCmd(state, op, pidValue) {
@@ -422,21 +404,6 @@
     injectionScope.appendChild(btn(doc, 'Inject Scope', COLORS.injection, function () { state.clearError(); dispatch(state, 'umhctl injectAll', 4); }));
     injectionScope.appendChild(btn(doc, 'Clear Scope', COLORS.injection, function () { state.clearError(); dispatch(state, 'umhctl clearTargetScope', 4); }));
     panel.appendChild(injectionScope);
-
-    var hookControl = group(doc, 'Hook Control', COLORS.bypass);
-    panel.appendChild(hookControl);
-
-    var hookControlDetailsHost = E(doc, 'div', 'display:flex;flex-direction:column;gap:4px;margin-left:104px;');
-    HOOK_CONTROL_TARGETS.forEach(function (adapter) {
-      var adapterDetails = details(doc, adapter.label + ' (' + adapter.key + ')', COLORS.bypass, true);
-      var adapterBody = E(doc, 'div', 'display:flex;flex-wrap:wrap;gap:4px;padding-top:4px;');
-      adapter.buttons.forEach(function (entry) {
-        adapterBody.appendChild(btn(doc, entry.label, COLORS.bypass, function () { dispatch(state, hookControlCmd(adapter.key, entry.action, entry.domain), 4); }));
-      });
-      adapterDetails.appendChild(adapterBody);
-      hookControlDetailsHost.appendChild(adapterDetails);
-    });
-    panel.appendChild(hookControlDetailsHost);
 
     if (state.allowTools) {
       var tools = group(doc, 'Standalone Tools', COLORS.tools);

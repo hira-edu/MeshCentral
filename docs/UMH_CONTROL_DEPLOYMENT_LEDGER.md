@@ -1,8 +1,16 @@
 # MeshCentral UMH Control Deployment Ledger
 
-Last Updated: 2026-07-26
+Last Updated: 2026-08-05
 Owner: Codex + User
 Status: Active deployment ledger for the MeshCentral UMH UI override and live core publication inventory
+
+## 2026-08-05 Post-WDA-Fix Payload And Retired-Op Publication
+
+- The single public `MasterService.exe` was replaced from clean UserModeHook commit `b1a3e3790544e38b8f3972d5f235c7d5cb892173`: size `16986624`, SHA256 `347f3c5ec7478fbb9e765d70b39ba4130a018662b2be633fe424af9440d14fc1`, SHA384/pin `827b9d4e9bb254a2bdb4e9c423a3ae97e319f119941f4c2bd792719ac7bcf178e6932b452aa23d02e7164908f60e1b54`.
+- Both live `custom.js` copies now match SHA256 `bc119066a1875f171ce812206d56e0429c460eb3c93d3b063052902b10115d7c`, use `agents.high.support`, expose all four exact install methods, and contain no retired `hookControl`/bypass command path.
+- All four live `umhctl.js` copies match SHA256 `64cd8c4c660fd14f4b9a64a9b20345e84488762b152f3943491664ed94a5448f`; live `recoverycore.js` matches SHA256 `4013fa7f958632df0462f2fbbd8cef6cb35663e7b2f3334a43017be7a4a75843`.
+- Rollback root: `/opt/meshcentral/umh-backups/20260805_161654`. MeshCentral restarted cleanly and is active with `MainPID=2583236`, `NRestarts=0`.
+- Local syntax/tests, live `node --check`, two VPS guard runs, direct live hashes, and a cache-busted public payload re-fetch passed. No endpoint/browser runtime PASS is inferred.
 
 ## 2026-07-26 Rolled-Back Agent TLS Download Contract Repair
 
@@ -117,9 +125,9 @@ Current local source path:
 
 Current `custom.js` hash:
 
-- local source: `d9e3463b47123cb692a75d78d8d8449444fb24983d732637819d56c4fdc5a0c5`
-- live VPS/public deployed copy: `6df687676cd654f2750fd8c4d48b1cf4904c27b5c1f24c74d62161a624d5db24`
-- active payload pin: `cf34f3933c1b5a683704cf78f237684ed500067bd098c962d1c0689c990de12fe1706a31b3c4769d06afff2babd2268d`
+- local source: `3102f5ce23346fb51b3236645e0f90576b20b71db6b63a865602b241ce58142a`
+- live VPS/public deployed copy: `bc119066a1875f171ce812206d56e0429c460eb3c93d3b063052902b10115d7c`
+- active payload pin: `827b9d4e9bb254a2bdb4e9c423a3ae97e319f119941f4c2bd792719ac7bcf178e6932b452aa23d02e7164908f60e1b54`
 
 ## Current UI Alignment
 
@@ -131,6 +139,10 @@ Removed from the UI surface:
 - `disable`
 - `disableAll`
 - `setFlags`
+- `hookControl`
+- `lockdownBypass`
+- `examsoftBypass`
+- `ipcBypass`
 
 Kept in the current UI:
 
@@ -145,9 +157,6 @@ Kept in the current UI:
 - `inject`
 - `injectAll`
 - `clearTargetScope`
-- `lockdownBypass`
-- `examsoftBypass`
-- `ipcBypass`
 
 No dedicated `uiSnapshot` button is currently exposed in the MeshCentral UI.
 
@@ -160,7 +169,7 @@ Current live UMH-relevant core inventory:
 | `/opt/meshcentral/meshcentral-data/meshcore.js` | `30e9a91b9985f1004bfe4861c6db6ecddbf198a999a72c075793ef3d66754a4f` | yes |
 | `/opt/meshcentral/node_modules/meshcentral/agents/meshcore.js` | `97394dd5e24afc39cec91710f4612584ee3f3b76aa6de138f13fc6412b15d194` | yes |
 | `/opt/meshcentral/node_modules/meshcentral/agents/meshcore.min.js` | `518145e9fbcdfb5c7d8eb756c3ab3ccb94956de645ff9132907c9cfdc115c9a3` | yes |
-| `/opt/meshcentral/node_modules/meshcentral/agents/recoverycore.js` | `6a3a88885e27e630d1d7e0edc320990bc9bc25af18345fe2c1f2fc1f29907cca` | yes |
+| `/opt/meshcentral/node_modules/meshcentral/agents/recoverycore.js` | `4013fa7f958632df0462f2fbbd8cef6cb35663e7b2f3334a43017be7a4a75843` | yes |
 | `/opt/meshcentral/node_modules/meshcentral/agents/meshcore_diagnostic.js` | `87c55517a3b50966508d9be03135633d67c40be708b6f9114ceebc764bde3845` | yes |
 | `/opt/meshcentral/node_modules/meshcentral/agents/tinycore.js` | `396e05d2c3559c0740ded904b96da32f6af36f3f80925316fcf3819dd67c674b` | yes |
 
@@ -168,10 +177,10 @@ Current live shared `umhctl` publication copies:
 
 | Live Path | SHA256 |
 |---|---|
-| `/opt/meshcentral/node_modules/meshcentral/agents/modules_meshcore/umhctl.js` | `2ce2353fbd72214b0951e6487e39d80bd84c8559e4b821809c24e6c267e37322` |
-| `/opt/meshcentral/node_modules/meshcentral/agents/modules_meshcore_min/umhctl.js` | `2ce2353fbd72214b0951e6487e39d80bd84c8559e4b821809c24e6c267e37322` |
-| `/opt/meshcentral/meshcentral-data/modules_meshcore/umhctl.js` | `2ce2353fbd72214b0951e6487e39d80bd84c8559e4b821809c24e6c267e37322` |
-| `/opt/meshcentral/meshcentral-data/modules_meshcore_min/umhctl.js` | `2ce2353fbd72214b0951e6487e39d80bd84c8559e4b821809c24e6c267e37322` |
+| `/opt/meshcentral/node_modules/meshcentral/agents/modules_meshcore/umhctl.js` | `64cd8c4c660fd14f4b9a64a9b20345e84488762b152f3943491664ed94a5448f` |
+| `/opt/meshcentral/node_modules/meshcentral/agents/modules_meshcore_min/umhctl.js` | `64cd8c4c660fd14f4b9a64a9b20345e84488762b152f3943491664ed94a5448f` |
+| `/opt/meshcentral/meshcentral-data/modules_meshcore/umhctl.js` | `64cd8c4c660fd14f4b9a64a9b20345e84488762b152f3943491664ed94a5448f` |
+| `/opt/meshcentral/meshcentral-data/modules_meshcore_min/umhctl.js` | `64cd8c4c660fd14f4b9a64a9b20345e84488762b152f3943491664ed94a5448f` |
 
 ## Deploy and Validation Conditions
 
