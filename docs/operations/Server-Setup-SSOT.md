@@ -283,13 +283,17 @@ This file contains the UMH control UI and console bridge, including commands suc
 - `umhctl listProcesses`
 - `umhctl getFlowContract`
 - `umhctl getCapabilities`
+- `umhctl safetyState`
+- `umhctl profileProcess`
+- `umhctl methodPolicy`
+- `umhctl securityBoundary`
 - `umhctl inject`
-- `umhctl disable`
-- `umhctl disableAll`
+- `umhctl injectAll`
 - `umhctl clearTargetScope`
-- `umhctl lockdownBypass`
-- `umhctl examsoftBypass`
-- `umhctl ipcBypass`
+
+Retired `hookControl`, bypass, disable, and aggregate-disable operator controls are not
+published. Input and WDA neutralization for the applicable targets is automatic at
+HookDLL install time.
 
 ### Runtime Core Override
 Runtime copies retained outside Git:
