@@ -6,9 +6,93 @@ Repo: `C:\Users\Workstation\Documents\GitHub\MeshCentral`
 Last full runtime reconciliation: July 26, 2026. Desktop multiplexing and backup
 permissions rechecked September 8, 2026 as described below.
 
+## September 8 desktop release — published
+
+The authorized release is active on VPS `74.208.52.191`. Publication finished
+at 13:15:47.888853 UTC on the VPS clock. MeshCentral is active/running as
+PID 95340 with `NRestarts=0`. This publication added one coordinated service
+stop/start after the four earlier server-fix restarts. The installed server
+remains MeshCentral 1.2.5 with the validated relay delta; its complete older
+local npm checkout was not used as a production replacement.
+
+The explicit release contains 21 target files and two regenerated
+`hashagents.json` manifests. Data and module source EXEs match the frozen build;
+MeshCentral's derived signed copies pass signature, executable-section and
+embedded-DLL parity checks. Both runtime architecture downloads and the public
+HTTPS x64 download contain the exact released DLL. The public and loopback x64
+downloads match byte for byte. The native `getSHA384FileHash` result agrees with
+the server's source-agent hash for both architectures and for Umair's installed
+x64 EXE, including the runtime random-policy footer normalization.
+
+| Published artifact | SHA-256 |
+| --- | --- |
+| x64 source `MeshService64.exe` / Umair `diaghost.exe` | `204b22948b311e80a5fc4484b586af7df27b8bf3ba617b7cd08f7bc887b8f347` |
+| Win32 source `MeshService.exe` | `e03f7f873ff1572558884a1ba52f9a19bc430291484962ab4ca719b28fc448e1` |
+| DLL payload and all published DLL aliases | `caa63f1fdebf189da901540388efd3da00d5ad10b16d6dfa19268a1f05b17f80` |
+| live `meshdesktopmultiplex.js` | `66baaf88c5b75c344fc3c8eaf36bb6bd9ac8c82063627b4a5c91613d1b28b395` |
+
+The frozen native package uses deployed base
+`0fb268971e670b09a89f977f727336a91328f0ea` plus the verified desktop/worker fixes
+and stack-allocation alignment correction described below. Its embedded commit
+metadata still names that base; file hashes identify this release. The native
+fixes were pushed in MeshAgent `53e62729`; the server fixes and merged history
+were pushed in MeshCentral `7949ce3cc`, both to `origin/main`.
+
+Preflight found the old VPS sidecars pointed at the unfinished
+`agents.high.support` migration while the live domain certificate source and
+validated agent still used `high.support`. The three release sidecars now use
+`wss://high.support:443/agent.ashx`; every other original sidecar byte, including
+each existing VPS enrollment identity, was preserved. No canary update hold is
+distributed. The July endpoint/certificate migration below remains historical
+and unexecuted by this release. The existing TLS/certificate admission,
+keepalive, proxy, core and public UI configuration remains in effect.
+
+Exact rollback copies and original ownership/modes for all 23 targets are in
+`/opt/meshcentral/backups/desktop-release-20260908_131537/activation.json` and
+its numbered sibling files. The record also identifies targets originally
+absent. Deployment used guarded replacements while MeshCentral was stopped,
+with automatic exact-file rollback on transaction failure. A later rollback
+must restore that recorded set, regenerate/restore its matching manifests and
+restart MeshCentral; older server-fix backups below cover only their stated
+module changes. Release staging is
+`/opt/meshcentral/staging/desktop-release-20260908-1320/`.
+
+After publication and the native hash check, Umair's temporary hold was removed
+through the existing native lifecycle. The transaction began at 13:20:40.786 UTC
+(Windows clock), passed in 3.144 seconds and started service PID 33152.
+Read-only datastore inspection found neither `disableUpdate` nor the earlier
+script-namespace key; the authenticated console returned
+`require('MeshAgent').updatesEnabled=true`. Both original config files were
+restored byte for byte (SHA-256
+`af967b82ddf24601f248ec504a24751a7af0823c0598043ab795dceb3940b43e`).
+The release `validate-update` check passed with every emitted health check true.
+At 13:27:27 UTC (Windows clock), PID 33152 still ran the same EXE/DLL with zero
+SCM failure events since its 13:20:43 start. Post-release browser checks showed
+fresh images in two viewers, a successful secondary reconnect and an
+uninterrupted primary observed through 3 minutes 31 seconds. Input stayed off.
+Both viewers were deliberately disconnected and all three release diagnostic
+tabs were closed; no debugger remained attached. This is a separate release
+smoke check in addition to the earlier 15-minute sustained trace.
+Umair remains the only endpoint selected for interactive diagnostic validation;
+published packages are now available through normal server distribution.
+
+Both repositories now retain only local `main` and owned `origin/main` branches.
+MeshCentral's fully merged `agent/umh-vps-deployment-20260805` branch was deleted
+locally and from the owned origin; pre-publication bundles preserve the branch
+history. Third-party upstream repositories were not changed. The pre-existing
+unrelated `public/scripts/custom.js` edit remains local and was not published.
+
+Release evidence is under MeshAgent's ignored
+`artifacts/validation/desktop-stall-20260908/`: `vps-release-result.json`,
+`vps-release-download-validation.json`, `vps-release-native-hashes.json`,
+`umair-update-hold-release-result.json` and
+`umair-release-final-validation-result.json`. The sustained investigation
+evidence below predates publication and remains valid for the identical native
+payload and relay code.
+
 ## Desktop multiplexing and backup corrections
 
-Current state, September 8 at 12:49:50 UTC (Windows clock): the server relay
+Pre-publication validation, September 8 at 12:49:50 UTC (Windows clock): the server relay
 corrections below remain active, and the native repairs were deployed to Umair
 alone. Its `WinDiagnosticHost` service remained Running as PID 13936 from
 12:29:58 UTC, with no subsequent service-failure events. The installed
@@ -21,39 +105,28 @@ traffic, 40,156,441 bytes delivered, 15 matched heartbeat rounds on viewer
 and agent transports, and five successful secondary reconnects with fresh
 images. The primary ultimately ran 956.998 seconds and received 41,033,471 bytes
 before its deliberate UI disconnect. A subsequent fresh viewer pair each
-received over 4 MB and completed
-a heartbeat round. No native fatal or stream gap was captured; kernel packet
+received over 4 MB and completed a heartbeat round. No native fatal or stream
+gap was captured; kernel packet
 drops were zero and native `validate-update` passed. The debugger, collectors
 and diagnostic tabs were closed. An unrelated viewer was preserved, so this
 does not claim a complete shared-capture teardown or explain every past freeze.
 
-Umair retains the native `disableUpdate=1` hold. The first successful canary
-activation at 12:18:57 UTC was replaced by normal automatic update because this
-server still publishes the older native package. The final binary-only update
-began at 12:29:26 UTC and completed in 33.038 seconds after the scoped hold was
-configured. The installed `.msh` and `.conf` retain their original contents plus
-an audit comment and this setting. The bare datastore key was originally absent;
-post-start readback found `1`, and native `require('MeshAgent').updatesEnabled`
-was false. No server package replacement or broad agent deployment occurred.
-This is a hold on Umair's native binary, not a per-node exact-version pin or a
-meshcore update hold. Reenabling native updates while the older package remains
-published will replace the fixes again.
+Before publication, Umair required a native `disableUpdate=1` hold because
+automatic update replaced the first canary with the then-published older
+package. The held update at 12:29:26 UTC passed in 33.038 seconds, and the native
+getter returned false during sustained validation. Console `dbset` had written
+the ineffective script key `0/disableUpdate`; that key was removed.
 
-Console `dbset` wrote `0/disableUpdate` in the script namespace and was ineffective;
-that key was removed. Native restoration must explicitly delete the bare key
-through configuration import, since restoring files that omit the setting does
-not remove its persisted value. Once the intended package distribution is ready,
-restore the original config contents with a temporary empty `disableUpdate=`
-line for an authorized native lifecycle start to import, remove that line after
-import, and verify original config hashes, bare-key absence and
-`updatesEnabled=true`. This restoration has not been performed; the hold remains
-active. MeshAgent's `docs/DEPLOYMENT.md` records the backup and evidence locations.
-Its ignored `native-canary-config-before-hold` backups and
-`native-canary-config-hold.json` preserve the original state; binary rollback
-sets are separate. No built-in per-node exact-version pin was found in the
-inspected installed MeshCentral 1.2.5 automatic-update path. The supported
-server `noAgentUpdate` option and binary-table overrides have broader scope and
-were not changed.
+The hold has now been released after the correct package and native hash
+contract were verified. Native startup imported a temporary empty
+`disableUpdate=` line to delete the bare datastore key, then both original
+configs were restored byte for byte. Merely omitting the setting would not
+delete its persisted value. Readback confirms no hold keys and
+`updatesEnabled=true`. MeshAgent's ignored `native-canary-config-before-hold`
+backups and `native-canary-config-hold.json` retain the original and held-state
+evidence; its release result records completed restoration. No built-in per-node
+exact-version pin was found in MeshCentral 1.2.5; the broader `noAgentUpdate`
+option and binary-table overrides were not changed.
 
 Relay timestamps originate on the VPS; native and SCM timestamps originate on
 Windows. At 12:45 UTC a read-only comparison bounded the VPS clock 14.143–17.341
@@ -108,9 +181,9 @@ The intermediate flow-control-only version is backed up separately in
 `/opt/meshcentral/backups/desktop-flow-20260908_085013`.
 The intermediate flow-control and viewer-snapshot version is in
 `/opt/meshcentral/backups/desktop-flow-20260908_091012`.
-No agent rollout was included. Rohit's historical overlapping sessions were
-found, but its individual freeze cannot be attributed conclusively while the
-device is offline and no failure trace exists.
+No agent rollout was included in those server-only changes. Rohit's historical
+overlapping sessions were found, but its individual freeze cannot be attributed
+conclusively while the device is offline and no failure trace exists.
 The operator selected Umair alone for live validation; Rohit's availability
 is not a deployment or completion prerequisite.
 
@@ -168,8 +241,9 @@ candidate (EXE SHA-256 prefix `204b2294`, DLL prefix `caa63f1f`) and performed
 Umair's elevated preflight, update, local debugger and sustained two-viewer
 validation. The source task retained builds/tests/docs ownership and checked
 the final evidence before recording the current state above. Use the binary-only
-transaction with an exact rollback set; do not combine it with a broad
-publication or endpoint/certificate migration.
+transaction with an exact rollback set for endpoint activation. The later
+separately authorized package publication is recorded above; it did not perform
+the unfinished endpoint/certificate migration.
 Separately, an isolated MeshConsole reproduction
 proved a capture/refresh lock deadlock. The local MeshAgent patch moves the
 transport wait outside the tile lock and abandons the scan on backpressure;
