@@ -3,7 +3,189 @@
 Date: April 13, 2026
 Repo: `C:\Users\Workstation\Documents\GitHub\MeshCentral`
 
-Last runtime reconciliation: July 26, 2026
+Last full runtime reconciliation: July 26, 2026. Desktop multiplexing and backup
+permissions rechecked September 8, 2026 as described below.
+
+## Desktop multiplexing and backup corrections
+
+Current state, September 8 at 12:49:50 UTC (Windows clock): the server relay
+corrections below remain active, and the native repairs were deployed to Umair
+alone. Its `WinDiagnosticHost` service remained Running as PID 13936 from
+12:29:58 UTC, with no subsequent service-failure events. The installed
+`diaghost.exe` SHA-256 is
+`204b22948b311e80a5fc4484b586af7df27b8bf3ba617b7cd08f7bc887b8f347`;
+`diagsvc.dll` is
+`caa63f1fdebf189da901540388efd3da00d5ad10b16d6dfa19268a1f05b17f80`.
+The preserved checkpoint shows 939.053 seconds of uninterrupted primary
+traffic, 40,156,441 bytes delivered, 15 matched heartbeat rounds on viewer
+and agent transports, and five successful secondary reconnects with fresh
+images. The primary ultimately ran 956.998 seconds and received 41,033,471 bytes
+before its deliberate UI disconnect. A subsequent fresh viewer pair each
+received over 4 MB and completed
+a heartbeat round. No native fatal or stream gap was captured; kernel packet
+drops were zero and native `validate-update` passed. The debugger, collectors
+and diagnostic tabs were closed. An unrelated viewer was preserved, so this
+does not claim a complete shared-capture teardown or explain every past freeze.
+
+Umair retains the native `disableUpdate=1` hold. The first successful canary
+activation at 12:18:57 UTC was replaced by normal automatic update because this
+server still publishes the older native package. The final binary-only update
+began at 12:29:26 UTC and completed in 33.038 seconds after the scoped hold was
+configured. The installed `.msh` and `.conf` retain their original contents plus
+an audit comment and this setting. The bare datastore key was originally absent;
+post-start readback found `1`, and native `require('MeshAgent').updatesEnabled`
+was false. No server package replacement or broad agent deployment occurred.
+This is a hold on Umair's native binary, not a per-node exact-version pin or a
+meshcore update hold. Reenabling native updates while the older package remains
+published will replace the fixes again.
+
+Console `dbset` wrote `0/disableUpdate` in the script namespace and was ineffective;
+that key was removed. Native restoration must explicitly delete the bare key
+through configuration import, since restoring files that omit the setting does
+not remove its persisted value. Once the intended package distribution is ready,
+restore the original config contents with a temporary empty `disableUpdate=`
+line for an authorized native lifecycle start to import, remove that line after
+import, and verify original config hashes, bare-key absence and
+`updatesEnabled=true`. This restoration has not been performed; the hold remains
+active. MeshAgent's `docs/DEPLOYMENT.md` records the backup and evidence locations.
+Its ignored `native-canary-config-before-hold` backups and
+`native-canary-config-hold.json` preserve the original state; binary rollback
+sets are separate. No built-in per-node exact-version pin was found in the
+inspected installed MeshCentral 1.2.5 automatic-update path. The supported
+server `noAgentUpdate` option and binary-table overrides have broader scope and
+were not changed.
+
+Relay timestamps originate on the VPS; native and SCM timestamps originate on
+Windows. At 12:45 UTC a read-only comparison bounded the VPS clock 14.143–17.341
+seconds ahead. Trace durations use a single clock; cross-host timestamps below
+must not be interpreted as synchronized causal-delay measurements.
+
+The September 8 desktop investigation verified `desktopmultiplex=true` on the
+VPS. The live multiplexer and the local source both missed backpressure updates
+on viewer membership changes. A new healthy viewer could leave the agent socket
+paused during startup or a screen reset before the picture cache refilled;
+removing the fastest viewer could leave the remaining overloaded viewers without
+backpressure. The local source now reevaluates both transitions and preserves
+the recording-write pause. It also rejects an invalid decoded relay cookie
+without dereferencing null; this cookie guard was already present on the VPS.
+
+The live two-viewer check also exposed a pre-existing disconnect defect:
+closing viewers synchronously splices the array being iterated, skipping peers
+that then retain a stale image while still appearing connected. Agent teardown
+now iterates a snapshot and uses each viewer's existing close/audit path.
+Deterministic cases cover two, three and four viewers; the real WebSocket test
+also verifies that every viewer socket closes on agent disconnection.
+
+Relay tracing confirmed a third defect: `performRelay()` ignored `addPeer()`
+rejecting a duplicate agent, leaving the unregistered socket and timers open.
+Both admission paths now close a rejected relay through the existing cleanup
+method. Regression coverage verifies the rejected socket closes while the
+original agent and viewers remain registered.
+
+The live multiplexer has unrelated differences from this checkout. A candidate
+containing only these three deltas is staged at
+`/opt/meshcentral/staging/desktop-stall-20260908/meshdesktopmultiplex.js` and passed
+the MeshAgent `meshcentral_multiplex_flow_control_runtime.js` and
+`meshcentral_multiplex_socket_runtime.js` regressions under the VPS service user.
+Following operator authorization, the flow-control delta was activated on
+September 8 at 08:35:27 UTC. The viewer snapshot fix was activated at 08:50:13
+UTC and explicit duplicate rejection cleanup at 09:10:12 UTC. The missing
+in-flight input-send flag and incorrect queue-length comparison were separately
+reproduced and corrected at 11:12:59 UTC. Four MeshCentral restarts occurred.
+The active module SHA-256 is
+`66baaf88c5b75c344fc3c8eaf36bb6bd9ac8c82063627b4a5c91613d1b28b395`.
+The preceding module is backed up in
+`/opt/meshcentral/backups/desktop-flow-20260908_111259`.
+Input writes now queue behind one outstanding send and pause viewers above ten
+queued commands. All nine behavioral tests and the real-socket regression
+passed against the active module as the service user.
+The exact previous module and activation metadata are in
+`/opt/meshcentral/backups/desktop-flow-20260908_083527`; restore its module to
+the live path with the original `root:root 0644` ownership/mode and restart to
+roll back. Startup, authenticated admin reload, agent reconnection, and the
+loopback regression using the HTTP server's nested `ws` 7.5.13 dependency passed.
+The intermediate flow-control-only version is backed up separately in
+`/opt/meshcentral/backups/desktop-flow-20260908_085013`.
+The intermediate flow-control and viewer-snapshot version is in
+`/opt/meshcentral/backups/desktop-flow-20260908_091012`.
+No agent rollout was included. Rohit's historical overlapping sessions were
+found, but its individual freeze cannot be attributed conclusively while the
+device is offline and no failure trace exists.
+The operator selected Umair alone for live validation; Rohit's availability
+is not a deployment or completion prerequisite.
+
+A later live run on Umair retained the same agent tunnel through a third viewer
+joining/leaving and two controlled secondary-viewer reconnects. A passive trace
+captured over 30 MB of continuing traffic and six successful 60-second ping/pong
+exchanges; browser checks passed seven minutes. Earlier sessions had closed
+after three to four minutes, including one after the final activation. Their
+initial causes were not visible in those short traces. The later session also
+closed after 480 seconds, after the short trace stopped. An extended trace
+captured a native service fatal exit at 09:57:03 UTC, followed by the agent-side
+TCP close at 09:57:55 and then both viewer closes. Over 96 MB and repeated
+successful heartbeats preceded that failure. The seven-minute check is not an
+uninterrupted final validation. Keepalive and cookie configuration were not
+changed.
+
+Windows SCM event 7031 and the native service's own `diaghost.log` subsequently
+confirmed six unexpected agent terminations during these checks. The log
+records Duktape `uncaught: 'invalid base value'` and its fatal handler exits with
+254. Existing service recovery restarts it after 10 seconds. The `power`
+collection confirms the associated connectivity loss/recovery. Locating the
+invalid native access required a stack capture before native deployment.
+After the initial elevation cancellation, the resumed elevated debugger
+captured the fatal path at 10:55:46 UTC and detached. A worker command ran before
+initialization; its error-reporting path accessed the missing `process` object
+through `EventEmitter_GetEmitter` and `duk_has_prop`. Local early-execution
+tests reproduce the fatal message and exit 254, while the `ready` control
+reports the script error normally. MeshAgent now queues INIT before publishing
+the worker, preserves earlier commands in FIFO order, and assigns permissions
+before starting its thread. All nine startup runtime cases pass, including
+permission enforcement, ordered messages, early exit and post-exit calls.
+DLL/full-package builds, embedded-payload parity and capture tests pass; the
+native changes are included in the validated Umair canary recorded above.
+The prepared native canary uses the live agent's reported commit
+`0fb268971e670b09a89f977f727336a91328f0ea` and retains its existing endpoint and
+provisioning. It also includes the existing stack-allocation alignment fix,
+after reproducing an HTTP request stack overwrite on that older revision.
+The exact canary passes nine worker startup cases, eight HTTP path lengths,
+61 capture connections, DLL first-frame capture and embedded payload parity.
+Windows canceled the first elevation request at 11:43:14 UTC. After renewed
+operator authorization, elevated read-only package validation passed at
+12:00:12 UTC with service PID 33116 unchanged. That package was superseded by further
+proven native lifecycle corrections: exit callbacks could free their parent
+before native dispatch finished, and every worker leaked three Windows handles.
+The revised code retains the parent through dispatch and releases the worker
+thread, chain thread and watchdog event at their ownership boundaries. Cleanup
+joins the watchdog before freeing its chain. The 45-cycle reproduction now
+keeps handle counts flat (187/187/187 versus 202/262/322 before cleanup), and
+startup/concurrency, callback release, capture, HTTP alignment and package
+checks pass on x64. Startup/concurrency and lifecycle cases also pass on Win32
+(205/205/205 handles after warmup). The immutable candidate is recorded in
+MeshAgent's ignored `native-canary-lifecycle-package.json` evidence manifest.
+The coordinated elevated task verified and activated the frozen revised
+candidate (EXE SHA-256 prefix `204b2294`, DLL prefix `caa63f1f`) and performed
+Umair's elevated preflight, update, local debugger and sustained two-viewer
+validation. The source task retained builds/tests/docs ownership and checked
+the final evidence before recording the current state above. Use the binary-only
+transaction with an exact rollback set; do not combine it with a broad
+publication or endpoint/certificate migration.
+Separately, an isolated MeshConsole reproduction
+proved a capture/refresh lock deadlock. The local MeshAgent patch moves the
+transport wait outside the tile lock and abandons the scan on backpressure;
+its capture-and-reconnect runtime test passes against the rebuilt binary and
+fails against the original. That distinct console finding does not identify
+the independently captured worker startup failure.
+
+Nightly archives had failed on a root-only deployment snapshot directory since
+July 22. The directory
+`/opt/meshcentral/backups/meshagent-only-20260722_203928-d6ccd3ab` now has
+`root:meshcentral 0750` permissions, preserving restricted access and granting
+the backup service read/traverse access. Its 34 descendants were successfully
+archived by the service account after this change. A full scheduled backup has
+not yet been verified. Keep deployment snapshots readable by that account when
+they are included in automatic backups; do not grant world access. Rollback of
+this single-directory permission change is `root:root 0700`.
 
 ## 2026-07-26 Agent Relay Regression Evidence
 

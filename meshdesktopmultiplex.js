@@ -190,6 +190,10 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
 
                 // Send an updated list of all peers to all viewers
                 obj.sendSessionMetadata();
+
+                // Membership changed: a new healthy viewer can release a stream
+                // paused while every previous viewer was in overflow.
+                updateAgentFlowControl();
             });
         } else {
             //console.log('addPeer-agent', obj.nodeid);
@@ -229,7 +233,8 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         if (peer == obj.agent) {
             //console.log('removePeer-agent', obj.nodeid);
             // Agent has disconnected, disconnect everyone.
-            if (obj.viewers != null) { for (var i in obj.viewers) { obj.viewers[i].close(); } }
+            // close() synchronously removes the viewer from obj.viewers.
+            if (obj.viewers != null) { for (const viewer of obj.viewers.slice()) { viewer.close(); } }
 
             // Clean up the agent
             obj.agent = null;
@@ -245,12 +250,13 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 obj.viewers.splice(i, 1);
             }
 
-            // Resume flow control if this was the peer that was limiting traffic (because it was the fastest one).
+            // Reevaluate both directions after membership changes. Removing the
+            // only healthy viewer must pause the producer for the remaining viewers.
             if (peer.overflow == true) {
                 obj.viewersOverflowCount--;
                 peer.overflow = false;
-                if ((obj.viewersOverflowCount < obj.viewers.length) && (obj.recordingFileWriting == false) && obj.agent && (obj.agent.paused == true)) { obj.agent.paused = false; obj.agent.ws._socket.resume(); }
             }
+            updateAgentFlowControl();
 
             // Log leaving the multiplex session
             if (obj.startTime != null) { // Used to check if the agent has connected. If not, don't log this event since the session never really started.
@@ -503,13 +509,25 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         }
     }
 
+    // The producer follows the fastest remaining viewer. A recording write
+    // still owns its pause until its completion callback releases it.
+    function updateAgentFlowControl() {
+        if ((obj.viewers == null) || (obj.viewers.length == 0) || (obj.agent == null)) return;
+        if (obj.viewersOverflowCount >= obj.viewers.length) {
+            if (obj.agent.paused == false) { obj.agent.paused = true; obj.agent.ws._socket.pause(); }
+        } else if ((obj.recordingFileWriting == false) && (obj.agent.paused == true)) {
+            obj.agent.paused = false;
+            obj.agent.ws._socket.resume();
+        }
+    }
+
     // Check if a viewer is in overflow situation
     function checkViewerOverflow(viewer) {
         if ((viewer.overflow == true) || (obj.viewers == null)) return;
         if ((viewer.sendQueue.length > 5) || ((viewer.dataPtr != null) && (viewer.dataPtr != obj.lastData))) {
             viewer.overflow = true;
             obj.viewersOverflowCount++;
-            if ((obj.viewersOverflowCount >= obj.viewers.length) && obj.agent && (obj.agent.paused == false)) { obj.agent.paused = true; obj.agent.ws._socket.pause(); }
+            updateAgentFlowControl();
         }
     }
 
@@ -519,7 +537,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         if ((viewer.sendQueue.length <= 5) && ((viewer.dataPtr == null) || (viewer.dataPtr == obj.lastData))) {
             viewer.overflow = false;
             obj.viewersOverflowCount--;
-            if ((obj.viewersOverflowCount < obj.viewers.length) && (obj.recordingFileWriting == false) && obj.agent && (obj.agent.paused == true)) { obj.agent.paused = false; obj.agent.ws._socket.resume(); }
+            updateAgentFlowControl();
         }
     }
 
@@ -570,7 +588,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             recordData(true, data, function () {
                 if (obj.viewers == null) return;
                 obj.recordingFileWriting = false;
-                if ((obj.viewersOverflowCount < obj.viewers.length) && obj.agent && (obj.agent.paused == true)) { obj.agent.paused = false; obj.agent.ws._socket.resume(); }
+                updateAgentFlowControl();
                 obj.processAgentData(data);
             });
         } else {
@@ -1064,8 +1082,10 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
     // Check relay authentication
     if ((user == null) && (obj.req.query != null) && (obj.req.query.rauth != null)) {
         const rcookie = parent.parent.decodeCookie(obj.req.query.rauth, parent.parent.loginCookieEncryptionKey, 240); // Cookie with 4 hour timeout
-        if (rcookie.ruserid != null) { obj.ruserid = rcookie.ruserid; } else if (rcookie.nouser === 1) { obj.rnouser = true; }
-        if (rcookie.nodeid != null) { obj.nodeid = rcookie.nodeid; }
+        if (rcookie != null) {
+            if (rcookie.ruserid != null) { obj.ruserid = rcookie.ruserid; } else if (rcookie.nouser === 1) { obj.rnouser = true; }
+            if (rcookie.nodeid != null) { obj.nodeid = rcookie.nodeid; }
+        }
     }
 
     // If there is no authentication, drop this connection
@@ -1227,7 +1247,7 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
                     // Desktop multiplexor was created, use it.
                     obj.deskMultiplexor = deskMultiplexor;
                     parent.desktoprelays[obj.nodeid] = obj.deskMultiplexor;
-                    obj.deskMultiplexor.addPeer(obj);
+                    if (obj.deskMultiplexor.addPeer(obj) === false) { obj.close(); return; }
                     ws._socket.resume(); // Release the traffic
                 } else {
                     // An error has occured, close this connection
@@ -1241,7 +1261,7 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
                 setTimeout(function () { performRelay(++retryCount); }, 50);
             } else {
                 // Hook up this peer to the multiplexor and release the traffic
-                obj.deskMultiplexor.addPeer(obj);
+                if (obj.deskMultiplexor.addPeer(obj) === false) { obj.close(); return; }
                 ws._socket.resume();
             }
         }
