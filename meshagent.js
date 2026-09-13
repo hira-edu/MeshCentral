@@ -213,11 +213,6 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                                 // Setup task limiter options, this system limits how many tasks can run at the same time to spread the server load.
                                 var taskLimiterOptions = { hash: meshcorehash, core: parent.parent.defaultMeshCores[corename], name: corename };
 
-                                // If the agent supports compression, sent the core compressed.
-                                if ((obj.agentInfo.capabilities & 0x100) && (parent.parent.defaultMeshCoresDeflate[corename])) {
-                                    args.core = parent.parent.defaultMeshCoresDeflate[corename];
-                                }
-
                                 // Update new core with task limiting so not to flood the server. This is a high priority task.
                                 obj.agentCoreUpdatePending = true;
                                 parent.parent.taskLimiter.launch(function (argument, taskid, taskLimiterQueue) {
@@ -284,7 +279,10 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                             if (obj.authenticated != 2) { parent.parent.taskLimiter.completed(taskid); return; } // If agent disconnection, complete and exit now.
                             if (obj.nodeid != null) { parent.parent.debug('agent', "Agent update required, NodeID=0x" + obj.nodeid.substring(0, 16) + ', ' + obj.agentExeInfo.desc); }
                             parent.agentStats.agentBinaryUpdate++;
-                            if ((obj.agentExeInfo.data == null) && (((obj.agentInfo.capabilities & 0x100) == 0) || (obj.agentExeInfo.zdata == null))) {
+                            // Legacy compression support does not guarantee streaming ZIP
+                            // correctness. Deliver raw updates until the fixed decoder is advertised.
+                            const useCompressedUpdate = ((obj.agentInfo.capabilities & 0x300) === 0x300) && (obj.agentExeInfo.zdata != null);
+                            if ((obj.agentExeInfo.data == null) && !useCompressedUpdate) {
                                 // Read the agent from disk
                                 parent.fs.open(obj.agentExeInfo.path, 'r', function (err, fd) {
                                     if (obj.agentExeInfo == null) return; // Agent disconnected during this call.
@@ -317,7 +315,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                                             // Send the first block to the agent
                                             obj.agentUpdate.ptr += bytesRead;
                                             parent.parent.debug('agentupdate', "Sent first block of " + bytesRead + " bytes from disk.");
-                                            obj.sendBinary(obj.agentUpdate.buf); // Command 14, mesh agent first data block
+                                            obj.sendBinary(obj.agentUpdate.buf.slice(0, bytesRead + 4)); // Command 14, mesh agent first data block
                                         }
                                     });
                                 });
@@ -339,14 +337,14 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                                 obj.agentUpdate.buf[3] = 1;
 
                                 // If agent supports compression, send the compressed agent if possible.
-                                if ((obj.agentInfo.capabilities & 0x100) && (obj.agentExeInfo.zdata != null)) {
+                                if (useCompressedUpdate) {
                                     // Send compressed data
                                     obj.agentUpdate.agentUpdateData = obj.agentExeInfo.zdata;
                                     obj.agentUpdate.agentUpdateHash = obj.agentExeInfo.zhash;
                                 } else {
                                     // Send uncompressed data
                                     obj.agentUpdate.agentUpdateData = obj.agentExeInfo.data;
-                                    obj.agentUpdate.agentUpdateHash = (obj.agentExeInfo.fileHash != null) ? obj.agentExeInfo.fileHash : obj.agentExeInfo.hash;
+                                    obj.agentUpdate.agentUpdateHash = obj.agentExeInfo.hash; // Native command 13 verifies the normalized executable hash.
                                 }
 
                                 const len = Math.min(parent.parent.agentUpdateBlockSize, obj.agentUpdate.agentUpdateData.length - obj.agentUpdate.ptr);
@@ -354,7 +352,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                                     // Send the first block
                                     obj.agentUpdate.agentUpdateData.copy(obj.agentUpdate.buf, 4, obj.agentUpdate.ptr, obj.agentUpdate.ptr + len);
                                     obj.agentUpdate.ptr += len;
-                                    obj.sendBinary(obj.agentUpdate.buf); // Command 14, mesh agent first data block
+                                    obj.sendBinary(obj.agentUpdate.buf.slice(0, len + 4)); // Command 14, mesh agent first data block
                                     parent.parent.debug('agentupdate', "Sent first block of " + len + " bytes from RAM.");
                                 } else {
                                     // Error
@@ -378,7 +376,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                 if ((msg.length == 4) && (obj.agentUpdate != null)) {
                     const status = common.ReadShort(msg, 2);
                     if (status == 1) {
-                        if (obj.agentExeInfo.data == null) {
+                        if (obj.agentUpdate.fd != null) {
                             // Read the agent from disk
                             parent.fs.read(obj.agentUpdate.fd, obj.agentUpdate.buf, 4, parent.parent.agentUpdateBlockSize, obj.agentUpdate.ptr, function (err, bytesRead, buffer) {
                                 if ((obj.agentExeInfo == null) || (obj.agentUpdate == null)) return; // Agent disconnected during this async call.

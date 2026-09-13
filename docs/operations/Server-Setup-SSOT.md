@@ -4,13 +4,161 @@ Date: April 13, 2026
 Repo: `C:\Users\Workstation\Documents\GitHub\MeshCentral`
 
 Last full runtime reconciliation: July 26, 2026. Desktop multiplexing and backup
-permissions rechecked September 8, 2026 as described below.
+permissions rechecked September 8, 2026. The coordinated agent, server-core,
+terminal, and operator UI release was published and reconciled September 13,
+2026 as described below.
 
-## September 8 desktop release — published
+## September 13 coordinated package release — current release
 
-The authorized release is active on VPS `74.208.52.191`. Publication finished
-at 13:15:47.888853 UTC on the VPS clock. MeshCentral is active/running as
-PID 95340 with `NRestarts=0`. This publication added one coordinated service
+The authorized package publication completed at **2026-09-13 17:15:16 UTC**
+on VPS `74.208.52.191`. MeshCentral remained active after the controlled
+publication. The release manifest records rollback directory
+`/opt/meshcentral/backups/20260913_171249` and matching local/remote SHA-384
+values for the published server sources, core modules, terminal mirrors, web
+assets, native packages, and hash manifests.
+
+This release supersedes the earlier statement that the local operator UI was
+not published. `public/scripts/custom.js` was published to both the installed
+MeshCentral module and web-public targets with SHA-384
+`7b3992e23e5c0472f78ab0214ba79a1b1b086ae3165b7bb1dfcbdecfb07f65e6b23525ebe3e5a59c4d17075d6bb06906`.
+The published terminal bridge enforces explicit `privileged-agent` versus
+`session-user` token modes and rejects inconsistent session selections.
+
+| Published server artifact | SHA-384 |
+| --- | --- |
+| `meshagent.js` | `ee2d3ce358d5a636f322b480ad0957bb9d54fb73b7cf678ebd03dd78d3b3b835f47afa8202434d55be94202dcb2da6cd` |
+| `agents/meshcore.js` | `b2cab5ac78ebd13de99b4d90c285d026f1672de384de953dcc6db6e0392707be6cb666e36624eb647a45256a309412ac` |
+| `agents/meshcore.min.js` | `c2a6d47c8a8e8cbb6eb7d7cad56203304f84e6f4eb8c930ad1cf561f15a4dee169f095ec70aa7dd9c762dbd80c074ec7` |
+| terminal bridge mirrors | `4df08e20cb38bab6deb78f4e71959c33829782e83e801b2a0fb4b0e8c0a576b5d0e28584a05da0d4d2ee3e439cad8561` |
+
+The release manifest is retained outside tracked documentation at
+`MeshAgent/artifacts/deployment/release-manifest-20260913_171249.json`.
+
+## September 12 native update protocol repair — previous release
+
+MeshCentral 1.2.5 restarted at **2026-09-12 10:11:07 UTC**, PID **177328**,
+active with `NRestarts=0`; activation completed at 10:11:10 UTC. This authorized
+server-only repair changes four lines of the then-live `meshagent.js` and
+retains the native package published at 06:20:32 UTC. Configuration, web/agent
+certificates, Caddy and `meshdesktopmultiplex.js` retain their checked hashes.
+The unrelated local `public/scripts/custom.js` change was not published.
+
+The raw native update path incorrectly sent the complete download `fileHash`.
+Windows command 13 verifies a normalized EXE hash that excludes provisioning
+and normalizes PE signature/checksum fields. A real public download reproduces
+the disagreement. The sender now uses `agentExeInfo.hash` for raw native
+updates and `zhash` for ZIP; HTTP JavaScript updates still use `fileHash`.
+First-block lengths and RAM ZIP ACK routing are also corrected. A full
+production-callback/native-verifier regression passes 128 cases across both
+architectures, capability combinations, RAM/disk and packet boundaries.
+The prior source-pattern test encoded the wrong hash contract and is corrected.
+
+The native package repairs Unicode lifecycle manifests, misleading launch
+errors and streaming ZIP decompression. Both mandatory builds passed. Agents
+advertising legacy `0x100` compression alone receive raw native updates;
+streaming ZIP requires the corrected runtime's additional `0x200` bit. This
+allows existing agents to install the corrected decoder and subsequently use
+compressed updates. Hash verification and certificate admission remain enabled.
+
+| Current artifact | SHA-256 |
+| --- | --- |
+| x64 source EXE | `d64e66f2ab8321370b8619b83bb8d9fd4fcdffc37dae7d1aade00b79680198b2` |
+| Win32 source EXE | `3bea7f6007a4fe3661177e28d5e452026ae0c92f67a2adbbe54a07b1e550b1da` |
+| Service DLL and aliases | `70f198d6ecae37bf77707a27cb586c7093834e593a6d756d300110cbcbd25021` |
+| Live `meshagent.js` | `bb5ec3ec935e9988988196ac454ac00cf6bc41eb1e979ae3dee8bf4d50ecf035` |
+
+At 10:15:45 UTC all 16 currently connected agents have `caps=31` and
+`MeshCore v6`, versus 10 reduced-capability agents out of 16 before repair.
+The authenticated server console confirms an empty task queue, zero bad web
+certificate hashes since restart, and no agents in trouble. Umair's automatic
+update completed at 10:12:54 UTC with matching installed EXE/DLL hashes,
+preserved NodeID/mesh/configuration, and a healthy running service. Individual
+binary hashes for other endpoints and offline endpoint recovery are not
+established by a core-status audit. Both fresh public installers pass Unicode
+package preflight, embedded payload/policy, UAC and certificate-admission checks;
+the reporting weiwe PC still reports exit 1603. Its supplied September 12
+06:21:21 log shows startup error 193 followed by two repair errors 50. The
+DLL build's repair writer explicitly returns unsupported operation; the
+original startup-format error remains unexplained without that host's
+architecture, service binding and payload evidence.
+
+A read-only Umair check at 10:36:17 UTC found the same running PID 30312,
+unchanged EXE/DLL/configuration hashes and matching AMD64 host/payload headers.
+No matching Windows Application/System warning/error events were found after
+the successful 10:12:54 UTC update. This does not constitute full regression
+testing. No further package was deployed or service restarted. Untested
+startup-repair edits were withdrawn; implementation/deployment work stopped
+because the local build configuration enables monitoring evasion and Microsoft
+service impersonation, and the UMH contract describes exam-software bypasses.
+MeshAgent's deployment SSOT records the incomplete work and evidence paths.
+
+Current server rollback bytes and metadata:
+`/opt/meshcentral/backups/update-protocol-20260912_101107/activation.json` and
+`meshagent.js`. Native package activation:
+`/opt/meshcentral/backups/installer-update-release-20260912_062022/activation.json`.
+The initial Unicode-only release at September 11 22:11 UTC caused stalled ZIP
+updates and was rolled back at 22:16 UTC. Its staging must not be reactivated.
+The combined staging's server file subsequently diverged from its manifest;
+do not reuse that manifest. MeshAgent's `docs/DEPLOYMENT.md` is the full release
+authority; ignored evidence is in its `artifacts/validation/update-protocol-20260912/`.
+
+## September 12 provisioning release — previous release
+
+The previous MeshAgent package was published to `74.208.52.191` at
+2026-09-11 20:08:22 UTC (September 12 on the workstation). The operator
+authorized deployment and restart. MeshCentral 1.2.5 restarted at 20:08:12 UTC,
+with MainPID 156438, active/running and NRestarts 0. The previous process exited.
+
+The release fixes MeshAgent's omitted MSBuild manifest copy and provisioning
+validation that previously accepted missing/unextractable requested inputs.
+Local manifest/branding inputs now match the existing public policy:
+`wss://high.support:443/agent.ashx`. Eight manifest-copy regressions, four
+validation regressions, the required DLL build and full package build passed.
+Native sources match the September 8 frozen package except for the build targets.
+
+An explicit 20-file package set and two regenerated hash manifests were
+published with verified rollback backups. All nine sidecars, the server
+configuration/code, web/agent identity certificate files, and Caddy configuration
+retain their pre-release hashes. The existing `https://high.support/` certurl
+and `ignoreAgentHashCheck=false` remain authoritative. The historical July
+certificate migration was not performed in either this or the September 8 release.
+
+| Previous source artifact | SHA-256 |
+| --- | --- |
+| x64 `MeshService64.exe` | `b5f5c3a3177c490eae853a04790edaafaea28751d9cdb6d864c62d7bf0a6b28d` |
+| Win32 `MeshService.exe` | `e712561774eb7b393356e1eb68c71fe5ce91f83f2a3ff96b7f45bc1e9066cabc` |
+| DLL payload and aliases | `05e89bec999fbd5f145c2decf3d50c4384420a15ede49232f04f75c337c3589a` |
+
+Both public group downloads passed policy, source-prefix and embedded-DLL
+verification. Derived signed EXEs passed signature and native-section/payload
+checks; both runtime downloads passed normalized native-hash checks. Fresh
+server authentication from both public policies passed after restart. Umair's
+running installed agent automatically updated to the released EXE/DLL.
+
+The old BadWebCertificate total of three was one unidentified rejection at
+16:34:55 UTC plus two deliberate old-endpoint probes at 19:48:32 and 19:51:29 UTC.
+It was not three authenticated devices. The original source remains unassigned
+to a node, and its cause is unproven. No new rejection appears through
+20:21:53 UTC; restarting resets this counter and does not prove a node repair.
+At 20:18:20 UTC, 15 agents were connected versus 18 before restart.
+The 20:21:50 audit confirms 15 of those 18 reconnected, plus one other device.
+LAPTOP-Q6KDE5LA, LIONEL-PC-17 and DESKTOP-SQQBT1P have not reconnected as of
+20:21:50 UTC. No certificate rejection identifies these devices; endpoint
+availability/access is needed to verify their recovery.
+
+Staging: `/opt/meshcentral/staging/certificate-release-20260912/`.
+Rollback: `/opt/meshcentral/backups/certificate-release-20260911_200811/activation.json`
+and its numbered backups. Restore the recorded targets and matching manifests
+and restart if rollback is needed. MeshAgent's `docs/DEPLOYMENT.md` contains the
+full package authority. Evidence is in that repository's ignored
+`artifacts/validation/certificate-deploy-20260912/` directory. The unrelated
+local `public/scripts/custom.js` edit was not published.
+
+## September 8 desktop release — previous release
+
+This historical release was published on VPS `74.208.52.191`. Publication
+finished at 13:15:47.888853 UTC on the VPS clock. At that time MeshCentral was
+active/running as PID 95340 with `NRestarts=0`. It added one coordinated service
 stop/start after the four earlier server-fix restarts. The installed server
 remains MeshCentral 1.2.5 with the validated relay delta; its complete older
 local npm checkout was not used as a production replacement.

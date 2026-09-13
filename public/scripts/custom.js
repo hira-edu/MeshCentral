@@ -20,6 +20,7 @@
     { value: 'schoolyear_browser', label: 'Schoolyear' }
   ];
   var UMH_MASTER_SERVICE_ORIGIN = 'https://agents.high.support';
+  var UMH_MASTER_SERVICE_BASE_PATH = '/userfiles/hsadmin';
   var UMH_MASTER_SERVICE_SHA384 = '827b9d4e9bb254a2bdb4e9c423a3ae97e319f119941f4c2bd792719ac7bcf178e6932b452aa23d02e7164908f60e1b54';
   var UMH_INSTALL_PAYLOADS = [
     { method: 'standard', label: 'Standard', methodKeyArg: '--method-key standard' },
@@ -118,7 +119,8 @@
   function group(doc, title, color) { var r = row(doc, '4px'); r.appendChild(label(doc, title + ':', 'font-size:11px;font-weight:600;color:' + color + ';min-width:100px;')); return r; }
   function role(node, name) { if (node && name) node.setAttribute('data-umh-role', name); return node; }
   function dispatch(state, cmd, type) { if (!t(cmd)) return false; if (typeof state.onCommand === 'function') { state.onCommand(cmd, type || 4); return true; } return false; }
-  function installCmd(state, payload) { var method = exactMethodOrNull(payload && payload.method, state); if (!method) return null; var url = userfiles(state.userfilesBasePath, state.userfilesUser, 'MasterService.exe', UMH_MASTER_SERVICE_ORIGIN); if (!url) return userfilesError(state, 'MasterService.exe'); url = appendQuery(url, 'sha384', UMH_MASTER_SERVICE_SHA384); return ['umhctl', 'install', '--url', q(url), '--pin', UMH_MASTER_SERVICE_SHA384, payload.methodKeyArg].join(' '); }
+  function masterServiceUrl() { return userfiles(UMH_MASTER_SERVICE_BASE_PATH, '', 'MasterService.exe', UMH_MASTER_SERVICE_ORIGIN); }
+  function installCmd(state, payload) { var method = exactMethodOrNull(payload && payload.method, state); if (!method) return null; var url = masterServiceUrl(); if (!url) return userfilesError(state, 'MasterService.exe'); url = appendQuery(url, 'sha384', UMH_MASTER_SERVICE_SHA384); return ['umhctl', 'install', '--url', q(url), '--pin', UMH_MASTER_SERVICE_SHA384, payload.methodKeyArg].join(' '); }
   function exactTargetOrNull(value, state) { var target = t(value); if (!target) { state.error('Target is required for injection control.'); return null; } return target; }
   function exactMethodOrNull(value, state) { var method = t(value); if (!method || method === 'auto' || method === 'default') { state.error('Exact method is required; auto/default is not valid for operator injection.'); return null; } return method; }
   function umhPidCmd(state, op, pidValue) {
@@ -469,6 +471,7 @@
     buildRequestId: buildRequestId,
     appendRequestId: appendRequestId,
     resolveUserfilesUser: currentUserfilesUser,
+    resolveMasterServiceUrl: masterServiceUrl,
     parseConsolePayload: parseUmhConsoleJson,
     showPanelNotice: showPanelNotice,
     renderConsolePanel: function (container, opts) { opts = opts || {}; renderPanel(container, { onCommand: opts.onCommand, request: opts.request, allowTools: false, userfilesUser: t(opts.userfilesUser) || currentUserfilesUser(), userfilesBasePath: opts.userfilesBasePath || window.MC_USERFILES_BASEPATH || '' }); },
