@@ -1790,6 +1790,7 @@ function handleServerCommand(data) {
                             ' bridgeClosed=' + (mesh.cmdchild._meshTerminalClosed === true) +
                             ' markerSeen=' + runCommandBridgeMarkerSeen +
                             ' mode=' + mesh.cmdchild._meshTerminalMode +
+                            ' tokenMode=' + mesh.cmdchild._meshTerminalTokenMode +
                             ' writes=' + mesh.cmdchild._meshTerminalWriteCount +
                             ' lastWriteBytes=' + mesh.cmdchild._meshTerminalLastWriteBytes +
                             ' outputChunks=' + mesh.cmdchild._meshTerminalOutputChunks +
