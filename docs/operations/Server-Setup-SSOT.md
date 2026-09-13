@@ -34,6 +34,18 @@ The published terminal bridge enforces explicit `privileged-agent` versus
 The release manifest is retained outside tracked documentation at
 `MeshAgent/artifacts/deployment/release-manifest-20260913_171249.json`.
 
+The shared UMH payload pin was refreshed at **2026-09-13 20:01:58 UTC** after
+the coordinated package release. The public `MasterService.exe` is size
+`17333248`, SHA-256
+`5e800707d63fa8d53f88453791ee4de2ee2a890a4bbc9f8f89024635c9de5965`, and
+SHA-384
+`f48e598e1ee78347231796532f43064d657992ab463427c0993b9088a1118ebf84d3c83f8560128d99b8f38f14c85e5b`.
+Both live `custom.js` copies are the publisher-stamped form of the tracked
+source and match at SHA-256
+`7eb32f644bed14e1906d8b3ba7c4089f578561fad0aec375c5b64807aaae3222`.
+MeshCentral is active/running with `MainPID=218112`, `NRestarts=0`; rollback is
+`/opt/meshcentral/umh-backups/20260914_010136`.
+
 ## September 12 native update protocol repair — previous release
 
 MeshCentral 1.2.5 restarted at **2026-09-12 10:11:07 UTC**, PID **177328**,
