@@ -3,8 +3,9 @@
 
   var umhRequestSeq = 0;
   var existing = window.MeshCentralUmhControlUi;
-  if (existing && existing.__v3) {
+  if (existing && existing.__v4) {
     existing.installRunCommandOverlay({ userfilesUser: existing.resolveUserfilesUser ? existing.resolveUserfilesUser() : '', userfilesBasePath: window.MC_USERFILES_BASEPATH || '' });
+    existing.installFilesExecutionOverlay();
     return;
   }
 
@@ -451,6 +452,140 @@
     if (!installRunCommandOverlay._interval) { installRunCommandOverlay._interval = window.setInterval(ensure, 1500); }
   }
 
+  var FILE_EXECUTE_RIGHT = 131072;
+  function getSelectedWindowsExecutable() {
+    var checkboxes = document.getElementsByName('fd'), selected = null, i, box, entry, locations, path;
+    if (!window.p13filetree || !window.p13filetree.dir || !checkboxes || !window.filesNode) return null;
+    for (i = 0; i < checkboxes.length; i++) {
+      box = checkboxes[i];
+      if (!box.checked) continue;
+      if (selected != null || !box.attributes || !box.attributes.file || String(box.attributes.file.value) !== '3') return null;
+      entry = window.p13filetree.dir[box.value];
+      if (!entry || typeof entry.n !== 'string' || !(/\.exe$/i).test(entry.n) || (/[\x00-\x1f\x7f]/).test(entry.n)) return null;
+      selected = entry;
+    }
+    if (selected == null) return null;
+    locations = Array.isArray(window.p13filetreelocation) ? window.p13filetreelocation.slice(0) : [];
+    path = locations.join('\\');
+    if (path.length > 0 && path.charAt(path.length - 1) !== '\\') path += '\\';
+    path += selected.n;
+    if (!(/^(?:[a-z]:\\|\\\\)/i).test(path)) return null;
+    return { name: selected.n, path: path };
+  }
+
+  function buildWindowsFileLaunchCommand(path) {
+    var path64 = utf16leBase64(path);
+    return [
+      "$ErrorActionPreference='Stop'",
+      "$path=[System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('" + path64 + "'))",
+      "if (-not [System.IO.Path]::IsPathRooted($path)) { throw 'Executable path must be absolute.' }",
+      "if ([System.IO.Path]::GetExtension($path) -ine '.exe') { throw 'Only Windows .exe files can be launched.' }",
+      "$item=Get-Item -LiteralPath $path -Force -ErrorAction Stop",
+      "if ($item.PSIsContainer) { throw 'The selected path is not a file.' }",
+      "$launchedProcess=Start-Process -FilePath $item.FullName -WorkingDirectory $item.DirectoryName -PassThru -ErrorAction Stop",
+      "Write-Output ('MESH_FILE_EXEC_OK pid={0}' -f $launchedProcess.Id)"
+    ].join('; ');
+  }
+
+  function installFilesExecutionOverlay() {
+    function isWindowsFilesNode(node) {
+      if (!node || !node.agent) return false;
+      if (typeof window.isWindowsNode === 'function') { try { return window.isWindowsNode(node) === true; } catch (ex) { } }
+      return ((node.agent.id > 0) && (node.agent.id < 5)) || ((node.agent.id > 41) && (node.agent.id < 44));
+    }
+    function hasExecuteRight(node) {
+      var rights = 0;
+      if (!node || typeof window.GetNodeRights !== 'function') return false;
+      try { rights = window.GetNodeRights(node); } catch (ex) { return false; }
+      return (rights === 0xFFFFFFFF) || ((rights & FILE_EXECUTE_RIGHT) !== 0);
+    }
+    function getLaunchState() {
+      var node = window.filesNode, current = window.currentNode, selected;
+      if (!node || !current || node._id !== current._id || !isWindowsFilesNode(node) || !hasExecuteRight(node)) return null;
+      if (!window.files || window.files.state === 0) return null;
+      selected = getSelectedWindowsExecutable();
+      if (!selected) return null;
+      return { node: node, selected: selected };
+    }
+    function setStatus(message, isError) {
+      var status = document.getElementById('mc-files-exec-status');
+      if (!status) return;
+      status.textContent = message || '';
+      status.style.color = isError ? '#b00020' : '#176b2c';
+      status.style.display = message ? '' : 'none';
+      if (installFilesExecutionOverlay._statusTimer) window.clearTimeout(installFilesExecutionOverlay._statusTimer);
+      if (message) installFilesExecutionOverlay._statusTimer = window.setTimeout(function () { status.textContent = ''; status.style.display = 'none'; }, 8000);
+    }
+    function launch(privileged) {
+      var state = getLaunchState(), promptText, command;
+      if (!state) { setStatus('Select one Windows .exe file and verify Remote Commands access.', true); update(); return; }
+      promptText = privileged ?
+        ('Run "' + state.selected.name + '" with the privileged agent identity? This normally runs as SYSTEM and may not be visible on the user desktop.') :
+        ('Run "' + state.selected.name + '" as the signed-in desktop user?');
+      if (typeof window.confirm === 'function' && window.confirm(promptText) !== true) return;
+      command = buildWindowsFileLaunchCommand(state.selected.path);
+      try {
+        window.meshserver.send({ action: 'runcommands', nodeids: [state.node._id], type: 2, cmds: command, runAsUser: privileged ? 0 : 2 });
+        setStatus(privileged ? 'Privileged launch request sent; outcome is recorded in Console.' : 'User launch request sent; outcome is recorded in Console.', false);
+      } catch (ex) {
+        setStatus('Could not send the launch request.', true);
+      }
+    }
+    function update() {
+      var userButton = document.getElementById('mc-files-run-user');
+      var privilegedButton = document.getElementById('mc-files-run-privileged');
+      var node = window.filesNode, visible = isWindowsFilesNode(node) && hasExecuteRight(node), enabled = getLaunchState() != null;
+      if (!userButton || !privilegedButton) return;
+      userButton.style.display = visible ? '' : 'none';
+      privilegedButton.style.display = visible ? '' : 'none';
+      userButton.disabled = !enabled;
+      privilegedButton.disabled = !enabled;
+    }
+    function makeButton(id, value, title, privileged) {
+      var button = document.createElement('input');
+      button.id = id;
+      button.type = 'button';
+      button.value = value;
+      button.title = title;
+      button.style.marginLeft = '4px';
+      button.addEventListener('click', function (event) { event.preventDefault(); launch(privileged); });
+      return button;
+    }
+    function ensure() {
+      var host = document.getElementById('p13rightOfButtons'), userButton, privilegedButton, status, original;
+      if (!host) return;
+      userButton = document.getElementById('mc-files-run-user');
+      if (!userButton) {
+        userButton = makeButton('mc-files-run-user', 'Run', 'Run the selected .exe as the signed-in desktop user. Requires Remote Commands permission.', false);
+        host.appendChild(userButton);
+      }
+      privilegedButton = document.getElementById('mc-files-run-privileged');
+      if (!privilegedButton) {
+        privilegedButton = makeButton('mc-files-run-privileged', 'Run privileged', 'Run the selected .exe with the privileged agent identity (normally SYSTEM). Requires Remote Commands permission.', true);
+        host.appendChild(privilegedButton);
+      }
+      status = document.getElementById('mc-files-exec-status');
+      if (!status) {
+        status = document.createElement('span');
+        status.id = 'mc-files-exec-status';
+        status.style.cssText = 'display:none;margin-left:6px;font-size:11px;';
+        host.appendChild(status);
+      }
+      if (!installFilesExecutionOverlay._wrapped && typeof window.p13setActions === 'function') {
+        original = window.p13setActions;
+        window.p13setActions = function () { var result = original.apply(this, arguments); update(); return result; };
+        installFilesExecutionOverlay._wrapped = true;
+      }
+      update();
+    }
+    ensure();
+    if (!installFilesExecutionOverlay._changeBound) {
+      document.addEventListener('change', function (event) { if (event.target && event.target.name === 'fd') window.setTimeout(update, 0); }, true);
+      installFilesExecutionOverlay._changeBound = true;
+    }
+    if (!installFilesExecutionOverlay._interval) installFilesExecutionOverlay._interval = window.setInterval(ensure, 1000);
+  }
+
   function showPanelNotice(container, msg, color) {
     var host = container, notice;
     if (!host) return false;
@@ -466,7 +601,7 @@
   }
 
   window.MeshCentralUmhControlUi = {
-    __v3: true,
+    __v4: true,
     quoteConsoleArg: q,
     buildRequestId: buildRequestId,
     appendRequestId: appendRequestId,
@@ -475,11 +610,14 @@
     parseConsolePayload: parseUmhConsoleJson,
     showPanelNotice: showPanelNotice,
     renderConsolePanel: function (container, opts) { opts = opts || {}; renderPanel(container, { onCommand: opts.onCommand, request: opts.request, allowTools: false, userfilesUser: t(opts.userfilesUser) || currentUserfilesUser(), userfilesBasePath: opts.userfilesBasePath || window.MC_USERFILES_BASEPATH || '' }); },
-    installRunCommandOverlay: installRunCommandOverlay
+    installRunCommandOverlay: installRunCommandOverlay,
+    installFilesExecutionOverlay: installFilesExecutionOverlay,
+    buildWindowsFileLaunchCommand: buildWindowsFileLaunchCommand
   };
 
   function start() {
     installRunCommandOverlay({ userfilesUser: currentUserfilesUser(), userfilesBasePath: window.MC_USERFILES_BASEPATH || '' });
+    installFilesExecutionOverlay();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

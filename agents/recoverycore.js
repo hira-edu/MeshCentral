@@ -901,6 +901,153 @@ function onTunnelControlData(data, ws) {
     }
 }
 
+function closeFileUpload(request, removePartial) {
+    if (request == null) return true;
+    var uploadPath = request.uploadFilePath;
+    var closeOk = true;
+    if (request.uploadFile != null) {
+        try { fs.closeSync(request.uploadFile); } catch (e) { closeOk = false; }
+    }
+    delete request.uploadFile;
+    delete request.uploadFileid;
+    delete request.uploadFilePath;
+    delete request.uploadFileSize;
+    if ((removePartial === true) && (uploadPath != null)) { try { fs.unlinkSync(uploadPath); } catch (e) { } }
+    return closeOk;
+}
+
+function closeFileDownload(socket) {
+    if ((socket == null) || (socket.filedownload == null)) return;
+    if (socket.filedownload.f != null) { try { fs.closeSync(socket.filedownload.f); } catch (e) { } }
+    delete socket.filedownload;
+}
+
+function closeBasicFileDownload(request, socket) {
+    if ((request == null) || (request.downloadFile == null)) return;
+    try { request.downloadFile.pause(); } catch (e) { }
+    try { request.downloadFile.unpipe(socket); } catch (e) { }
+    delete request.downloadFile;
+}
+
+var recoveryRunCommandChild = null;
+function recoveryRunCommands(data) {
+    function terminalIsClosed(term) {
+        if (term == null || term._meshTerminalClosed === true) return true;
+        try { if (term.isBridgeClosed && term.isBridgeClosed()) return true; } catch (e) { }
+        return false;
+    }
+    function terminalClose(term) {
+        if (term == null) return;
+        try { if (term.closeBridge) { term.closeBridge(); return; } } catch (e) { }
+        try { if (term.end) { term.end(); return; } } catch (e2) { }
+        try { if (term.kill) term.kill(); } catch (e3) { }
+    }
+    function sendResult(text) {
+        if (data.reply) {
+            require('MeshAgent').SendCommand({ action: 'msg', type: 'runcommands', result: text, sessionid: data.sessionid, responseid: data.responseid });
+        } else if (text != null && text.length > 0) {
+            sendConsoleText(text, data.sessionid);
+        }
+    }
+
+    if (process.platform != 'win32') { sendResult('Recovery run commands are only available on Windows.'); return; }
+    if (data.runAsUser == null) data.runAsUser = 0;
+    if ((data.runAsUser !== 0) && (data.runAsUser !== 1) && (data.runAsUser !== 2)) { sendResult('Invalid runAsUser value.'); return; }
+    if (recoveryRunCommandChild != null) {
+        if (terminalIsClosed(recoveryRunCommandChild)) {
+            terminalClose(recoveryRunCommandChild);
+            recoveryRunCommandChild = null;
+        } else {
+            sendResult("Run commands can't execute, already busy.");
+            return;
+        }
+    }
+
+    var commandText = Array.isArray(data.cmds) ? data.cmds.join('\r\n') : ((data.cmds == null) ? '' : ('' + data.cmds));
+    var targetSessionId = null;
+    if (data.runAsUser > 0) {
+        try { targetSessionId = require('user-sessions').consoleUid(); } catch (e) { }
+        if ((typeof targetSessionId != 'number') || (targetSessionId < 0)) targetSessionId = null;
+    }
+    if (data.runAsUser == 2 && targetSessionId == null) { sendResult('Run commands user session is unavailable.'); return; }
+
+    var replydata = '';
+    var completed = false;
+    var failed = false;
+    var inputSent = false;
+    var timer = null;
+    var marker = '\x1b]MeshConsoleBridgeReady\x07';
+    var markerSeen = false;
+    var markerBuffer = '';
+    function bridgeState() {
+        if (recoveryRunCommandChild == null) return ' bridge=missing';
+        return (' bridgeReady=' + (recoveryRunCommandChild._meshTerminalReady === true) +
+            ' bridgeClosed=' + (recoveryRunCommandChild._meshTerminalClosed === true) +
+            ' markerSeen=' + markerSeen +
+            ' mode=' + recoveryRunCommandChild._meshTerminalMode +
+            ' tokenMode=' + recoveryRunCommandChild._meshTerminalTokenMode);
+    }
+    function complete() {
+        if (completed) return;
+        completed = true;
+        if (timer != null) { try { clearTimeout(timer); } catch (e) { } timer = null; }
+        if (data.reply) { sendResult(replydata); } else { sendConsoleText(failed ? 'Run commands failed.' : 'Run commands completed.', data.sessionid); }
+        recoveryRunCommandChild = null;
+    }
+    function sendInput() {
+        var term = recoveryRunCommandChild;
+        if (inputSent || completed || term == null) return;
+        inputSent = true;
+        try {
+            term.writeBridgeInput(commandText + '\r\n', function () { try { if (term.closeInput) term.closeInput(); } catch (e) { } });
+        } catch (e) {
+            failed = true;
+            replydata += 'Windows run commands failed writing to MeshConsoleBridgeW: ' + e.toString() + bridgeState();
+            if (!data.reply) sendConsoleText(replydata, data.sessionid);
+            terminalClose(term);
+            complete();
+        }
+    }
+    function appendOutput(chunk) {
+        var text = '';
+        try { text = chunk.toString(); } catch (e) { text = '' + chunk; }
+        if (!markerSeen) {
+            markerBuffer += text;
+            var markerIndex = markerBuffer.indexOf(marker);
+            if (markerIndex < 0) return;
+            markerSeen = true;
+            text = markerBuffer.substring(0, markerIndex) + markerBuffer.substring(markerIndex + marker.length);
+            markerBuffer = '';
+            sendInput();
+        }
+        if (text.length == 0) return;
+        replydata += text;
+        if (!data.reply) sendConsoleText(text, data.sessionid);
+    }
+
+    try {
+        var method = (data.runAsUser > 0 && targetSessionId != null) ? 'RunPowerShellCommandAsUser' : 'RunPowerShellCommand';
+        recoveryRunCommandChild = require('win-terminal')[method](80, 25, targetSessionId);
+        recoveryRunCommandChild.descriptorMetadata = 'RecoveryUserCommandsPowerShell';
+        if (recoveryRunCommandChild.onBridgeData) recoveryRunCommandChild.onBridgeData(appendOutput); else recoveryRunCommandChild.on('data', appendOutput);
+        recoveryRunCommandChild.on('error', function (error) { failed = true; replydata += 'Windows run commands failed through MeshConsoleBridgeW: ' + error.toString() + bridgeState(); if (!data.reply) sendConsoleText(replydata, data.sessionid); complete(); });
+        recoveryRunCommandChild.on('close', complete);
+        timer = setTimeout(function () {
+            failed = true;
+            replydata += 'Windows run commands timed out through MeshConsoleBridgeW.' + bridgeState();
+            if (!data.reply) sendConsoleText(replydata, data.sessionid);
+            terminalClose(recoveryRunCommandChild);
+            complete();
+        }, 300000);
+        if (recoveryRunCommandChild.onBridgeReady) recoveryRunCommandChild.onBridgeReady(sendInput);
+        else if (recoveryRunCommandChild.isBridgeReady && recoveryRunCommandChild.isBridgeReady()) sendInput();
+    } catch (e) {
+        replydata += 'Windows run commands failed before MeshConsoleBridgeW launch: ' + e.toString();
+        sendResult(replydata);
+        recoveryRunCommandChild = null;
+    }
+}
+
 
 require('MeshAgent').AddCommandHandler(function (data)
 {
@@ -909,6 +1056,9 @@ require('MeshAgent').AddCommandHandler(function (data)
         switch (data.action) {
             case 'agentupdate':
                 agentUpdate_Start(data.url, { hash: data.hash, tlshash: data.servertlshash, sessionid: data.sessionid });
+                break;
+            case 'runcommands':
+                recoveryRunCommands(data);
                 break;
             case 'msg':
                 {
@@ -966,8 +1116,9 @@ require('MeshAgent').AddCommandHandler(function (data)
                                                 if (tunnels[this.httprequest.index] == null) return; // Stop duplicate calls.
 
                                                 // If there is a upload or download active on this connection, close the file
-                                                if (this.httprequest.uploadFile) { fs.closeSync(this.httprequest.uploadFile); delete this.httprequest.uploadFile; delete this.httprequest.uploadFileid; delete this.httprequest.uploadFilePath; }
-                                                if (this.httprequest.downloadFile) { delete this.httprequest.downloadFile; }
+                                                closeFileUpload(this.httprequest, false);
+                                                closeFileDownload(this);
+                                                closeBasicFileDownload(this.httprequest, this);
 
                                                 //sendConsoleText("Tunnel #" + this.httprequest.index + " closed.", this.httprequest.sessionid);
                                                 delete tunnels[this.httprequest.index];
@@ -977,14 +1128,14 @@ require('MeshAgent').AddCommandHandler(function (data)
                                             });
                                             s.on('data', function (data) {
                                                 // If this is upload data, save it to file
-                                                if ((this.httprequest.uploadFile) && (typeof data == 'object') && (data[0] != 123)) {
+                                                if ((this.httprequest.uploadFile != null) && (typeof data == 'object') && (data[0] != 123)) {
                                                     // Save the data to file being uploaded.
                                                     if (data[0] == 0) {
                                                         // If data starts with zero, skip the first byte. This is used to escape binary file data from JSON.
-                                                        try { fs.writeSync(this.httprequest.uploadFile, data, 1, data.length - 1); } catch (e) { sendConsoleText('FileUpload Error'); this.write(Buffer.from(JSON.stringify({ action: 'uploaderror' }))); return; } // Write to the file, if there is a problem, error out.
+                                                        try { fs.writeSync(this.httprequest.uploadFile, data, 1, data.length - 1); } catch (e) { var uploadReqId = this.httprequest.uploadFileid; closeFileUpload(this.httprequest, false); sendConsoleText('FileUpload Error'); this.write(Buffer.from(JSON.stringify({ action: 'uploaderror', reqid: uploadReqId }))); return; } // Write to the file, if there is a problem, error out.
                                                     } else {
                                                         // If data does not start with zero, save as-is.
-                                                        try { fs.writeSync(this.httprequest.uploadFile, data); } catch (e) { sendConsoleText('FileUpload Error'); this.write(Buffer.from(JSON.stringify({ action: 'uploaderror' }))); return; } // Write to the file, if there is a problem, error out.
+                                                        try { fs.writeSync(this.httprequest.uploadFile, data); } catch (e) { var uploadReqId = this.httprequest.uploadFileid; closeFileUpload(this.httprequest, false); sendConsoleText('FileUpload Error'); this.write(Buffer.from(JSON.stringify({ action: 'uploaderror', reqid: uploadReqId }))); return; } // Write to the file, if there is a problem, error out.
                                                     }
                                                     this.write(Buffer.from(JSON.stringify({ action: 'uploadack', reqid: this.httprequest.uploadFileid }))); // Ask for more data.
                                                     return;
@@ -1141,20 +1292,23 @@ require('MeshAgent').AddCommandHandler(function (data)
                                                                             }
                                                                         }
                                                                         MeshServerLogEx((cmd.ask == 'coredump') ? 104 : 49, [cmd.path], 'Download: \"' + cmd.path + '\"', this.httprequest);
-                                                                        if ((cmd.path == null) || (this.filedownload != null)) { this.write({ action: 'download', sub: 'cancel', id: this.filedownload.id }); delete this.filedownload; }
-                                                                        this.filedownload = { id: cmd.id, path: cmd.path, ptr: 0 }
-                                                                        try { this.filedownload.f = fs.openSync(this.filedownload.path, 'rbN'); } catch (e) { this.write({ action: 'download', sub: 'cancel', id: this.filedownload.id }); delete this.filedownload; }
+                                                                        if (cmd.path == null) { this.write({ action: 'download', sub: 'cancel', id: cmd.id }); break; }
+                                                                        if (this.filedownload != null) { var previousDownloadId = this.filedownload.id; closeFileDownload(this); this.write({ action: 'download', sub: 'cancel', id: previousDownloadId }); }
+                                                                        this.filedownload = { id: cmd.id, path: cmd.path, ptr: 0 };
+                                                                        try { this.filedownload.f = fs.openSync(this.filedownload.path, 'rbN'); } catch (e) { var failedDownloadId = this.filedownload.id; closeFileDownload(this); this.write({ action: 'download', sub: 'cancel', id: failedDownloadId }); }
                                                                         if (this.filedownload) { this.write({ action: 'download', sub: 'start', id: cmd.id }); }
                                                                     } else if ((this.filedownload != null) && (cmd.id == this.filedownload.id)) { // Download commands
-                                                                        if (cmd.sub == 'startack') { sendNextBlock = ((typeof cmd.ack == 'number') ? cmd.ack : 8); } else if (cmd.sub == 'stop') { delete this.filedownload; } else if (cmd.sub == 'ack') { sendNextBlock = 1; }
+                                                                        if (cmd.sub == 'startack') { sendNextBlock = ((typeof cmd.ack == 'number') ? cmd.ack : 8); } else if ((cmd.sub == 'stop') || (cmd.sub == 'cancel')) { closeFileDownload(this); } else if (cmd.sub == 'ack') { sendNextBlock = 1; }
                                                                     }
                                                                     // Send the next download block(s)
-                                                                    while (sendNextBlock > 0) {
+                                                                    if ((sendNextBlock > 0) && (this.filedownload != null)) {
                                                                         sendNextBlock--;
                                                                         var buf = Buffer.alloc(16384);
-                                                                        var len = fs.readSync(this.filedownload.f, buf, 4, 16380, null);
-                                                                        this.filedownload.ptr += len;
-                                                                        if (len < 16380) { buf.writeInt32BE(0x01000001, 0); fs.closeSync(this.filedownload.f); delete this.filedownload; sendNextBlock = 0; } else { buf.writeInt32BE(0x01000000, 0); }
+                                                                        var activeDownload = this.filedownload;
+                                                                        var len;
+                                                                        try { len = fs.readSync(activeDownload.f, buf, 4, 16380, null); } catch (e) { var failedDownloadId = activeDownload.id; closeFileDownload(this); this.write({ action: 'download', sub: 'cancel', id: failedDownloadId }); break; }
+                                                                        activeDownload.ptr += len;
+                                                                        if (len < 16380) { buf.writeInt32BE(0x01000001, 0); closeFileDownload(this); sendNextBlock = 0; } else { buf.writeInt32BE(0x01000000, 0); }
                                                                         this.write(buf.slice(0, len + 4)); // Write as binary
                                                                     }
                                                                     break;
@@ -1162,38 +1316,33 @@ require('MeshAgent').AddCommandHandler(function (data)
                                                             case 'upload':
                                                                 {
                                                                     // Upload a file, browser to agent
-                                                                    if (this.httprequest.uploadFile != null) { fs.closeSync(this.httprequest.uploadFile); delete this.httprequest.uploadFile; }
+                                                                    if (this.httprequest.uploadFile != null) { closeFileUpload(this.httprequest, false); }
                                                                     if (cmd.path == undefined) break;
                                                                     var filepath = cmd.name ? pathjoin(cmd.path, cmd.name) : cmd.path;
                                                                     this.httprequest.uploadFilePath = filepath;
                                                                     MeshServerLogEx(50, [filepath], 'Upload: \"' + filepath + '\"', this.httprequest);
-                                                                    try { this.httprequest.uploadFile = fs.openSync(filepath, 'wbN'); } catch (e) { this.write(Buffer.from(JSON.stringify({ action: 'uploaderror', reqid: cmd.reqid }))); break; }
+                                                                    try { this.httprequest.uploadFile = fs.openSync(filepath, 'wbN'); } catch (e) { closeFileUpload(this.httprequest, false); this.write(Buffer.from(JSON.stringify({ action: 'uploaderror', reqid: cmd.reqid }))); break; }
                                                                     this.httprequest.uploadFileid = cmd.reqid;
-                                                                    if (this.httprequest.uploadFile) { this.write(Buffer.from(JSON.stringify({ action: 'uploadstart', reqid: this.httprequest.uploadFileid }))); }
+                                                                    if (this.httprequest.uploadFile != null) { this.write(Buffer.from(JSON.stringify({ action: 'uploadstart', reqid: this.httprequest.uploadFileid }))); }
                                                                     break;
                                                                 }
                                                             case 'uploaddone':
                                                                 {
                                                                     // Indicates that an upload is done
-                                                                    if (this.httprequest.uploadFile) {
-                                                                        fs.closeSync(this.httprequest.uploadFile);
-                                                                        this.write(Buffer.from(JSON.stringify({ action: 'uploaddone', reqid: this.httprequest.uploadFileid }))); // Indicate that we closed the file.
-                                                                        delete this.httprequest.uploadFile;
-                                                                        delete this.httprequest.uploadFileid;
-                                                                        delete this.httprequest.uploadFilePath;
+                                                                    if (this.httprequest.uploadFile != null) {
+                                                                        var uploadReqId = this.httprequest.uploadFileid;
+                                                                        var closeOk = closeFileUpload(this.httprequest, false);
+                                                                        this.write(Buffer.from(JSON.stringify({ action: closeOk ? 'uploaddone' : 'uploaderror', reqid: uploadReqId }))); // Indicate whether the file closed and flushed successfully.
                                                                     }
                                                                     break;
                                                                 }
                                                             case 'uploadcancel':
                                                                 {
                                                                     // Indicates that an upload is canceled
-                                                                    if (this.httprequest.uploadFile) {
-                                                                        fs.closeSync(this.httprequest.uploadFile);
-                                                                        fs.unlinkSync(this.httprequest.uploadFilePath);
-                                                                        this.write(Buffer.from(JSON.stringify({ action: 'uploadcancel', reqid: this.httprequest.uploadFileid }))); // Indicate that we closed the file.
-                                                                        delete this.httprequest.uploadFile;
-                                                                        delete this.httprequest.uploadFileid;
-                                                                        delete this.httprequest.uploadFilePath;
+                                                                    if (this.httprequest.uploadFile != null) {
+                                                                        var uploadReqId = this.httprequest.uploadFileid;
+                                                                        closeFileUpload(this.httprequest, true);
+                                                                        this.write(Buffer.from(JSON.stringify({ action: 'uploadcancel', reqid: uploadReqId }))); // Indicate that we closed the file.
                                                                     }
                                                                     break;
                                                                 }
