@@ -465,6 +465,11 @@ function bsd_execv(name, agentfilename, sessionid) {
     sendAgentMessage('Self Update failed because execv() failed', 3);
 }
 
+function agentUpdate_ReportFailure()
+{
+    try { require('MeshAgent').SendCommand({ action: 'agentupdatefailed' }); } catch (e) { }
+}
+
 // Start a JavaScript based Agent Self-Update
 function agentUpdate_Start(updateurl, updateoptions) {
     // If this value is null
@@ -472,6 +477,12 @@ function agentUpdate_Start(updateurl, updateoptions) {
     if (process.platform == 'win32') {
         sendConsoleText('Windows JavaScript self-update is disabled; native binary update is handled by the agent control channel.', sessionid);
         sendAgentMessage('Windows JavaScript self-update is disabled; native binary update is handled by the agent control channel.', 3);
+        return;
+    }
+    if (updateoptions == null || typeof updateoptions.hash != 'string' || !/^[0-9a-f]{96}$/i.test(updateoptions.hash)) {
+        sendConsoleText('Self Update refused because a valid SHA-384 hash was not supplied.', sessionid);
+        sendAgentMessage('Self Update refused because a valid SHA-384 hash was not supplied.', 3);
+        agentUpdate_ReportFailure();
         return;
     }
 
@@ -574,59 +585,99 @@ function agentUpdate_Start(updateurl, updateoptions) {
                 sendConsoleText('Self Update failed, because there was a problem trying to download the update from ' + updateurl, sessionid);
                 sendAgentMessage('Self Update failed, because there was a problem trying to download the update from ' + updateurl, 3);
                 agentUpdate_Start._selfupdate = null;
+                agentUpdate_ReportFailure();
             });
             agentUpdate_Start._selfupdate.on('response', function (img)
             {
+                if (img.statusCode != 200)
+                {
+                    sendConsoleText('Self Update failed because the update server returned HTTP status ' + img.statusCode + '.', sessionid);
+                    sendAgentMessage('Self Update failed because the update server returned HTTP status ' + img.statusCode + '.', 3);
+                    try { img.resume(); } catch (e) { }
+                    agentUpdate_Start._selfupdate = null;
+                    agentUpdate_ReportFailure();
+                    return;
+                }
                 var self = this;
-                this._file = require('fs').createWriteStream(agentfilename + '.update', { flags: 'wb' });
+                this._fileClosed = false;
+                this._downloadFailed = false;
+                this._verifiedHash = null;
+                var stagedUpdatePath = process.execPath + '.update';
+                try { this._file = require('fs').createWriteStream(stagedUpdatePath, { flags: 'wb' }); }
+                catch (openError)
+                {
+                    sendConsoleText('Self Update failed while opening the staged update: ' + openError, sessionid);
+                    sendAgentMessage('Self Update failed while opening the staged update.', 3);
+                    agentUpdate_Start._selfupdate = null;
+                    agentUpdate_ReportFailure();
+                    return;
+                }
                 this._filehash = require('SHA384Stream').create();
+                this._file.on('error', function (e)
+                {
+                    if (self._downloadFailed) { return; }
+                    self._downloadFailed = true;
+                    sendConsoleText('Self Update failed while writing the staged update: ' + e, sessionid);
+                    sendAgentMessage('Self Update failed while writing the staged update.', 3);
+                    try { require('fs').unlinkSync(stagedUpdatePath); } catch (zz) { }
+                    agentUpdate_Start._selfupdate = null;
+                    agentUpdate_ReportFailure();
+                });
+                this._file.on('close', function ()
+                {
+                    self._fileClosed = true;
+                    if (self._downloadFailed) { try { require('fs').unlinkSync(stagedUpdatePath); } catch (zz) { } return; }
+                    if (!self._downloadFailed && self._verifiedHash != null)
+                    {
+                        var verifiedHash = self._verifiedHash;
+                        self._verifiedHash = null;
+                        self._filehash.emit('hash', verifiedHash);
+                    }
+                });
                 this._filehash.on('hash', function (h)
                 {
-                    if (updateoptions != null && updateoptions.hash != null)
+                    if (self._downloadFailed) { return; }
+                    if (updateoptions.hash.toLowerCase() == h.toString('hex').toLowerCase())
                     {
-                        if (updateoptions.hash.toLowerCase() == h.toString('hex').toLowerCase())
-                        {
-                            if (sessionid != null) { sendConsoleText('Download complete. HASH verified.', sessionid); }
-                        }
-                        else
-                        {
-                            agentUpdate_Start._retryCount++;
-                            sendConsoleText('Self Update FAILED because the downloaded agent FAILED hash check (' + agentUpdate_Start._retryCount + '), URL: ' + updateurl, sessionid);
-                            sendAgentMessage('Self Update FAILED because the downloaded agent FAILED hash check (' + agentUpdate_Start._retryCount + '), URL: ' + updateurl, 3);
-                            agentUpdate_Start._selfupdate = null;
-
-                            try
-                            {
-                                // We are clearing these two properties, becuase some older agents may not cleanup correctly causing problems with the retry
-                                require('https').globalAgent.sockets = {};
-                                require('https').globalAgent.requests = {};
-                            }
-                            catch(z)
-                            {}
-                            if (needStreamFix)
-                            {
-                                sendConsoleText('This is an older agent that may have an httpstream bug. On next retry will try to fetch the update differently...');
-                                needStreamFix = false;
-                            }
-
-                            if (agentUpdate_Start._retryCount < 4)
-                            {
-                                // Retry the download again
-                                sendConsoleText('Self Update will try again in 20 seconds...', sessionid);
-                                agentUpdate_Start._timeout = setTimeout(agentUpdate_Start, 20000, updateurl, updateoptions);
-                            }
-                            else
-                            {
-                                sendConsoleText('Self Update giving up, too many failures...', sessionid);
-                                sendAgentMessage('Self Update giving up, too many failures...', 3);
-                            }
-                            return;
-                        }
+                        if (sessionid != null) { sendConsoleText('Download complete. HASH verified.', sessionid); }
                     }
                     else
                     {
-                        sendConsoleText('Download complete. HASH=' + h.toString('hex'), sessionid);
+                        self._downloadFailed = true;
+                        agentUpdate_Start._retryCount++;
+                        sendConsoleText('Self Update FAILED because the downloaded agent FAILED hash check (' + agentUpdate_Start._retryCount + '), URL: ' + updateurl, sessionid);
+                        sendAgentMessage('Self Update FAILED because the downloaded agent FAILED hash check (' + agentUpdate_Start._retryCount + '), URL: ' + updateurl, 3);
+                        agentUpdate_Start._selfupdate = null;
+
+                        try
+                        {
+                            // We are clearing these two properties, becuase some older agents may not cleanup correctly causing problems with the retry
+                            require('https').globalAgent.sockets = {};
+                            require('https').globalAgent.requests = {};
+                        }
+                        catch(z)
+                        {}
+                        if (needStreamFix)
+                        {
+                            sendConsoleText('This is an older agent that may have an httpstream bug. On next retry will try to fetch the update differently...');
+                            needStreamFix = false;
+                        }
+
+                        if (agentUpdate_Start._retryCount < 4)
+                        {
+                            // Retry the download again
+                            sendConsoleText('Self Update will try again in 20 seconds...', sessionid);
+                            agentUpdate_Start._timeout = setTimeout(agentUpdate_Start, 20000, updateurl, updateoptions);
+                        }
+                        else
+                        {
+                            sendConsoleText('Self Update giving up, too many failures...', sessionid);
+                            sendAgentMessage('Self Update giving up, too many failures...', 3);
+                            agentUpdate_ReportFailure();
+                        }
+                        return;
                     }
+                    if (!self._fileClosed) { self._verifiedHash = h; return; }
 
                     // Send an indication to the server that we got the update download correctly.
                     try { require('MeshAgent').SendCommand({ action: 'agentupdatedownloaded' }); } catch (e) { }
@@ -635,24 +686,27 @@ function agentUpdate_Start(updateurl, updateoptions) {
                     {
                         sendConsoleText('Self Update disabled for this platform; native service lifecycle is required.', sessionid);
                         sendAgentMessage('Self Update disabled for this platform; native service lifecycle is required.', 3);
-                        try { require('fs').unlinkSync(process.cwd() + agentfilename + '.update'); } catch (zz) { }
+                        try { require('fs').unlinkSync(stagedUpdatePath); } catch (zz) { }
                         agentUpdate_Start._selfupdate = null;
+                        agentUpdate_ReportFailure();
                         return;
                     }
 
                     if (sessionid != null) { sendConsoleText('Updating and restarting agent...', sessionid); }
-                    var m = require('fs').statSync(process.execPath).mode;
-                    require('fs').chmodSync(process.cwd() + agentfilename + '.update', m);
-
-                    // remove binary
-                    require('fs').unlinkSync(process.execPath);
-
-                    // copy update
-                    require('fs').copyFileSync(process.cwd() + agentfilename + '.update', process.execPath);
-                    require('fs').chmodSync(process.execPath, m);
-
-                    // erase update
-                    require('fs').unlinkSync(process.cwd() + agentfilename + '.update');
+                    try
+                    {
+                        var m = require('fs').statSync(process.execPath).mode;
+                        require('fs').chmodSync(stagedUpdatePath, m);
+                        require('fs').renameSync(stagedUpdatePath, process.execPath);
+                    }
+                    catch (replaceError)
+                    {
+                        sendConsoleText('Self Update failed while atomically replacing the agent: ' + replaceError, sessionid);
+                        sendAgentMessage('Self Update failed while atomically replacing the agent.', 3);
+                        agentUpdate_Start._selfupdate = null;
+                        agentUpdate_ReportFailure();
+                        return;
+                    }
 
                     if (process.platform == 'freebsd')
                     {
@@ -1237,10 +1291,10 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 break;
             case 'agentupdateex':
                 // Perform an direct agent update without requesting any information from the server, this should not typically be used.
-                if (args['_'].length == 1) {
-                    if (args['_'][0].startsWith('https://')) { agentUpdate_Start(args['_'][0], { sessionid: sessionid }); } else { response = "Usage: agentupdateex https://server/path"; }
+                if (args['_'].length == 2) {
+                    if (args['_'][0].startsWith('https://') && /^[0-9a-f]{96}$/i.test(args['_'][1])) { agentUpdate_Start(args['_'][0], { sessionid: sessionid, hash: args['_'][1] }); } else { response = "Usage: agentupdateex https://server/path SHA384"; }
                 } else {
-                    agentUpdate_Start(null, { sessionid: sessionid });
+                    response = "Usage: agentupdateex https://server/path SHA384";
                 }
                 break;
             case 'eval':
