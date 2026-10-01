@@ -272,9 +272,16 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                 */
             }
             else if (cmdid == 12) { // MeshCommand_AgentHash
-                if ((msg.length == 52) && (obj.agentExeInfo != null) && (obj.agentExeInfo.update == true)) {
+                // A user-requested native update remains available when fleet
+                // automatic updates are disabled with noagentupdate. The
+                // pending flag is set only by the explicit agentupdate route.
+                if ((msg.length == 52) && (obj.agentExeInfo != null) &&
+                    ((obj.agentExeInfo.update == true) || (obj.agentUpdateRequestPending === true))) {
                     const agenthash = msg.substring(4);
                     const agentUpdateMethod = compareAgentBinaryHash(obj.agentExeInfo, agenthash);
+                    // The connection sequence sends command 12 in place of the core check (command 11).
+                    // An explicit request comes after that check, so a current agent needs no new one.
+                    const explicitUpdateRequest = (obj.agentUpdateRequestPending === true);
                     delete obj.agentUpdateRequestPending;
                     if (agentUpdateMethod === 2) { // Use meshcore agent update system
                         delete obj.agentUpdateTransferPending;
@@ -303,7 +310,14 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                                 // Read the agent from disk
                                 parent.fs.open(obj.agentExeInfo.path, 'r', function (err, fd) {
                                     if (obj.agentExeInfo == null) { if (fd != null) { try { parent.fs.close(fd); } catch (ex) { } } delete obj.agentUpdateTransferPending; parent.parent.taskLimiter.completed(taskid); return; } // Agent disconnected during this call.
-                                    if (err) { delete obj.agentUpdateTransferPending; parent.parent.taskLimiter.completed(taskid); parent.parent.debug('agentupdate', "ERROR: " + err); return console.error(err); }
+                                    if (err) {
+                                        delete obj.agentUpdateTransferPending;
+                                        parent.parent.taskLimiter.completed(taskid);
+                                        parent.parent.debug('agentupdate', "ERROR: " + err);
+                                        console.error(err);
+                                        restoreAgentCoreAfterUpdateFailure(); // Command 12 replaced the core check; run it now.
+                                        return;
+                                    }
                                     obj.agentUpdate = { ptr: 0, buf: Buffer.alloc(parent.parent.agentUpdateBlockSize + 4), fd: fd, taskid: taskid };
 
                                     // MeshCommand_CoreModule, ask mesh agent to clear the core.
@@ -388,7 +402,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                     } else {
                         delete obj.agentUpdateTransferPending;
                         // Check the mesh core, if the agent is capable of running one
-                        if (((obj.agentInfo.capabilities & 16) != 0) && (parent.parent.meshAgentsArchitectureNumbers[obj.agentInfo.agentId].core != null)) {
+                        if (!explicitUpdateRequest && ((obj.agentInfo.capabilities & 16) != 0) && (parent.parent.meshAgentsArchitectureNumbers[obj.agentInfo.agentId].core != null)) {
                             obj.sendBinary(common.ShortToStr(11) + common.ShortToStr(0)); // Command 11, ask for mesh core hash.
                         }
                     }
@@ -412,11 +426,12 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                                     delete obj.agentUpdateTransferPending;
                                     restoreAgentCoreAfterUpdateFailure();
                                 } else {
-                                    // Send the next block to the agent
+                                    // Send the next block to the agent. A zero-byte read is end of file, not a block.
                                     parent.parent.debug('agentupdate', "Sending disk agent #" + obj.agentExeInfo.id + " block, ptr=" + obj.agentUpdate.ptr + ", len=" + bytesRead + ".");
                                     obj.agentUpdate.ptr += bytesRead;
-                                    if (bytesRead == parent.parent.agentUpdateBlockSize) { obj.sendBinary(obj.agentUpdate.buf); } else { obj.sendBinary(obj.agentUpdate.buf.slice(0, bytesRead + 4)); } // Command 14, mesh agent next data block
-                                    if ((bytesRead < parent.parent.agentUpdateBlockSize) || (obj.agentUpdate.ptr == obj.agentExeInfo.size)) {
+                                    if (bytesRead == parent.parent.agentUpdateBlockSize) { obj.sendBinary(obj.agentUpdate.buf); } else if (bytesRead > 0) { obj.sendBinary(obj.agentUpdate.buf.slice(0, bytesRead + 4)); } // Command 14, mesh agent next data block
+                                    // End at end of file: the size recorded at startup can be stale.
+                                    if (bytesRead < parent.parent.agentUpdateBlockSize) {
                                         parent.parent.debug('agentupdate', "Completed agent #" + obj.agentExeInfo.id + " update from disk, ptr=" + obj.agentUpdate.ptr + ".");
                                         obj.sendBinary(common.ShortToStr(13) + common.ShortToStr(0) + obj.agentExeInfo.hash); // Command 13, end mesh agent download, send agent SHA384 hash
                                         try { parent.fs.close(obj.agentUpdate.fd); } catch (ex) { }
@@ -2212,6 +2227,8 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
     function compareAgentBinaryHash(agentExeInfo, agentHash) {
         // If this is a temporary agent and the server is set to not update temporary agents, don't update the agent.
         if ((obj.agentInfo.capabilities & 0x20) && (args.temporaryagentupdate === false)) return 0;
+        // An all-zero hash means the agent will ignore any transfer, so never start one, not even in test mode.
+        if (agentHash == '\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0') return 0;
         // If we are testing the agent update system, always return true
         if ((args.agentupdatetest === true) || (args.agentupdatetest === 1)) return 1;
         if (args.agentupdatetest === 2) return isWindowsAgentArchitecture(agentExeInfo.id) ? (isWindowsServiceAgentArchitecture(agentExeInfo.id) ? 1 : 0) : 2;
