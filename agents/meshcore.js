@@ -1289,7 +1289,7 @@ function tunnel_checkServerIdentity(certs)
     if ((tunnel_checkServerIdentity.servertlshash != null) && (tunnel_checkServerIdentity.servertlshash.toLowerCase() != certs[0].digest.split(':').join('').toLowerCase())) { throw new Error('BadCert') }
 }
 
-function tunnel_onError()
+function tunnel_onError(e)
 {
     sendConsoleText("ERROR: Unable to connect relay tunnel to: " + this.url + ", " + JSON.stringify(e));
 }

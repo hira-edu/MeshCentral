@@ -93,7 +93,13 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
     obj.viewerConnected = false;        // Set to true if one viewer attempted to connect to the agent.
     obj.recordingFile = null;           // Present if we are recording to file.
     obj.recordingFileSize = 0;          // Current size of the recording file.
-    obj.recordingFileWriting = false;   // Set to true is we are in the process if writing to the recording file.
+    obj.recordingFileWriting = false;   // Set to true when the recording write queue is backed up and the agent must be paused.
+    obj.recordingQueue = [];            // FIFO of recording blocks waiting to be written, written one at a time.
+    obj.recordingEntryWriting = false;  // Set to true while the recording block at the head of the queue is being written.
+    obj.agentLastRx = 0;                // Time we last received data from the agent.
+    obj.agentLastPing = null;           // Time we last sent a liveness ping to the agent.
+    obj.aloneSince = null;              // Time since the agent or viewers have been waiting without the other side.
+    obj.watchdogTimer = null;           // Agent liveness and session watchdog timer.
     obj.startTime = null;               // Starting time of the multiplex session.
     obj.userIds = [];                   // List of userid's that have intertracted with this session.
     //obj.autoLock = false;               // Automatically lock the remote device once disconnected
@@ -173,6 +179,9 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             }
 
             startRecording(domain, startRecord, function () {
+                // The viewer or the session may have gone away while the recording file was opening
+                if ((obj.viewers == null) || (obj.viewers.indexOf(peer) == -1)) return;
+
                 // Indicated we are connected
                 obj.sendToViewer(peer, obj.recordingFile ? 'cr' : 'c');
 
@@ -184,8 +193,10 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 
                 // Log joining the multiplex session
                 if (obj.startTime != null) {
-                    var event = { etype: 'relay', action: 'relaylog', domain: domain.id, nodeid: obj.nodeid, userid: peer.user ? peer.user._id : null, username: peer.user.name, msgid: 143, msgArgs: [obj.id], msg: "Joined desktop multiplex session \"" + obj.id + "\"", protocol: 2 };
-                    parent.parent.DispatchEvent(['*', obj.nodeid, peer.user._id, obj.meshid], obj, event);
+                    var event = { etype: 'relay', action: 'relaylog', domain: domain.id, nodeid: obj.nodeid, userid: peer.user ? peer.user._id : null, username: peer.user ? peer.user.name : null, msgid: 143, msgArgs: [obj.id], msg: "Joined desktop multiplex session \"" + obj.id + "\"", protocol: 2 };
+                    const targets = ['*', obj.nodeid, obj.meshid];
+                    if (peer.user != null) { targets.push(peer.user._id); }
+                    parent.parent.DispatchEvent(targets, obj, event);
                 }
 
                 // Send an updated list of all peers to all viewers
@@ -197,20 +208,43 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             });
         } else {
             //console.log('addPeer-agent', obj.nodeid);
-            if (obj.agent != null) { parent.parent.debug('relay', 'DesktopRelay: Error, duplicate agent connection'); return false; }
-            
+            var replacingAgent = false;
+            if (obj.agent != null) {
+                // A hung or half-open agent tunnel can't recover by itself. If the current agent has gone silent
+                // or has a write that is not completing, replace it with this new agent connection.
+                const now = Date.now();
+                const agentSilent = ((obj.agent.paused == false) && ((now - obj.agentLastRx) > 20000));
+                const agentStalled = ((obj.agent.sending == true) && ((now - obj.agent.sendStart) > 15000));
+                if ((agentSilent == false) && (agentStalled == false)) { parent.parent.debug('relay', 'DesktopRelay: Error, duplicate agent connection'); return false; }
+                parent.parent.debug('relay', 'DesktopRelay: Replacing unresponsive agent, silent=' + (now - obj.agentLastRx) + 'ms, stalled=' + agentStalled + ' node=' + obj.nodeid);
+                const oldAgent = obj.agent;
+                obj.agent = null;
+                delete oldAgent.deskMultiplexor; // Closing the old agent must not tear down this session.
+                hardClosePeer(oldAgent);
+                resetDisplayState();
+                replacingAgent = true;
+            }
+
             // Setup the agent
             obj.agent = peer;
             peer.sending = false;
             peer.overflow = false;
             peer.sendQueue = [];
             peer.paused = false;
+            obj.agentLastRx = Date.now();
+            obj.agentLastPing = null;
 
             // Indicated we are connected and send connection options and protocol if needed
             obj.sendToAgent(obj.recordingFile?'cr':'c');
             if (obj.viewerConnected == true) {
                 if (obj.protocolOptions != null) { obj.sendToAgent(JSON.stringify(obj.protocolOptions)); } // Send connection options
                 obj.sendToAgent('2'); // Send remote desktop connect
+            }
+
+            // A replacement agent starts fresh, send it the current aggregate viewer settings.
+            if (replacingAgent == true) {
+                sendAgentCompression();
+                sendAgentPause();
             }
         }
 
@@ -319,11 +353,14 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             delete peer.sendQueue;
             delete peer.startTime;
 
-            // If this is the last viewer, disconnect the agent
-            if ((obj.viewers != null) && (obj.viewers.length == 0) && (obj.agent != null)) { obj.agent.close(); dispose(); return true; }
+            // If this is the last viewer, disconnect the agent if present and dispose of this multiplexor
+            if ((obj.viewers != null) && (obj.viewers.length == 0)) { if (obj.agent != null) { obj.agent.close(); } dispose(); return true; }
 
             // A leaving viewer may have been holding the aggregate stream at a higher scale or frame rate.
             obj.recomputeViewerImageSettings();
+
+            // A leaving viewer may have been the only unpaused one.
+            updateAggregateDesktopPause();
 
             // Send an updated list of all peers to all viewers
             obj.sendSessionMetadata();
@@ -335,6 +372,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
     function dispose() {
         if (obj.viewers == null) return;
         //console.log('dispose', obj.nodeid);
+        if (obj.watchdogTimer != null) { clearInterval(obj.watchdogTimer); obj.watchdogTimer = null; }
         delete obj.viewers;
         delete obj.imagesCounters;
         delete obj.images;
@@ -378,6 +416,80 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         parent.parent.debug('relay', 'DesktopRelay: Disposing desktop multiplexor');
     }
 
+    // Dispose of this multiplexor if it has no agent and no viewers. Return true if disposed.
+    obj.disposeIfEmpty = function () {
+        if ((obj.viewers == null) || (obj.agent != null) || (obj.viewers.length > 0)) return false;
+        dispose();
+        return true;
+    }
+
+    // Hard close a peer. Run the normal close for cleanup, then destroy the socket since a graceful
+    // close can't complete on a half-open connection with a full send buffer.
+    function hardClosePeer(peer) {
+        const ws = peer.ws;
+        try { peer.close(); } catch (ex) { }
+        try { if ((ws != null) && (ws._socket != null)) { ws._socket.destroy(); } } catch (ex) { }
+    }
+
+    // Clear all display state so a replacement agent can start a new display stream.
+    function resetDisplayState() {
+        obj.width = 0;
+        obj.height = 0;
+        obj.swidth = 0;
+        obj.sheight = 0;
+        obj.screen = null;
+        obj.imagesCount = 0;
+        obj.imagesCounters = {};
+        obj.images = {};
+        obj.lastScreenSizeCmd = null;
+        obj.lastScreenSizeCounter = 0;
+        obj.firstData = null;
+        obj.lastData = null;
+        obj.viewersOverflowCount = 0;
+        for (var i in obj.viewers) {
+            const v = obj.viewers[i];
+            v.overflow = false;
+            v.dataPtr = null;
+            if (v.paused == true) { v.paused = false; try { v.ws._socket.resume(); } catch (ex) { } }
+        }
+    }
+
+    // Watchdog: hard close a hung agent, keep idle agents answering and close sessions where one side never arrived.
+    function sessionWatchdog() {
+        if (obj.viewers == null) return;
+        const now = Date.now();
+        const agent = obj.agent;
+
+        // An agent write that has not completed in 15 seconds means the tunnel is hung or half-open.
+        if ((agent != null) && (agent.sending == true) && ((now - agent.sendStart) > 15000)) {
+            parent.parent.debug('relay', 'DesktopRelay: Agent write stalled for ' + (now - agent.sendStart) + 'ms, hard closing agent node=' + obj.nodeid);
+            hardClosePeer(agent);
+            return;
+        }
+
+        // Ping a quiet agent so a healthy idle agent keeps answering and only a dead agent goes silent.
+        if ((agent != null) && (agent.sending == false) && (agent.paused == false) && ((now - obj.agentLastRx) > 10000) && ((obj.agentLastPing == null) || ((now - obj.agentLastPing) > 10000))) {
+            obj.agentLastPing = now;
+            obj.sendToAgent('{"ctrlChannel":"102938","type":"ping"}');
+        }
+
+        // Close the session if the agent or the viewers have been waiting alone for 60 seconds.
+        const alone = (((agent == null) && (obj.viewers.length > 0)) || ((agent != null) && (obj.viewers.length == 0)));
+        if (alone == false) { obj.aloneSince = null; }
+        else if (obj.aloneSince == null) { obj.aloneSince = now; }
+        else if ((now - obj.aloneSince) > 60000) {
+            parent.parent.debug('relay', 'DesktopRelay: ' + ((agent == null) ? 'Agent never connected' : 'No viewers') + ', closing session node=' + obj.nodeid);
+            if (agent != null) { agent.close(); } else { for (const viewer of obj.viewers.slice()) { viewer.close(); } }
+            return;
+        }
+
+        // A multiplexor with no peers at all is no longer needed.
+        if ((agent == null) && (obj.viewers.length == 0)) {
+            if (parent.desktoprelays[obj.nodeid] === obj) { delete parent.desktoprelays[obj.nodeid]; }
+            dispose();
+        }
+    }
+
     // Send data to the agent or queue it up for sending
     obj.sendToAgent = function (data) {
         if ((obj.viewers == null) || (obj.agent == null)) return;
@@ -395,8 +507,10 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 }
             }
         } else {
-            obj.agent.sending = true;
-            obj.agent.ws.send(data, sendAgentNext);
+            const agent = obj.agent;
+            agent.sending = true;
+            agent.sendStart = Date.now();
+            agent.ws.send(data, function () { sendAgentNext(agent); });
         }
     }
 
@@ -420,23 +534,50 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             obj.imageScaling = viewersimageScaling;
             obj.imageFrameRate = viewersimageFrameRate;
             //console.log('Send-Agent-Compression', obj.imageType, obj.imageCompression, obj.imageScaling, obj.imageFrameRate);
-            var cmd = Buffer.alloc(10);
-            cmd.writeUInt16BE(5, 0); // Command 5, compression
-            cmd.writeUInt16BE(10, 2); // Command size, 10 bytes long
-            cmd[4] = obj.imageType; // Image type: 1 = JPEG, 2 = PNG, 3 = TIFF, 4 = WebP
-            cmd[5] = obj.imageCompression; // Image compression level
-            cmd.writeUInt16BE(obj.imageScaling, 6); // Scaling level
-            cmd.writeUInt16BE(obj.imageFrameRate, 8); // Frame rate timer
-            obj.sendToAgent(cmd);
+            sendAgentCompression();
+        }
+    }
+
+    // Send the current aggregate image settings to the agent
+    function sendAgentCompression() {
+        var cmd = Buffer.alloc(10);
+        cmd.writeUInt16BE(5, 0); // Command 5, compression
+        cmd.writeUInt16BE(10, 2); // Command size, 10 bytes long
+        cmd[4] = obj.imageType; // Image type: 1 = JPEG, 2 = PNG, 3 = TIFF, 4 = WebP
+        cmd[5] = obj.imageCompression; // Image compression level
+        cmd.writeUInt16BE(obj.imageScaling, 6); // Scaling level
+        cmd.writeUInt16BE(obj.imageFrameRate, 8); // Frame rate timer
+        obj.sendToAgent(cmd);
+    }
+
+    // Send the current aggregate desktop pause state to the agent
+    function sendAgentPause() {
+        var cmd = Buffer.alloc(5);
+        cmd.writeUInt16BE(8, 0); // Command 8, pause
+        cmd.writeUInt16BE(5, 2); // Command size, 5 bytes long
+        cmd[4] = (obj.desktopPaused == true) ? 1 : 0; // 0 = Unpause, 1 = Pause
+        obj.sendToAgent(cmd);
+    }
+
+    // The agent is paused only if all viewers are paused. Recompute after any viewer pause or membership change.
+    function updateAggregateDesktopPause() {
+        if ((obj.viewers == null) || (obj.viewers.length == 0)) return;
+        var viewersPaused = true;
+        for (var i in obj.viewers) { if (obj.viewers[i].desktopPaused == false) { viewersPaused = false; }; }
+        if (viewersPaused != obj.desktopPaused) {
+            obj.desktopPaused = viewersPaused;
+            //console.log('Send-Agent-' + ((viewersPaused == true) ? 'Pause' : 'UnPause'));
+            sendAgentPause();
         }
     }
 
     // Send more data to the agent
-    function sendAgentNext() {
-        if ((obj.viewers == null) || (obj.agent == null)) return;
+    function sendAgentNext(agent) {
+        if ((obj.viewers == null) || (obj.agent == null) || (obj.agent !== agent)) return; // Ignore write completions from a replaced agent
         if (obj.agent.sendQueue.length > 0) {
             // Send from the pending send queue
-            obj.agent.ws.send(obj.agent.sendQueue.shift(), sendAgentNext);
+            obj.agent.sendStart = Date.now();
+            obj.agent.ws.send(obj.agent.sendQueue.shift(), function () { sendAgentNext(agent); });
         } else {
             // Nothing to send
             obj.agent.sending = false;
@@ -492,9 +633,18 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
 
     // Send data to the viewer or queue it up for sending
     obj.sendToViewer = function (viewer, data) {
-        if ((viewer == null) || (obj.viewers == null)) return;
+        if ((viewer == null) || (obj.viewers == null) || (viewer.sendQueue == null)) return;
         //console.log('SendToViewer', data.length);
         if (viewer.sending) {
+            if (viewer.sendQueue.length >= 1000) {
+                // This viewer is not draining its queue, drop it. Close later since callers may be iterating the viewers.
+                if (viewer.sendQueueClosing != true) {
+                    viewer.sendQueueClosing = true;
+                    parent.parent.debug('relay', 'DesktopRelay: Closing viewer, send backlog=' + viewer.sendQueue.length + ' node=' + obj.nodeid);
+                    setImmediate(function () { try { viewer.close(); } catch (ex) { } });
+                }
+                return;
+            }
             viewer.sendQueue.push(data);
         } else {
             viewer.sending = true;
@@ -509,21 +659,22 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         }
     }
 
-    // The producer follows the fastest remaining viewer. A recording write
-    // still owns its pause until its completion callback releases it.
+    // The producer follows the fastest remaining viewer. A backed up recording
+    // write queue also pauses the agent until the queue is drained.
     function updateAgentFlowControl() {
         if ((obj.viewers == null) || (obj.viewers.length == 0) || (obj.agent == null)) return;
-        if (obj.viewersOverflowCount >= obj.viewers.length) {
+        if ((obj.viewersOverflowCount >= obj.viewers.length) || (obj.recordingFileWriting == true)) {
             if (obj.agent.paused == false) { obj.agent.paused = true; obj.agent.ws._socket.pause(); }
-        } else if ((obj.recordingFileWriting == false) && (obj.agent.paused == true)) {
+        } else if (obj.agent.paused == true) {
             obj.agent.paused = false;
             obj.agent.ws._socket.resume();
+            obj.agentLastRx = Date.now(); // The agent could not be heard while paused, restart the silence timer.
         }
     }
 
     // Check if a viewer is in overflow situation
     function checkViewerOverflow(viewer) {
-        if ((viewer.overflow == true) || (obj.viewers == null)) return;
+        if ((viewer.overflow == true) || (obj.viewers == null) || (viewer.sendQueue == null)) return;
         if ((viewer.sendQueue.length > 5) || ((viewer.dataPtr != null) && (viewer.dataPtr != obj.lastData))) {
             viewer.overflow = true;
             obj.viewersOverflowCount++;
@@ -533,7 +684,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
 
     // Check if a viewer is in underflow situation
     function checkViewerUnderflow(viewer) {
-        if ((viewer.overflow == false) || (obj.viewers == null)) return;
+        if ((viewer.overflow == false) || (obj.viewers == null) || (viewer.sendQueue == null)) return;
         if ((viewer.sendQueue.length <= 5) && ((viewer.dataPtr == null) || (viewer.dataPtr == obj.lastData))) {
             viewer.overflow = false;
             obj.viewersOverflowCount--;
@@ -558,6 +709,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 // Send the next image
                 //if ((viewer.lastImageNumberSent != null) && ((viewer.lastImageNumberSent + 1) != (viewer.dataPtr))) { console.log('SVIEW-S1', viewer.lastImageNumberSent, viewer.dataPtr); } // DEBUG
                 var image = obj.images[viewer.dataPtr];
+                if (image == null) { viewer.dataPtr = null; viewer.sending = false; checkViewerUnderflow(viewer); return; } // Image is gone, wait for new data.
                 viewer.lastImageNumberSent = viewer.dataPtr;
                 //if ((image.next != null) && ((viewer.dataPtr + 1) != image.next)) { console.log('SVIEW-S2', viewer.dataPtr, image.next); } // DEBUG
                 viewer.dataPtr = image.next;
@@ -584,13 +736,9 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
     obj.processData = function (peer, data) {
         if (obj.viewers == null) return;
         if (peer == obj.agent) {
-            obj.recordingFileWriting = true;
-            recordData(true, data, function () {
-                if (obj.viewers == null) return;
-                obj.recordingFileWriting = false;
-                updateAgentFlowControl();
-                obj.processAgentData(data);
-            });
+            obj.agentLastRx = Date.now();
+            recordData(true, data); // Queued in order, the agent is paused if the recording queue backs up
+            obj.processAgentData(data);
         } else {
             obj.processViewerData(peer, data);
         }
@@ -645,6 +793,8 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 break;
             case 6: // Refresh, handle this on the server
                 //console.log('Viewer-Refresh');
+                // Replay the cache to this viewer, and also ask the live agent: a refresh is how a user repairs a
+                // stale or corrupted screen, which the server cache alone cannot fix.
                 viewer.dataPtr = obj.firstData; // Start over
                 if (viewer.sending == false) { sendViewerNext(viewer); }
                 if (obj.agent != null) { obj.sendToAgent(data); }
@@ -655,14 +805,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 if (viewer.desktopPaused == (pause == 1)) break;
                 viewer.desktopPaused = (pause == 1);
                 //console.log('Viewer-' + ((pause == 1)?'Pause':'UnPause'));
-                var viewersPaused = true;
-                for (var i in obj.viewers) { if (obj.viewers[i].desktopPaused == false) { viewersPaused = false; }; }
-                if (viewersPaused != obj.desktopPaused) {
-                    obj.desktopPaused = viewersPaused;
-                    //console.log('Send-Agent-' + ((viewersPaused == true) ? 'Pause' : 'UnPause'));
-                    data[4] = (viewersPaused == true) ? 1 : 0;
-                    obj.sendToAgent(data);
-                }
+                updateAggregateDesktopPause();
                 break;
             case 10: // CTRL-ALT-DEL, forward to agent
                 if (viewer.viewOnly == false) { obj.sendToAgent(data); }
@@ -673,7 +816,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             case 14: // Touch setup
                 break;
             case 82: // Request display information
-                if (obj.lastDisplayLocationData != null) { obj.sendToAgent(obj.lastDisplayLocationData); }
+                if (obj.lastDisplayLocationData != null) { obj.sendToViewer(viewer, obj.lastDisplayLocationData); }
                 break;
             case 85: // Unicode Key Events, forward to agent
                 if (viewer.viewOnly == false) { obj.sendToAgent(data); }
@@ -725,23 +868,30 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             case 3: // Tile, check dimentions and store
                 if ((data.length < 10) || (obj.lastData == null)) break;
                 var x = data.readUInt16BE(4), y = data.readUInt16BE(6);
-                var dimensions = require('image-size').imageSize(data.slice(8));
+                var dimensions = null;
+                try { dimensions = require('image-size').imageSize(data.slice(8)); } catch (ex) { }
+                if ((dimensions == null) || (typeof dimensions.width != 'number') || (typeof dimensions.height != 'number')) { parent.parent.debug('relay', 'DesktopRelay: Dropping unreadable tile node=' + obj.nodeid); break; }
                 var sx = (x / 16), sy = (y / 16), sw = (dimensions.width / 16), sh = (dimensions.height / 16);
+
+                // Count only the tile slots that are inside the screen, slots past the edge would wrap to the next row.
+                var slotCount = 0;
+                for (var i = 0; (i < sw) && ((i + sx) < obj.swidth); i++) { for (var j = 0; (j < sh) && ((j + sy) < obj.sheight); j++) { slotCount++; } }
+                if (slotCount == 0) break; // This tile is entirely outside the screen
                 obj.counter++;
-                
+
                 // Keep a reference to this image & how many tiles it covers
                 obj.images[obj.counter] = { next: null, prev: obj.lastData, data: jumboData };
                 obj.images[obj.lastData].next = obj.counter;
                 obj.lastData = obj.counter;
-                obj.imagesCounters[obj.counter] = (sw * sh);
+                obj.imagesCounters[obj.counter] = slotCount;
                 obj.imagesCount++;
                 if (obj.imagesCount == 2000000000) { obj.imagesCount = 1; } // Loop the counter if needed
 
                 //console.log('Adding Image ' + obj.counter, x, y, dimensions.width, dimensions.height);
 
                 // Update the screen with the correct pointers.
-                for (var i = 0; i < sw; i++) {
-                    for (var j = 0; j < sh; j++) {
+                for (var i = 0; (i < sw) && ((i + sx) < obj.swidth); i++) { // Skip slots outside the screen
+                    for (var j = 0; (j < sh) && ((j + sy) < obj.sheight); j++) {
                         var k = ((obj.swidth * (j + sy)) + (i + sx));
                         const oi = obj.screen[k];
                         obj.screen[k] = obj.counter;
@@ -911,18 +1061,21 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
     }
 
     // Record data to the recording file
-    function recordData(isAgent, data, func) {
+    function recordData(isAgent, data) {
         try {
             if (obj.recordingFile != null) {
-                // Write data to recording file
-                recordingEntry(obj.recordingFile.fd, 2, (isAgent ? 0 : 2), data, function () { func(data); });
-            } else {
-                func(data);
+                // Queue data for the recording file
+                recordingEntry(obj.recordingFile.fd, 2, (isAgent ? 0 : 2), data, null);
+
+                // Flow control, pause the agent if the recording file can't keep up
+                if (obj.recordingQueue.length > 64) { obj.recordingFileWriting = true; updateAgentFlowControl(); }
             }
+            // A drained (or absent) recording queue never holds the agent paused.
+            if ((obj.recordingFileWriting == true) && (obj.recordingQueue.length == 0)) { obj.recordingFileWriting = false; updateAgentFlowControl(); }
         } catch (ex) { console.log(ex); }
     }
 
-    // Record a new entry in a recording log
+    // Record a new entry in a recording log. Entries are queued and written one at a time to keep them in order.
     function recordingEntry(fd, type, flags, data, func, tag) {
         try {
             if (typeof data == 'string') {
@@ -933,7 +1086,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 header.writeInt32BE(blockData.length, 4); // Size
                 header.writeIntBE(new Date(), 10, 6); // Time
                 var block = Buffer.concat([header, blockData]);
-                parent.parent.fs.write(fd, block, 0, block.length, function () { func(fd, tag); });
+                obj.recordingQueue.push({ fd: fd, block: block, offset: 0, func: func, tag: tag });
                 obj.recordingFileSize += block.length;
             } else {
                 // Binary write
@@ -943,10 +1096,39 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 header.writeInt32BE(data.length, 4); // Size
                 header.writeIntBE(new Date(), 10, 6); // Time
                 var block = Buffer.concat([header, data]);
-                parent.parent.fs.write(fd, block, 0, block.length, function () { func(fd, tag); });
+                obj.recordingQueue.push({ fd: fd, block: block, offset: 0, func: func, tag: tag });
                 obj.recordingFileSize += block.length;
             }
-        } catch (ex) { console.log(ex); func(fd, tag); }
+        } catch (ex) { console.log(ex); if (func) { func(fd, tag); } return; }
+        writeNextRecordingEntry();
+    }
+
+    // Write the next queued recording entry, only one write is in flight at any time.
+    function writeNextRecordingEntry() {
+        if ((obj.recordingEntryWriting == true) || (obj.recordingQueue.length == 0)) return;
+        obj.recordingEntryWriting = true;
+        const entry = obj.recordingQueue[0];
+        try {
+            parent.parent.fs.write(entry.fd, entry.block, entry.offset, entry.block.length - entry.offset, onRecordingEntryWritten);
+        } catch (ex) {
+            console.log(ex);
+            onRecordingEntryWritten(ex, 0);
+        }
+        function onRecordingEntryWritten(err, written) {
+            obj.recordingEntryWriting = false;
+            if ((err == null) && (typeof written == 'number') && (written > 0) && ((entry.offset + written) < entry.block.length)) {
+                // Partial write, write the rest of this entry
+                entry.offset += written;
+            } else {
+                if (err != null) { parent.parent.debug('relay', 'DesktopRelay: Recording write error: ' + err); }
+                obj.recordingQueue.shift();
+                if (entry.func) { entry.func(entry.fd, entry.tag); }
+
+                // Flow control, resume the agent once the recording queue is drained
+                if ((obj.recordingFileWriting == true) && (obj.recordingQueue.length == 0)) { obj.recordingFileWriting = false; updateAgentFlowControl(); }
+            }
+            writeNextRecordingEntry();
+        }
     }
 
     // If there is a recording quota, remove any old recordings if needed
@@ -992,6 +1174,8 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         obj.meshid = nodes[0].meshid;
         obj.icon = nodes[0].icon;
         obj.name = nodes[0].name;
+        obj.watchdogTimer = setInterval(sessionWatchdog, 5000);
+        if (typeof obj.watchdogTimer.unref == 'function') { obj.watchdogTimer.unref(); } // The watchdog alone must not keep the process alive
         recordingSetup(domain, function () { func(obj); });
     });
     return obj;
@@ -1213,7 +1397,7 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
     }
 
     function performRelay(retryCount) {
-        if ((obj.id == null) || (retryCount > 20)) { try { obj.close(); } catch (e) { } return null; } // Attempt to connect without id, drop this.
+        if ((obj.id == null) || (retryCount > 200)) { try { obj.close(); } catch (e) { } return null; } // Attempt to connect without id, or the multiplexor was not created within 10 seconds, drop this.
         if (retryCount == 0) { ws._socket.setKeepAlive(true, 240000); } // Set TCP keep alive
 
         /*
@@ -1240,18 +1424,24 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
         // Create if needed and add this peer to the desktop multiplexor
         obj.deskMultiplexor = parent.desktoprelays[obj.nodeid];
         if (obj.deskMultiplexor == null) {
-            parent.desktoprelays[obj.nodeid] = 1; // Indicate that the creating of the desktop multiplexor is pending.
+            const relayNodeId = obj.nodeid;
+            parent.desktoprelays[relayNodeId] = 1; // Indicate that the creating of the desktop multiplexor is pending.
             parent.parent.debug('relay', 'DesktopRelay: Creating new desktop multiplexor');
-            CreateDesktopMultiplexor(parent, domain, obj.nodeid, obj.id, function (deskMultiplexor) {
+            CreateDesktopMultiplexor(parent, domain, relayNodeId, obj.id, function (deskMultiplexor) {
                 if (deskMultiplexor != null) {
                     // Desktop multiplexor was created, use it.
                     obj.deskMultiplexor = deskMultiplexor;
-                    parent.desktoprelays[obj.nodeid] = obj.deskMultiplexor;
-                    if (obj.deskMultiplexor.addPeer(obj) === false) { obj.close(); return; }
+                    parent.desktoprelays[relayNodeId] = deskMultiplexor;
+                    const added = deskMultiplexor.addPeer(obj);
+
+                    // If this peer closed while the multiplexor was being created, don't leave an empty multiplexor behind.
+                    if (deskMultiplexor.disposeIfEmpty() == true) { if (parent.desktoprelays[relayNodeId] === deskMultiplexor) { delete parent.desktoprelays[relayNodeId]; } }
+                    if (added === false) { obj.close(); return; }
+                    if (obj.ws == null) return; // This peer was closed
                     ws._socket.resume(); // Release the traffic
                 } else {
                     // An error has occured, close this connection
-                    delete parent.desktoprelays[obj.nodeid];
+                    delete parent.desktoprelays[relayNodeId];
                     ws.close();
                 }
             });
@@ -1283,7 +1473,7 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
     ws.on('error', function (err) {
         //console.log('ws-error', err);
         parent.relaySessionErrorCount++;
-        console.log('Relay error from ' + obj.req.clientIp + ', ' + err.toString().split('\r')[0] + '.');
+        console.log('Relay error from ' + ((obj.req != null) ? obj.req.clientIp : 'closed relay') + ', ' + err.toString().split('\r')[0] + '.');
         obj.close();
     });
 
