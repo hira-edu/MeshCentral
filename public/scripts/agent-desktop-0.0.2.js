@@ -277,13 +277,11 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
                 obj.ProcessPictureMsg(view.slice(4), X, Y);
                 break;
             case 7: // Screen size
+                // Release only keys this viewer pressed, before ProcessScreenMsg
+                // clears their tracking. Unsolicited modifier releases on connect
+                // are real OS input and can dismiss the lock screen or change focus.
+                obj.handleReleaseKeys();
                 obj.ProcessScreenMsg(X, Y);
-                obj.SendKeyMsgKC(obj.KeyAction.UP, 16); // Shift
-                obj.SendKeyMsgKC(obj.KeyAction.UP, 17); // Ctrl
-                obj.SendKeyMsgKC(obj.KeyAction.UP, 18); // Alt
-                obj.SendKeyMsgKC(obj.KeyAction.UP, 91); // Left-Windows
-                obj.SendKeyMsgKC(obj.KeyAction.UP, 92); // Right-Windows
-                obj.SendKeyMsgKC(obj.KeyAction.UP, 16); // Shift
                 obj.send(String.fromCharCode(0x00, 0x0E, 0x00, 0x04));
                 break;
             case 11: // GetDisplays (TODO)
