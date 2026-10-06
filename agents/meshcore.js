@@ -1396,7 +1396,7 @@ function handleServerCommand(data) {
 
                                     // Log tunnel disconnection
                                     var xusername = data.xuserid.split('/')[2];
-                                    if (data.guestname != null) { xusername += '/' + guestname; }
+                                    if (data.guestname != null) { xusername += '/' + data.guestname; }
                                     MeshServerLogEx(msgid, [xusername], "Forcibly disconnected session of user: " + xusername, data);
                                 }
                             }
@@ -3180,7 +3180,7 @@ function kvm_consentpromise_resolved(always)
             if (this.ws.httprequest.soptions.notifyTitle != null) { notifyTitle = this.ws.httprequest.soptions.notifyTitle; }
             if (this.ws.httprequest.soptions.notifyMsgDesktop != null) { notifyMessage = this.ws.httprequest.soptions.notifyMsgDesktop.replace(/\{0\}/g, this.ws.httprequest.realname).replace(/\{1\}/g, this.ws.httprequest.username); }
         }
-        try { require('toaster').Toast(notifyTitle, notifyMessage, tsid); } catch (ex) { }
+        try { require('toaster').Toast(notifyTitle, notifyMessage, this.ws.tsid); } catch (ex) { }
     }
     if (this.ws.httprequest.consent && (this.ws.httprequest.consent & 0x40))
     {

@@ -1026,11 +1026,14 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 func(false);
                 return;
             }
+            // The session was disposed while the file was opening, don't leave an open descriptor behind.
+            if (obj.viewers == null) { try { parent.parent.fs.close(fd); } catch (ex) { } func(false); return; }
             // Write the recording file header
             parent.parent.debug('relay', 'Relay: Started recording to file: ' + recFullFilename);
             var metadata = { magic: 'MeshCentralRelaySession', ver: 1, nodeid: obj.nodeid, meshid: obj.meshid, time: new Date().toLocaleString(), protocol: 2, devicename: obj.name, devicegroup: obj.meshname };
             var firstBlock = JSON.stringify(metadata);
             recordingEntry(fd, 1, 0, firstBlock, function () {
+                if (obj.viewers == null) { try { parent.parent.fs.close(fd); } catch (ex) { } func(false); return; } // Session ended during the header write
                 obj.recordingFile = { fd: fd, filename: recFullFilename };
                 obj.recordingFileWriting = false;
                 func(true);
@@ -1309,7 +1312,8 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
         if ((arg == 1) || (arg == null)) { try { ws.close(); parent.parent.debug('relay', 'DesktopRelay: Soft disconnect (' + obj.req.clientIp + ')'); } catch (e) { console.log(e); } } // Soft close, close the websocket
         if (arg == 2) { try { ws._socket._parent.end(); parent.parent.debug('relay', 'DesktopRelay: Hard disconnect (' + obj.req.clientIp + ')'); } catch (e) { console.log(e); } } // Hard close, close the TCP socket
         if (obj.relaySessionCounted) { parent.relaySessionCount--; delete obj.relaySessionCounted; }
-        if ((obj.deskMultiplexor != null) && (typeof obj.deskMultiplexor == 'object') && (obj.deskMultiplexor.removePeer(obj) == true)) { delete parent.desktoprelays[obj.nodeid]; }
+        // Only remove the table entry if it is still ours, a newer multiplexor for this node must survive.
+        if ((obj.deskMultiplexor != null) && (typeof obj.deskMultiplexor == 'object') && (obj.deskMultiplexor.removePeer(obj) == true) && (parent.desktoprelays[obj.nodeid] === obj.deskMultiplexor)) { delete parent.desktoprelays[obj.nodeid]; }
 
         // Aggressive cleanup
         delete obj.id;
@@ -1318,6 +1322,7 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
         delete obj.user;
         delete obj.nodeid;
         delete obj.ruserid;
+        if (obj.expireTimer != null) { clearTimeout(obj.expireTimer); } // Don't leave the cookie expire timer holding this object alive
         delete obj.expireTimer;
         delete obj.deskMultiplexor;
 
@@ -1397,7 +1402,11 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
     }
 
     function performRelay(retryCount) {
-        if ((obj.id == null) || (retryCount > 200)) { try { obj.close(); } catch (e) { } return null; } // Attempt to connect without id, or the multiplexor was not created within 10 seconds, drop this.
+        if ((obj.id == null) || (retryCount > 200)) { // Attempt to connect without id, or the multiplexor was not created within 10 seconds, drop this.
+            // A creation that never completed must not block this node forever, let the next connection try again.
+            if ((retryCount > 200) && (parent.desktoprelays[obj.nodeid] === 1)) { parent.parent.debug('relay', 'DesktopRelay: Releasing stale pending multiplexor for node ' + obj.nodeid); delete parent.desktoprelays[obj.nodeid]; }
+            try { obj.close(); } catch (e) { } return null;
+        }
         if (retryCount == 0) { ws._socket.setKeepAlive(true, 240000); } // Set TCP keep alive
 
         /*
@@ -1429,6 +1438,14 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
             parent.parent.debug('relay', 'DesktopRelay: Creating new desktop multiplexor');
             CreateDesktopMultiplexor(parent, domain, relayNodeId, obj.id, function (deskMultiplexor) {
                 if (deskMultiplexor != null) {
+                    if (parent.desktoprelays[relayNodeId] !== 1) {
+                        // Creation took so long that the pending marker was released, this node may already have a newer multiplexor. Don't replace it.
+                        parent.parent.debug('relay', 'DesktopRelay: Discarding late desktop multiplexor for node ' + relayNodeId);
+                        deskMultiplexor.disposeIfEmpty();
+                        obj.close();
+                        return;
+                    }
+
                     // Desktop multiplexor was created, use it.
                     obj.deskMultiplexor = deskMultiplexor;
                     parent.desktoprelays[relayNodeId] = deskMultiplexor;
@@ -1465,8 +1482,8 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
         this._socket.bytesReadEx = this._socket.bytesRead;
         this._socket.bytesWrittenEx = this._socket.bytesWritten;
 
-        // If this data was received by the agent, decode it.
-        if (this.me.deskMultiplexor != null) { this.me.deskMultiplexor.processData(this.me, data); }
+        // If this data was received by the agent, decode it. While creation is pending, deskMultiplexor is the number 1, not a multiplexor.
+        if ((this.me.deskMultiplexor != null) && (typeof this.me.deskMultiplexor == 'object')) { this.me.deskMultiplexor.processData(this.me, data); }
     });
 
     // If error, close both sides of the relay.
