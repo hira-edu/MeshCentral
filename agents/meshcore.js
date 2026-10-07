@@ -1,3 +1,29 @@
+// Windows Files actions execute inside the native agent; never a command shell.
+function nativeFileAction(socket, cmd) {
+    var request = socket.httprequest || {}, rights = request.rights;
+    var result = { ok: false, error: 'Access denied.' };
+    var deleting = cmd.action == 'delete';
+    if (typeof rights == 'number' && (rights == 0xFFFFFFFF ||
+        ((rights & 8) != 0 && (rights & 1024) == 0 && (deleting || (rights & 131072) != 0)))) {
+        if (process.platform != 'win32') { result.error = 'Native Windows file actions are unavailable.'; }
+        else if (typeof cmd.path != 'string' || cmd.path.length == 0 ||
+            (cmd.action == 'execute' && typeof cmd.privileged != 'boolean')) { result.error = 'Invalid file action.'; }
+        else {
+            try {
+                var agent = require('MeshAgent');
+                if (typeof agent.fileAction != 'function') { result.error = 'Update the agent to enable native file actions.'; }
+                else { result = agent.fileAction(cmd.action, cmd.path, deleting ? cmd.rec === true : cmd.action == 'execute' && cmd.privileged === true); }
+            } catch (ex) { result = { ok: false, error: String(ex) }; }
+        }
+    }
+    result.action = 'fileaction'; result.operation = cmd.action; result.reqid = cmd.reqid;
+    try { socket.write(Buffer.from(JSON.stringify(result))); } catch (ex) { }
+    var message = 'Native file ' + cmd.action + ': ' + cmd.path + ' ' + JSON.stringify(result);
+    try { sendConsoleText(message, request.sessionid); } catch (ex) { }
+    if (typeof MeshServerLogEx == 'function') { MeshServerLogEx(20, [cmd.path], message, request); }
+    return result;
+}
+
 /*
 Copyright 2018-2022 Intel Corporation
 
@@ -1443,9 +1469,11 @@ function handleServerCommand(data) {
                     case 'ps': {
                         // Return the list of running processes
                         if (data.sessionid) {
-                            processManager.getProcesses(function (plist) {
+                            try { processManager.getProcesses(function (plist) {
                                 mesh.SendCommand({ action: 'msg', type: 'ps', value: JSON.stringify(plist), sessionid: data.sessionid });
-                            });
+                            }); } catch (error) {
+                                mesh.SendCommand({ action: 'msg', type: 'ps', value: '{}', error: error.toString(), sessionid: data.sessionid });
+                            }
                         }
                         break;
                     }
@@ -1496,8 +1524,9 @@ function handleServerCommand(data) {
                     }
                     case 'service': {
                         // return information about the service
+                        var service = null;
                         try {
-                            var service = require('service-manager').manager.getService(data.serviceName);
+                            service = require('service-manager').manager.getService(data.serviceName);
                             if (service != null) {
                                 var reply = {
                                     name: (service.name ? service.name : ''),
@@ -1508,31 +1537,24 @@ function handleServerCommand(data) {
                                     installedBy: (service.installedBy ? service.installedBy : '') ,
                                     user: (service.user ? service.user : '')
                                 };
-                                if(reply.installedBy.indexOf('S-1-5') != -1) {
-                                    var cmd = "(Get-WmiObject -Class win32_userAccount -Filter \"SID='"+service.installedBy+"'\").Caption";
-                                    var replydata = "";
-                                    var pws = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], {});
-                                    pws.descriptorMetadata = 'UserSIDPowerShell';
-                                    pws.stdout.on('data', function (c) { replydata += c.toString(); });
-                                    pws.stderr.on('data', function (c) { replydata += c.toString(); });
-                                    pws.stdin.write(cmd + '\r\nexit\r\n');
-                                    pws.on('exit', function () {
-                                        if (replydata != "") reply.installedBy = replydata;
-                                        mesh.SendCommand({ action: 'msg', type: 'service', value: JSON.stringify(reply), sessionid: data.sessionid });
-                                        delete pws;
-                                    });
-                                } else {
-                                    mesh.SendCommand({ action: 'msg', type: 'service', value: JSON.stringify(reply), sessionid: data.sessionid });
+                                if (reply.installedBy.indexOf('S-1-') == 0) {
+                                    try { reply.installedBy = require('user-sessions').getAccountName(reply.installedBy); } catch (lookupError) { } // Keep the authoritative SID if the account was removed.
                                 }
+                                mesh.SendCommand({ action: 'msg', type: 'service', value: JSON.stringify(reply), sessionid: data.sessionid });
                             }
                         } catch (ex) { 
-                            mesh.SendCommand({ action: 'msg', type: 'service', error: ex, sessionid: data.sessionid })
+                            mesh.SendCommand({ action: 'msg', type: 'service', error: ex.toString(), sessionid: data.sessionid });
+                        } finally {
+                            if (service != null && typeof service.close == 'function') { service.close(); }
                         }
+                        break;
                     }
                     case 'services': {
                         // Return the list of installed services
                         var services = null;
-                        try { services = require('service-manager').manager.enumerateService(); } catch (ex) { }
+                        try { services = require('service-manager').manager.enumerateService(); } catch (ex) {
+                            mesh.SendCommand({ action: 'msg', type: 'services', value: '[]', error: ex.toString(), sessionid: data.sessionid });
+                        }
                         if (services != null) { mesh.SendCommand({ action: 'msg', type: 'services', value: JSON.stringify(services), sessionid: data.sessionid }); }
                         break;
                     }
@@ -2681,6 +2703,14 @@ function terminal_promise_connection_resolved(term)
         this.ws.httprequest._term = term;
         this.ws.httprequest._term.tunnel = this.ws;
         stdoutstream = stdinstream = term;
+        term.on('error', function (error) {
+            var tunnel = this.tunnel;
+            if (tunnel != null) {
+                tunnel.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: error.toString(), msgid: 2 }));
+                tunnel.end();
+            }
+        });
+        term.on('close', function () { if (this.tunnel != null) { this.tunnel.end(); } });
     }
     else
     {
@@ -3761,9 +3791,17 @@ function onTunnelData(data)
                     MeshServerLogEx(164, [cmd.path], "Create file: \"" + cmd.path + "\"", this.httprequest);
                     break;
                 }
+                case 'execute': { nativeFileAction(this, cmd); break; }
                 case 'rm': {
                     // Delete, possibly recursive delete
+                    if (!Array.isArray(cmd.delfiles)) { break; }
                     for (var i in cmd.delfiles) {
+                        if (typeof cmd.delfiles[i] != 'string' || !cmd.delfiles[i] || cmd.delfiles[i] == '.' || cmd.delfiles[i] == '..' || /[\\/:\x00]/.test(cmd.delfiles[i])) { continue; }
+                        if (process.platform == 'win32') {
+                            nativeFileAction(this, { action: 'delete', reqid: cmd.reqid, path: require('path').join(cmd.path, cmd.delfiles[i]), rec: cmd.rec });
+                            continue;
+                        }
+
                         var p = obj.path.join(cmd.path, cmd.delfiles[i]), delcount = 0;
                         try { delcount = deleteFolderRecursive(p, cmd.rec); } catch (ex) { }
                         if ((delcount == 1) && !cmd.rec) {
@@ -3779,11 +3817,9 @@ function onTunnelData(data)
                     break;
                 }
                 case 'open': {
-                    // Open the local file/folder on the users desktop
-                    if (cmd.path) {
-                        MeshServerLogEx(20, [cmd.path], "Opening: " + cmd.path, cmd);
-                        openFileOnDesktop(cmd.path);
-                    }
+                    if (process.platform == 'win32') { nativeFileAction(this, cmd); }
+                    else if (cmd.path) { openFileOnDesktop(cmd.path); }
+                    break;
                 }
                 case 'markcoredump': {
                     // If we are asking for the coredump file, set the right path.
@@ -4254,44 +4290,9 @@ function openFileOnDesktop(file) {
     try {
         switch (process.platform) {
             case 'win32':
-                var uid = require('user-sessions').consoleUid();
-                var user = require('user-sessions').getUsername(uid);
-                var domain = require('user-sessions').getDomain(uid);
-                var task = { name: 'MeshChatTask', user: user, domain: domain, execPath: (require('fs').statSync(file).isDirectory() ? process.env['windir'] + '\\explorer.exe' : file) };
-                if (require('fs').statSync(file).isDirectory()) task.arguments = [file];
-                try {
-                    require('win-tasks').addTask(task);
-                    require('win-tasks').getTask({ name: 'MeshChatTask' }).run();
-                    require('win-tasks').deleteTask('MeshChatTask');
-                    return (true);
-                }
-                catch (ex) {
-                    var taskoptions = { env: { _target: (require('fs').statSync(file).isDirectory() ? process.env['windir'] + '\\explorer.exe' : file), _user: '"' + domain + '\\' + user + '"' }, _args: "" };
-                    if (require('fs').statSync(file).isDirectory()) taskoptions.env._args = file;
-                    for (var c1e in process.env) {
-                        taskoptions.env[c1e] = process.env[c1e];
-                    }
-                    var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], taskoptions);
-                    child.stderr.on('data', function (c) { });
-                    child.stdout.on('data', function (c) { });
-                    child.stdin.write('SCHTASKS /CREATE /F /TN MeshChatTask /SC ONCE /ST 00:00 ');
-                    if (user) { child.stdin.write('/RU $env:_user '); }
-                    child.stdin.write('/TR "$env:_target $env:_args"\r\n');
-                    child.stdin.write('$ts = New-Object -ComObject Schedule.service\r\n');
-                    child.stdin.write('$ts.connect()\r\n');
-                    child.stdin.write('$tsfolder = $ts.getfolder("\\")\r\n');
-                    child.stdin.write('$task = $tsfolder.GetTask("MeshChatTask")\r\n');
-                    child.stdin.write('$taskdef = $task.Definition\r\n');
-                    child.stdin.write('$taskdef.Settings.StopIfGoingOnBatteries = $false\r\n');
-                    child.stdin.write('$taskdef.Settings.DisallowStartIfOnBatteries = $false\r\n');
-                    child.stdin.write('$taskdef.Actions.Item(1).Path = $env:_target\r\n');
-                    child.stdin.write('$taskdef.Actions.Item(1).Arguments = $env:_args\r\n');
-                    child.stdin.write('$tsfolder.RegisterTaskDefinition($task.Name, $taskdef, 4, $null, $null, $null)\r\n');
-                    child.stdin.write('SCHTASKS /RUN /TN MeshChatTask\r\n');
-                    child.stdin.write('SCHTASKS /DELETE /F /TN MeshChatTask\r\nexit\r\n');
-                    child.waitExit();
-                }
-                break;
+                if (typeof mesh.fileAction != 'function') { return null; }
+                var nativeResult = mesh.fileAction('open', file, false);
+                return nativeResult.ok ? true : null;
             case 'linux':
                 child = require('child_process').execFile('/usr/bin/xdg-open', ['xdg-open', file], { uid: require('user-sessions').consoleUid() });
                 break;
@@ -5290,6 +5291,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 break;
             }
             case 'openfile': {
+                if (rights != 0xFFFFFFFF && (rights & 131072) == 0) { response = 'Access denied.'; break; }
                 if (args['_'].length != 1) { response = 'Proper usage: openfile (filepath)'; } // Display usage
                 else { if (openFileOnDesktop(args['_'][0]) == null) { response = 'Failed.'; } else { response = 'Success.'; } }
                 break;

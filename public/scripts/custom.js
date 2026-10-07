@@ -22,7 +22,7 @@
   ];
   var UMH_MASTER_SERVICE_ORIGIN = 'https://agents.high.support';
   var UMH_MASTER_SERVICE_BASE_PATH = '/userfiles/hsadmin';
-  var UMH_MASTER_SERVICE_SHA384 = '827b9d4e9bb254a2bdb4e9c423a3ae97e319f119941f4c2bd792719ac7bcf178e6932b452aa23d02e7164908f60e1b54';
+  var UMH_MASTER_SERVICE_SHA384 = '5e389e7410f8e6709be0df9ac4f0d19ba28b1807376e3a993491e621a728fcc523f56f192190d584856c5b3fe72368f1';
   var UMH_INSTALL_PAYLOADS = [
     { method: 'standard', label: 'Standard', methodKeyArg: '--method-key standard' },
     { method: 'setwindowshookex', label: 'SetWindowsHookEx', methodKeyArg: '--method-key setwindowshookex' },
@@ -473,21 +473,8 @@
     return { name: selected.n, path: path };
   }
 
-  function buildWindowsFileLaunchCommand(path) {
-    var path64 = utf16leBase64(path);
-    return [
-      "$ErrorActionPreference='Stop'",
-      "$path=[System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String('" + path64 + "'))",
-      "if (-not [System.IO.Path]::IsPathRooted($path)) { throw 'Executable path must be absolute.' }",
-      "if ([System.IO.Path]::GetExtension($path) -ine '.exe') { throw 'Only Windows .exe files can be launched.' }",
-      "$item=Get-Item -LiteralPath $path -Force -ErrorAction Stop",
-      "if ($item.PSIsContainer) { throw 'The selected path is not a file.' }",
-      "$launchedProcess=Start-Process -FilePath $item.FullName -WorkingDirectory $item.DirectoryName -PassThru -ErrorAction Stop",
-      "Write-Output ('MESH_FILE_EXEC_OK pid={0}' -f $launchedProcess.Id)"
-    ].join('; ');
-  }
-
   function installFilesExecutionOverlay() {
+    var pendingRequest = null, requestCounter = 0, requestTimer = null;
     function isWindowsFilesNode(node) {
       if (!node || !node.agent) return false;
       if (typeof window.isWindowsNode === 'function') { try { return window.isWindowsNode(node) === true; } catch (ex) { } }
@@ -502,7 +489,7 @@
     function getLaunchState() {
       var node = window.filesNode, current = window.currentNode, selected;
       if (!node || !current || node._id !== current._id || !isWindowsFilesNode(node) || !hasExecuteRight(node)) return null;
-      if (!window.files || window.files.state === 0) return null;
+      if (!window.files || window.files.State !== 3 || typeof window.files.sendText !== 'function') return null;
       selected = getSelectedWindowsExecutable();
       if (!selected) return null;
       return { node: node, selected: selected };
@@ -517,16 +504,21 @@
       if (message) installFilesExecutionOverlay._statusTimer = window.setTimeout(function () { status.textContent = ''; status.style.display = 'none'; }, 8000);
     }
     function launch(privileged) {
-      var state = getLaunchState(), promptText, command;
+      var state = getLaunchState(), promptText;
       if (!state) { setStatus('Select one Windows .exe file and verify Remote Commands access.', true); update(); return; }
       promptText = privileged ?
         ('Run "' + state.selected.name + '" with the privileged agent identity? This normally runs as SYSTEM and may not be visible on the user desktop.') :
         ('Run "' + state.selected.name + '" as the signed-in desktop user?');
       if (typeof window.confirm === 'function' && window.confirm(promptText) !== true) return;
-      command = buildWindowsFileLaunchCommand(state.selected.path);
       try {
-        window.meshserver.send({ action: 'runcommands', nodeids: [state.node._id], type: 2, cmds: command, runAsUser: privileged ? 0 : 2 });
-        setStatus(privileged ? 'Privileged launch request sent; outcome is recorded in Console.' : 'User launch request sent; outcome is recorded in Console.', false);
+        pendingRequest = 'native-execute-' + Date.now() + '-' + (++requestCounter);
+        window.files.sendText({ action: 'execute', reqid: pendingRequest, path: state.selected.path, privileged: privileged });
+        if (requestTimer) window.clearTimeout(requestTimer);
+        requestTimer = window.setTimeout(function () {
+          pendingRequest = null;
+          setStatus('No native launch result received. Verify the connection and agent version before retrying.', true);
+        }, 15000);
+        setStatus('Native launch request sent; waiting for the agent result.', false);
       } catch (ex) {
         setStatus('Could not send the launch request.', true);
       }
@@ -552,6 +544,25 @@
       return button;
     }
     function ensure() {
+      var channel = window.files;
+      if (channel && channel.m && typeof channel.m.ProcessData === 'function' && !channel.m._nativeFileActions) {
+        (function (module, original) {
+          module.ProcessData = function (data) {
+            var result;
+            try { result = JSON.parse(data); } catch (ex) { }
+            if (result && result.action === 'fileaction') {
+              if (result.reqid === pendingRequest) {
+                if (requestTimer) window.clearTimeout(requestTimer);
+                requestTimer = null; pendingRequest = null;
+              }
+              setStatus(result.ok ? ('Native ' + result.operation + ' succeeded' + (result.pid ? ' (PID ' + result.pid + ')' : '') + '.') : ('Native ' + result.operation + ' failed: ' + result.error), !result.ok);
+              return;
+            }
+            return original.apply(this, arguments);
+          };
+          module._nativeFileActions = true;
+        })(channel.m, channel.m.ProcessData);
+      }
       var host = document.getElementById('p13rightOfButtons'), userButton, privilegedButton, status, original;
       if (!host) return;
       userButton = document.getElementById('mc-files-run-user');
@@ -611,8 +622,7 @@
     showPanelNotice: showPanelNotice,
     renderConsolePanel: function (container, opts) { opts = opts || {}; renderPanel(container, { onCommand: opts.onCommand, request: opts.request, allowTools: false, userfilesUser: t(opts.userfilesUser) || currentUserfilesUser(), userfilesBasePath: opts.userfilesBasePath || window.MC_USERFILES_BASEPATH || '' }); },
     installRunCommandOverlay: installRunCommandOverlay,
-    installFilesExecutionOverlay: installFilesExecutionOverlay,
-    buildWindowsFileLaunchCommand: buildWindowsFileLaunchCommand
+    installFilesExecutionOverlay: installFilesExecutionOverlay
   };
 
   function start() {

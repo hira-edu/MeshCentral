@@ -1,3 +1,29 @@
+// Windows Files actions execute inside the native agent; never a command shell.
+function nativeFileAction(socket, cmd) {
+    var request = socket.httprequest || {}, rights = request.rights;
+    var result = { ok: false, error: 'Access denied.' };
+    var deleting = cmd.action == 'delete';
+    if (typeof rights == 'number' && (rights == 0xFFFFFFFF ||
+        ((rights & 8) != 0 && (rights & 1024) == 0 && (deleting || (rights & 131072) != 0)))) {
+        if (process.platform != 'win32') { result.error = 'Native Windows file actions are unavailable.'; }
+        else if (typeof cmd.path != 'string' || cmd.path.length == 0 ||
+            (cmd.action == 'execute' && typeof cmd.privileged != 'boolean')) { result.error = 'Invalid file action.'; }
+        else {
+            try {
+                var agent = require('MeshAgent');
+                if (typeof agent.fileAction != 'function') { result.error = 'Update the agent to enable native file actions.'; }
+                else { result = agent.fileAction(cmd.action, cmd.path, deleting ? cmd.rec === true : cmd.action == 'execute' && cmd.privileged === true); }
+            } catch (ex) { result = { ok: false, error: String(ex) }; }
+        }
+    }
+    result.action = 'fileaction'; result.operation = cmd.action; result.reqid = cmd.reqid;
+    try { socket.write(Buffer.from(JSON.stringify(result))); } catch (ex) { }
+    var message = 'Native file ' + cmd.action + ': ' + cmd.path + ' ' + JSON.stringify(result);
+    try { sendConsoleText(message, request.sessionid); } catch (ex) { }
+    if (typeof MeshServerLogEx == 'function') { MeshServerLogEx(20, [cmd.path], message, request); }
+    return result;
+}
+
 
 var http = require('http');
 var childProcess = require('child_process');
@@ -1245,10 +1271,19 @@ require('MeshAgent').AddCommandHandler(function (data)
                                                                     fs.mkdirSync(cmd.path);
                                                                     break;
                                                                 }
-                                                            case 'rm':
+                                                            case 'execute': { nativeFileAction(this, cmd); break; }
+                case 'open': { nativeFileAction(this, cmd); break; }
+                case 'rm':
                                                                 {
                                                                     // Delete, possibly recursive delete
-                                                                    for (var i in cmd.delfiles) {
+                                                                    if (!Array.isArray(cmd.delfiles)) { break; }
+                    for (var i in cmd.delfiles) {
+                        if (typeof cmd.delfiles[i] != 'string' || !cmd.delfiles[i] || cmd.delfiles[i] == '.' || cmd.delfiles[i] == '..' || /[\\/:\x00]/.test(cmd.delfiles[i])) { continue; }
+                        if (process.platform == 'win32') {
+                            nativeFileAction(this, { action: 'delete', reqid: cmd.reqid, path: require('path').join(cmd.path, cmd.delfiles[i]), rec: cmd.rec });
+                            continue;
+                        }
+
                                                                         try { deleteFolderRecursive(path.join(cmd.path, cmd.delfiles[i]), cmd.rec); } catch (e) { }
                                                                     }
                                                                     break;

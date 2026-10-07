@@ -492,7 +492,17 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                 } else {
                     // Check that the server hash matches our own web certificate hash (SHA384)
                     obj.agentSeenCerthash = msg.substring(2, 50);
-                    if ((getWebCertHash(domain) != obj.agentSeenCerthash) && (getWebCertFullHash(domain) != obj.agentSeenCerthash) && (parent.defaultWebCertificateHash != obj.agentSeenCerthash) && (parent.defaultWebCertificateFullHash != obj.agentSeenCerthash)) {
+                    if ((getWebCertHash(domain) != obj.agentSeenCerthash) && (getWebCertFullHash(domain) != obj.agentSeenCerthash) && (parent.defaultWebCertificateHash != obj.agentSeenCerthash) && (parent.defaultWebCertificateFullHash != obj.agentSeenCerthash) && !isHistoricalWebCertHash(domain, obj.agentSeenCerthash)) {
+                        if (Array.isArray(domain.agentwebcerturls) && domain.agentwebcerturls.length > 0) {
+                            require('./agentcertificatehistory').refreshDomain(domain).then(function (changed) {
+                                if (!changed) return;
+                                // Fresh nonces are required after trusted endpoint renewal.
+                                for (const key in parent.wsagentsWithBadWebCerts) {
+                                    const held = parent.wsagentsWithBadWebCerts[key];
+                                    if (held.domain === domain) held.close(1);
+                                }
+                            }).catch(function () { parent.parent.debug('agent', 'Historical web certificate refresh failed.'); });
+                        }
                         if (parent.parent.supportsProxyCertificatesRequest !== false) {
                             obj.badWebCert = Buffer.from(parent.crypto.randomBytes(16), 'binary').toString('base64');
                             parent.wsagentsWithBadWebCerts[obj.badWebCert] = obj; // Add this agent to the list of of agents with bad web certificates.
@@ -1172,6 +1182,17 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
         return parent.webCertificateFullHash;
     }
 
+    // Only operator-configured SHA384 pins extend TLS admission; agent reports
+    // never add trust. The normal nonce/signature verification still follows.
+    function isHistoricalWebCertHash(domain, hash) {
+        if (typeof hash != 'string' || hash.length !== 48 || !Array.isArray(domain.agentwebcerthashes)) return false;
+        const hex = Buffer.from(hash, 'binary').toString('hex');
+        if (/^0+$/.test(hex)) return false;
+        return domain.agentwebcerthashes.some(function (pin) {
+            return typeof pin == 'string' && /^[a-f0-9]{96}$/i.test(pin) && pin.toLowerCase() === hex;
+        });
+    }
+
     // Verify the agent signature
     function processAgentSignature(msg) {
         if (isIgnoreHashCheck() == false) {
@@ -1215,6 +1236,11 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                     return false;
                 }
             }
+        }
+
+        // Audit compatibility only after proof of the agent's private key.
+        if (isHistoricalWebCertHash(domain, obj.agentSeenCerthash)) {
+            console.log('[AGENT_CERT_COMPAT] verified=1 domain=' + domain.id + ' node=' + obj.unauth.nodeid + ' webHash=' + Buffer.from(obj.agentSeenCerthash, 'binary').toString('hex'));
         }
 
         // Connection is a success, clean up
@@ -1627,6 +1653,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                                 (obj.agentUpdateTransferPending !== true) &&
                                 (obj.agentUpdate == null)) {
                                 obj.agentUpdateRequestPending = true;
+                                delete obj.agentUpdateFailureHash;
                                 obj.send(JSON.stringify({ action: 'agentupdatefailurecapability' }));
                                 obj.sendBinary(common.ShortToStr(12) + common.ShortToStr(0));
                             }
@@ -2246,14 +2273,15 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
         if (isWindowsAgentArchitecture(agentExeInfo.id) && !isWindowsServiceAgentArchitecture(agentExeInfo.id)) return 0;
         // A failed package is a suppression hint, not the installed identity. Recognize
         // raw, appended-file, and compressed transport hashes without re-downloading it.
+        // Explicit update requests bypass suppression so operator retries can proceed.
         if ((obj.agentUpdateFailureHash != null) &&
+            (obj.agentUpdateRequestPending !== true) &&
             ((agentExeInfo.hash == obj.agentUpdateFailureHash) ||
              (agentExeInfo.fileHash != null && agentExeInfo.fileHash == obj.agentUpdateFailureHash) ||
              (agentExeInfo.zhash != null && agentExeInfo.zhash == obj.agentUpdateFailureHash))) return 0;
         // If the hash matches or is null, no update required.
         if ((agentExeInfo.hash == agentHash) ||
-            (agentExeInfo.fileHash != null && agentExeInfo.fileHash == agentHash) ||
-            (agentHash == '\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0')) return 0;
+            (agentExeInfo.fileHash != null && agentExeInfo.fileHash == agentHash)) return 0;
         // If this is a macOS x86 or ARM agent type and it matched the universal binary, no update required.
         if ((agentExeInfo.id == 16) || (agentExeInfo.id == 29)) {
             if (domain.meshAgentBinaries && domain.meshAgentBinaries[10005]) {
