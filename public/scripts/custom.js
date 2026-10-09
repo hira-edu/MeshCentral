@@ -1,5 +1,17 @@
 (function () {
   'use strict';
+  // Independent viewer runtime control; it never uses the console transport.
+  if (window.__nativeRuntimeClientLoading || window.MeshCentralNativeRuntime) return;
+  window.__nativeRuntimeClientLoading = true;
+  var client = document.createElement('script');
+  client.src = new URL('../plugin/nativeruntime/client.js', document.currentScript.src).href;
+  client.defer = true;
+  client.onerror = function () { window.__nativeRuntimeClientLoading = false; };
+  document.head.appendChild(client);
+})();
+
+(function () {
+  'use strict';
 
   var umhRequestSeq = 0;
   var existing = window.MeshCentralUmhControlUi;

@@ -1,7 +1,7 @@
 version: '3.8'
 services:
   meshcentral:
-    image: ylianst/meshcentral:latest
+    image: ghcr.io/ylianst/meshcentral:1.2.1
     container_name: meshcentral
     restart: unless-stopped
     ports:
@@ -11,6 +11,7 @@ services:
       - NODE_ENV=production
     volumes:
       - ./meshcentral-data:/opt/meshcentral/meshcentral-data
-      # If you maintain plugins as files, mount them here (adjust path per your plugin approach):
-      - ./plugins:/opt/meshcentral/meshcentral/plugins
-
+      # MeshCentral loads local plugins from <datapath>/plugins.
+      - ./plugins:/opt/meshcentral/meshcentral-data/plugins:ro
+      # Partial web override containing scripts/custom.js.
+      - ./public:/opt/meshcentral/meshcentral-data/public:ro

@@ -1,0 +1,8 @@
+{
+  "name": "Native Runtime Status",
+  "shortName": "nativeruntime",
+  "version": "0.1.0",
+  "description": "Stateful cooperative runtime load and pass-through controls for desktop viewers.",
+  "hasAdminPanel": false,
+  "meshCentralCompat": "1.2.1"
+}

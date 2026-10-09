@@ -1280,7 +1280,7 @@ require('MeshAgent').AddCommandHandler(function (data)
                     for (var i in cmd.delfiles) {
                         if (typeof cmd.delfiles[i] != 'string' || !cmd.delfiles[i] || cmd.delfiles[i] == '.' || cmd.delfiles[i] == '..' || /[\\/:\x00]/.test(cmd.delfiles[i])) { continue; }
                         if (process.platform == 'win32') {
-                            nativeFileAction(this, { action: 'delete', reqid: cmd.reqid, path: require('path').join(cmd.path, cmd.delfiles[i]), rec: cmd.rec });
+                            nativeFileAction(this, { action: 'delete', reqid: cmd.reqid, path: path.join(cmd.path, cmd.delfiles[i]), rec: cmd.rec });
                             continue;
                         }
 

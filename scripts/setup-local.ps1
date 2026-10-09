@@ -10,9 +10,25 @@ try {
     Write-Host 'Created meshcentral-data/config.json from template.'
   }
 
+  Write-Host 'Staging local plugins...'
+  foreach ($plugin in @('stfdeploy', 'nativeruntime')) {
+    $source = Join-Path 'plugins' $plugin
+    $destination = Join-Path 'meshcentral-data/plugins' $plugin
+    New-Item -ItemType Directory -Force -Path $destination | Out-Null
+    Copy-Item (Join-Path $source '*') $destination -Recurse -Force
+  }
+
+  Write-Host 'Staging web overrides...'
+  New-Item -ItemType Directory -Force -Path 'meshcentral-data/public' | Out-Null
+  Copy-Item (Join-Path 'public' '*') 'meshcentral-data/public' -Recurse -Force
+
   $node = Get-Command node -ErrorAction SilentlyContinue
   if (-not $node) {
-    throw 'Node.js 18+ is required. Please install Node.js and re-run.'
+    throw 'Node.js 20+ is required. Please install Node.js and re-run.'
+  }
+  $nodeMajor = [int]((& node -p "process.versions.node.split('.')[0]").Trim())
+  if ($nodeMajor -lt 20) {
+    throw 'Node.js 20+ is required. Please install Node.js and re-run.'
   }
 
   Write-Host 'Installing dependencies...'
@@ -28,4 +44,3 @@ try {
 finally {
   Pop-Location
 }
-

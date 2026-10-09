@@ -9,10 +9,9 @@
     "postinstall": "node -e \"try{require('fs').mkdirSync('meshcentral-data',{recursive:true})}catch(e){}\""
   },
   "dependencies": {
-    "meshcentral": "^1.1.0"
+    "meshcentral": "1.2.1"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.0.0"
   }
 }
-

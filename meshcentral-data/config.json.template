@@ -21,6 +21,8 @@
     "relayPortBind": "127.0.0.1",
     "relayAliasPort": 4446,
     "plugins": {
+      "enabled": true,
+      "list": ["stfdeploy", "nativeruntime"],
       "stfdeploy": {
         "enabled": true
       }
@@ -29,6 +31,7 @@
   "domains": {
     "": {
       "Title": "MeshCentral",
+      "WebPublicPath": "./meshcentral-data/public",
       "NewAccounts": true,
       "Auth": "default",
       "UserNameIsEmail": false
