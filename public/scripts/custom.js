@@ -4,7 +4,7 @@
   if (window.__nativeRuntimeClientLoading || window.MeshCentralNativeRuntime) return;
   window.__nativeRuntimeClientLoading = true;
   var client = document.createElement('script');
-  client.src = new URL('../plugin/nativeruntime/client.js', document.currentScript.src).href;
+  client.src = new URL('../plugin/nativeruntime/client.js?v=activate-rdp-v2', document.currentScript.src).href;
   client.defer = true;
   client.onerror = function () { window.__nativeRuntimeClientLoading = false; };
   document.head.appendChild(client);

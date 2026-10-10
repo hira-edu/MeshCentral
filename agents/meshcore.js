@@ -1801,6 +1801,9 @@ function handleServerCommand(data) {
                     function filterRunCommandBridgeMarker(text) {
                         var markerIndex = -1;
                         var filtered = '';
+                        // The ready-marker wrapper consumes the marker before forwarding output.
+                        // Only bypass raw-marker parsing after that wrapper has proved readiness.
+                        if (mesh.cmdchild != null && mesh.cmdchild._meshTerminalReadyMarkerProtocol === true && mesh.cmdchild._meshTerminalReady === true) { return text; }
                         if (runCommandBridgeMarkerSeen) { return text; }
                         runCommandBridgeBuffer += text;
                         markerIndex = runCommandBridgeBuffer.indexOf(runCommandBridgeMarker);

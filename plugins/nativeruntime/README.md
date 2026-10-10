@@ -1,17 +1,21 @@
 # Native runtime viewer control
 
-This local MeshCentral 1.2.1 extension adds one stateful Load/Unload control
-beside Connect in classic, modern and mobile viewers, including both guest-share
-viewers. The two mobile templates use `connectbutton1`; the other three use
+This local MeshCentral 1.2.1 extension adds one stateful Activate/Unload control.
+It follows RDP Connect in the classic and modern full desktop viewers and follows
+Connect in mobile and guest-share viewers, where RDP Connect is not present. The
+two mobile templates use `connectbutton1`; the other three use
 `connectbutton1span`.
 
-Load activates the runtime for eligible targets. Unload means cooperative
+Activate enables the controller and activates the runtime for eligible targets.
+The enabled state remains armed when no eligible process is currently running,
+and the viewer offers Unload in that state. Unload means cooperative
 deactivation to pass-through while the component remains resident; it never
 requests `FreeLibrary` or another physical detach. A controller
-`restartRequired` flag is displayed as a warning that earlier effects were not
-fully restored. It does not prevent a later Load. Any confirmed, settled,
-controllable snapshot without active targets offers Load, including zero-target
-snapshots after an earlier target exits.
+`restartRequired` flag is reported as a warning that earlier effects were not
+fully restored. It does not prevent a later Activate action. Detailed status is exposed by
+the control tooltip and accessible live status instead of a wrapping toolbar
+label. The control follows the currently visible Connect or Disconnect group so
+starting and stopping KVM does not leave it behind as the first toolbar item.
 
 ## Local installation
 
@@ -34,7 +38,7 @@ domain, account or share record, share window and revocation state. Guest
 requests derive the node from their signed cookie and database record. There is
 no separate plugin mutation ACL or policy/capability layer. Remote-view-only
 accounts, view-only guest shares, and domains with `desktop.viewonly` enabled
-can see status but cannot send Load or Unload.
+can see status but cannot use Activate or Unload.
 
 Requests use `nativeRuntime` v1 with a UUID and operation `getStatus`, `load` or
 `unload`. The browser includes the last relay epoch and generation with a state
@@ -45,9 +49,14 @@ aggregates those records without inventing capabilities or policy. Responses
 from other connections or with mismatched IDs/operations are ignored. Timeout
 means unknown and a mutation is never automatically repeated; the client uses a
 fresh read-only status query to reconcile an unknown mutation outcome. A
-successful mutation that reports `operationPending` is followed by four bounded
-status-only polls. If it is still pending, the same control becomes a manual
-Retry Status action.
+successful mutation or initial status that reports `operationPending` is
+followed by four bounded status-only polls. The visible viewer also refreshes
+status every ten seconds so the relay's mutation baseline stays fresh and newly
+started or exited eligible processes are reflected without a page reload. If an
+operation is still pending, the same control becomes a manual Retry Status
+action. A state-changing click whose local status is already twelve seconds old
+first refreshes that read-only baseline, then submits the requested change once
+only if it is still the valid next operation.
 
 Controller `result` is the bounded protocol enum: accepted, invalid message,
 unsupported version, unsupported command or persistence failure. `lastError`

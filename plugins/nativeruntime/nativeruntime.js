@@ -322,7 +322,7 @@ module.exports.nativeruntime = function (parent) {
         prefixes.add('/');
         for (const prefix of prefixes) {
             web.app.get(prefix + 'plugin/nativeruntime/client.js', (_req, res) => {
-                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Cache-Control', 'no-store, max-age=0');
                 res.sendFile(path.join(__dirname, 'client.js'));
             });
             web.app.post(prefix + 'plugin/nativeruntime/request', web.express.json({ limit: '8kb', strict: true }), async (req, res) => {

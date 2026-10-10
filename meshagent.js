@@ -1867,6 +1867,11 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                     if (parent.parent.taskManager != null) { parent.parent.taskManager.agentAction(command, obj); }
                     break;
                 }
+                case 'nativeRuntimeResult': {
+                    // The native-runtime plugin consumes the correlated result
+                    // through hook_processAgentData immediately after this switch.
+                    break;
+                }
                 default: {
                     parent.agentStats.unknownAgentActionCount++;
                     parent.parent.debug('agent', 'Unknown agent action (' + obj.remoteaddrport + '): ' + JSON.stringify(command) + '.');

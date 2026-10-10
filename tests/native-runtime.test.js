@@ -476,7 +476,7 @@ test('share revocation while waiting hides the completed result', async t => {
 
 test('model drives one stateful toggle and permits reloading with a restoration warning', async () => {
     const replies = [
-        status({ controllerEpoch: EPOCH, generation: '0' }),
+        status({ controllerEpoch: EPOCH, generation: '0', loadEnabled: false }),
         status({ controllerEpoch: EPOCH, generation: '1', anyActive: true, anyInactive: false, activeTargetCount: 1, inactiveTargetCount: 0 }),
         status({ controllerEpoch: EPOCH, generation: '2', loadEnabled: false, restartRequired: true })
     ];
@@ -497,7 +497,7 @@ test('model drives one stateful toggle and permits reloading with a restoration 
     assert.equal(model.nextOperation(), 'load');
 });
 
-test('settled controllable state without active or resident targets still offers Load', async () => {
+test('settled disabled state without active or resident targets offers Load', async () => {
     const request = command();
     const model = createModel(async value => uiResult(value, status({ controllerEpoch: EPOCH, generation: '0',
         loadEnabled: false, anyResident: false, anyActive: false, anyInactive: false,
@@ -507,13 +507,23 @@ test('settled controllable state without active or resident targets still offers
     assert.equal(model.nextOperation(), 'load');
 });
 
+test('settled enabled state without targets remains armed and offers Unload', async () => {
+    const request = command();
+    const model = createModel(async value => uiResult(value, status({ controllerEpoch: EPOCH, generation: '0',
+        loadEnabled: true, anyResident: false, anyActive: false, anyInactive: false,
+        matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 })),
+    crypto.randomUUID, () => {});
+    await model.request(request.operation);
+    assert.equal(model.nextOperation(), 'unload');
+});
+
 test('a confirmed controller failure remains actionable from its reported state', async () => {
     const requests = [];
     const model = createModel(async request => {
         requests.push(request);
-        if (request.operation === 'getStatus') return uiResult(request, status({ controllerEpoch: EPOCH, generation: '0' }));
+        if (request.operation === 'getStatus') return uiResult(request, status({ controllerEpoch: EPOCH, generation: '0', loadEnabled: false }));
         return uiResult(request, status({ ok: false, state: 'degraded', controllerEpoch: EPOCH, generation: '1',
-            failedTargetCount: 1, error: { code: 'controller-command-failed', message: 'The controller could not complete the command.' } }));
+            loadEnabled: false, failedTargetCount: 1, error: { code: 'controller-command-failed', message: 'The controller could not complete the command.' } }));
     }, crypto.randomUUID, () => {});
     await model.request('getStatus');
     await model.request('load');
@@ -526,7 +536,7 @@ test('an unknown mutation outcome is reconciled with getStatus and never retried
     const requests = [];
     const model = createModel(async request => {
         requests.push(request);
-        if (requests.length === 1) return uiResult(request, status({ controllerEpoch: EPOCH, generation: '0' }));
+        if (requests.length === 1) return uiResult(request, status({ controllerEpoch: EPOCH, generation: '0', loadEnabled: false }));
         if (request.operation === 'load') return {
             action: 'nativeRuntimeResult', version: 1, operation: 'load', requestId: request.requestId,
             ok: false, state: 'unknown', error: { code: 'outcome-unknown', message: 'Status unknown.' }
@@ -541,6 +551,24 @@ test('an unknown mutation outcome is reconciled with getStatus and never retried
     assert.equal(model.nextOperation(), 'unload');
 });
 
+test('a stale click performs a read-only preflight before one mutation', async () => {
+    const requests = [];
+    let clock = 0;
+    const model = createModel(async request => {
+        requests.push(request);
+        return uiResult(request, status({ controllerEpoch: EPOCH, generation: request.operation === 'load' ? '1' : '0',
+            loadEnabled: request.operation === 'load', anyActive: request.operation === 'load',
+            anyInactive: request.operation !== 'load', activeTargetCount: request.operation === 'load' ? 1 : 0,
+            inactiveTargetCount: request.operation === 'load' ? 0 : 1 }));
+    }, crypto.randomUUID, () => {}, async () => {}, () => clock);
+    await model.request('getStatus');
+    clock = 13000;
+    await model.request('load');
+    assert.deepEqual(requests.map(request => request.operation), ['getStatus', 'getStatus', 'load']);
+    assert.equal(requests.filter(request => request.operation === 'load').length, 1);
+    assert.equal(model.nextOperation(), 'unload');
+});
+
 test('a successful pending mutation polls status until the controller settles', async () => {
     const requests = [];
     let statusReads = 0;
@@ -549,7 +577,7 @@ test('a successful pending mutation polls status until the controller settles', 
         if (request.operation === 'load') return uiResult(request, status({ controllerEpoch: EPOCH, generation: '1',
             operationPending: true, anyActive: true, anyInactive: false, activeTargetCount: 1, inactiveTargetCount: 0 }));
         statusReads++;
-        return uiResult(request, status({ controllerEpoch: EPOCH, generation: statusReads === 1 ? '0' : '1',
+        return uiResult(request, status({ controllerEpoch: EPOCH, generation: statusReads === 1 ? '0' : '1', loadEnabled: statusReads !== 1,
             operationPending: statusReads === 2, anyActive: statusReads > 1, anyInactive: statusReads <= 1,
             activeTargetCount: statusReads > 1 ? 1 : 0, inactiveTargetCount: statusReads <= 1 ? 1 : 0 }));
     }, crypto.randomUUID, () => {}, async () => {});
@@ -568,7 +596,7 @@ test('pending polling is bounded and leaves a manual status retry path', async (
         if (request.operation === 'load') return uiResult(request, status({ controllerEpoch: EPOCH, generation: '1',
             operationPending: true }));
         statusReads++;
-        return uiResult(request, status({ controllerEpoch: EPOCH, generation: statusReads === 1 ? '0' : '1',
+        return uiResult(request, status({ controllerEpoch: EPOCH, generation: statusReads === 1 ? '0' : '1', loadEnabled: statusReads !== 1,
             operationPending: statusReads > 1 && statusReads < 6 }));
     }, crypto.randomUUID, () => {}, async () => {});
     await model.request('getStatus');
@@ -580,6 +608,20 @@ test('pending polling is bounded and leaves a manual status retry path', async (
     assert.equal(model.nextOperation(), 'getStatus');
     await model.request('getStatus');
     assert.equal(model.state.status.operationPending, false);
+    assert.equal(model.nextOperation(), 'unload');
+});
+
+test('an initial pending status enters the bounded reconciliation loop', async () => {
+    const requests = [];
+    const model = createModel(async request => {
+        requests.push(request);
+        return uiResult(request, status({ controllerEpoch: EPOCH, generation: '0', loadEnabled: false,
+            operationPending: requests.length === 1 }));
+    }, crypto.randomUUID, () => {}, async () => {});
+    await model.request('getStatus');
+    assert.deepEqual(requests.map(request => request.operation), ['getStatus', 'getStatus']);
+    assert.equal(model.state.polling, false);
+    assert.equal(model.state.status.operationPending, false);
     assert.equal(model.nextOperation(), 'load');
 });
 
@@ -589,6 +631,7 @@ test('same-scope reset cancels a sleeping pending-status loop', async () => {
     const model = createModel(async request => {
         requests.push(request);
         return uiResult(request, status({ controllerEpoch: EPOCH, generation: request.operation === 'load' ? '1' : '0',
+            loadEnabled: request.operation === 'load',
             operationPending: request.operation === 'load' }));
     }, crypto.randomUUID, () => {}, () => new Promise(resolve => { releasePause = resolve; }));
     model.reset('A');
@@ -610,6 +653,7 @@ test('A-B-A reset sequence cannot revive an earlier pending-status loop', async 
     const model = createModel(async request => {
         requests.push(request);
         return uiResult(request, status({ controllerEpoch: EPOCH, generation: request.operation === 'load' ? '1' : '0',
+            loadEnabled: request.operation === 'load',
             operationPending: request.operation === 'load' }));
     }, crypto.randomUUID, () => {}, () => new Promise(resolve => { releasePause = resolve; }));
     model.reset('A');
@@ -627,13 +671,24 @@ test('A-B-A reset sequence cannot revive an earlier pending-status loop', async 
 });
 
 // Minimal DOM with the insertion semantics of all five MeshCentral 1.2.1 viewers.
-function viewerFixture(kind, replyFields) {
+function viewerFixture(kind, replyFields = status({ loadEnabled: false })) {
     const elements = [];
+    const intervals = [];
+    const observations = [];
+    const observers = [];
     function element(tag) {
-        const node = { tagName: tag.toUpperCase(), children: [], style: {}, attributes: {}, listeners: {}, disabled: false,
+        const node = { tagName: tag.toUpperCase(), children: [], style: { cssText: '' }, className: '', value: '', attributes: {}, listeners: {}, disabled: false,
             setAttribute(key, value) { this.attributes[key] = value; }, addEventListener(name, fn) { this.listeners[name] = fn; },
             appendChild(child) { this.children.push(child); child.parentNode = this; return child; },
-            insertBefore(child, before) { const index = this.children.indexOf(before); this.children.splice(index < 0 ? this.children.length : index, 0, child); child.parentNode = this; },
+            insertBefore(child, before) {
+                if (child.parentNode) {
+                    const oldIndex = child.parentNode.children.indexOf(child);
+                    if (oldIndex >= 0) child.parentNode.children.splice(oldIndex, 1);
+                }
+                const index = this.children.indexOf(before);
+                this.children.splice(index < 0 ? this.children.length : index, 0, child);
+                child.parentNode = this;
+            },
             get nextSibling() { return this.parentNode?.children[this.parentNode.children.indexOf(this) + 1]; },
             get isConnected() { return !!this.parentNode; } };
         elements.push(node); return node;
@@ -642,36 +697,83 @@ function viewerFixture(kind, replyFields) {
     const mobile = kind.includes('mobile');
     const anchor = toolbar.appendChild(element(mobile ? 'input' : kind === 'modern' ? 'div' : 'span'));
     anchor.id = mobile ? 'connectbutton1' : 'connectbutton1span';
+    const connect = mobile ? anchor : anchor.appendChild(element(kind === 'modern' ? 'button' : 'input'));
+    connect.id = 'connectbutton1';
+    connect.className = kind === 'modern' ? 'btn btn-success btn-sm' : '';
+    connect.style.cssText = mobile ? 'height:28px' : '';
+    let rdpAnchor = null;
+    if (kind === 'classic' || kind === 'modern') {
+        rdpAnchor = toolbar.appendChild(element(kind === 'modern' ? 'div' : 'span'));
+        rdpAnchor.id = 'connectbutton1rspan';
+        const rdp = rdpAnchor.appendChild(element(kind === 'modern' ? 'button' : 'input'));
+        rdp.id = 'connectbutton1r';
+    }
+    const disconnectAnchor = toolbar.appendChild(element(mobile ? 'input' : kind === 'modern' ? 'div' : 'span'));
+    disconnectAnchor.id = mobile ? 'disconnectbutton1' : 'disconnectbutton1span';
+    disconnectAnchor.style.display = 'none';
+    const disconnect = mobile ? disconnectAnchor : disconnectAnchor.appendChild(element(kind === 'modern' ? 'button' : 'input'));
+    disconnect.id = 'disconnectbutton1';
     const prefix = '/tenant/';
     const document = { body, readyState: 'complete', currentScript: { src: 'https://host' + prefix + 'plugin/nativeruntime/client.js' },
         createElement: element, getElementById: id => elements.find(e => e.id === id), addEventListener() {} };
     const requests = [], requestUrls = [];
-    const win = { document, crypto, currentNode: kind.startsWith('guest') ? null : { _id: NODE }, authCookie: 'cookie',
+    const win = { document, crypto, currentNode: kind.startsWith('guest') ? null : { _id: NODE, conn: 1 }, authCookie: 'cookie',
         location: { pathname: kind.startsWith('guest') ? prefix + 'sharing/' : prefix,
             href: kind.startsWith('guest') ? 'https://host' + prefix + 'sharing/' : 'https://host' + prefix },
-        URL, AbortController, setTimeout, clearTimeout, addEventListener() {}, MutationObserver: class { observe() {} },
+        URL, AbortController, setTimeout, clearTimeout, setInterval(fn) { intervals.push(fn); return intervals.length; }, clearInterval() {}, addEventListener() {},
+        MutationObserver: class { constructor(callback) { this.callback = callback; observers.push(this); } observe(target, options) { observations.push({ target, options }); } },
         fetch: async (url, options) => { const request = JSON.parse(options.body); requestUrls.push(url); requests.push(request); return {
             status: 200, json: async () => uiResult(request, { controllerEpoch: EPOCH, generation: '0', ...replyFields }) }; } };
-    return { win, anchor, requests, requestUrls };
+    return { win, anchor, connect, rdpAnchor, disconnectAnchor, disconnect, intervals, observations, observers, requests, requestUrls };
 }
 
 for (const surface of ['classic', 'modern', 'mobile', 'guest', 'guest-mobile']) {
-    test('single Load control beside Connect: ' + surface, async () => {
+    test('single Activate control follows RDP or Connect: ' + surface, async () => {
         const f = viewerFixture(surface);
         const model = install(f.win);
         await new Promise(setImmediate);
         const panel = f.win.document.getElementById('mc-native-runtime');
-        assert.equal(f.anchor.nextSibling, panel);
+        const expectedAnchor = f.rdpAnchor || f.anchor;
+        assert.equal(expectedAnchor.nextSibling, panel);
+        if (f.rdpAnchor) assert.equal(f.anchor.nextSibling, f.rdpAnchor);
         assert.equal(panel.attributes['aria-label'], 'Native runtime');
         assert.equal(panel.children.length, 2);
-        assert.equal(panel.children[0].textContent, 'Load');
+        assert.equal(panel.children[0].textContent, 'Activate');
+        assert.equal(panel.children[0].value, surface === 'modern' ? '' : 'Activate');
         assert.equal(panel.children[0].disabled, false);
+        assert.equal(panel.children[0].tagName, surface === 'modern' ? 'BUTTON' : 'INPUT');
+        assert.equal(panel.children[0].className, f.connect.className);
+        assert.equal(panel.children[0].style.cssText, f.connect.style.cssText);
         assert.equal(panel.children[1].attributes['aria-live'], 'polite');
-        assert.match(panel.children[1].textContent, /Runtime: unloaded \(resident, pass-through\)/);
+        assert.match(panel.children[1].style.cssText, /position:absolute/);
+        assert.match(panel.children[1].textContent, /Runtime: disabled \(resident, pass-through\)/);
+        assert.doesNotMatch(panel.style.cssText, /flex-wrap/);
+        assert.match(panel.style.cssText, /margin-inline:4px/);
+        assert.deepEqual(f.observations[0].options, { childList: true, subtree: true });
+        assert.ok(f.observations.some(entry => entry.target === f.anchor && entry.options.attributeFilter.includes('style')));
+        if (f.rdpAnchor) assert.ok(f.observations.some(entry => entry.target === f.rdpAnchor && entry.options.attributeFilter.includes('style')));
         assert.equal(f.requests.length, 1);
         assert.equal(f.requests[0].nodeid, surface.startsWith('guest') ? undefined : NODE);
         assert.equal(f.requestUrls[0], 'https://host/tenant/plugin/nativeruntime/request');
         assert.equal(model.nextOperation(), 'load');
+    });
+}
+
+for (const surface of ['classic', 'modern', 'mobile']) {
+    test('runtime control follows the visible KVM control without resetting state: ' + surface, async () => {
+        const f = viewerFixture(surface);
+        const model = install(f.win);
+        await new Promise(setImmediate);
+        const panel = f.win.document.getElementById('mc-native-runtime');
+        assert.equal((f.rdpAnchor || f.anchor).nextSibling, panel);
+        f.anchor.style.display = 'none';
+        if (f.rdpAnchor) f.rdpAnchor.style.display = 'none';
+        f.disconnectAnchor.style.display = '';
+        f.observers[0].callback([{ type: 'attributes', target: f.anchor }]);
+        await new Promise(resolve => setTimeout(resolve, 0));
+        assert.equal(f.disconnectAnchor.nextSibling, panel);
+        assert.equal(f.requests.length, 1);
+        assert.equal(model.state.status.loadEnabled, false);
     });
 }
 
@@ -685,26 +787,50 @@ test('loaded viewer exposes Unload and explains that unload is pass-through', as
     assert.match(control.title, /never physically unloads/);
 });
 
-test('restart-required viewer keeps Load available and reports incomplete restoration', async () => {
+test('restart-required viewer keeps Activate available and reports incomplete restoration', async () => {
     const f = viewerFixture('guest', status({ loadEnabled: false, restartRequired: true }));
     install(f.win);
     await new Promise(setImmediate);
     const panel = f.win.document.getElementById('mc-native-runtime');
-    assert.equal(panel.children[0].textContent, 'Load');
+    assert.equal(panel.children[0].textContent, 'Activate');
     assert.equal(panel.children[0].disabled, false);
     assert.match(panel.children[1].textContent, /restart required for complete restoration/);
-    assert.match(panel.children[0].title, /Load the runtime again/);
+    assert.match(panel.children[0].title, /Activate the runtime again/);
 });
 
-test('zero-target settled viewer keeps Load available', async () => {
+test('zero-target settled viewer keeps Activate available', async () => {
     const f = viewerFixture('classic', status({ loadEnabled: false, anyResident: false, anyActive: false, anyInactive: false,
         matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 }));
     const model = install(f.win);
     await new Promise(setImmediate);
     const control = f.win.document.getElementById('mc-native-runtime').children[0];
-    assert.equal(control.textContent, 'Load');
+    assert.equal(control.textContent, 'Activate');
     assert.equal(control.disabled, false);
     assert.equal(model.nextOperation(), 'load');
+});
+
+test('zero-target enabled viewer shows an armed Unload control without a visible count label', async () => {
+    const f = viewerFixture('modern', status({ loadEnabled: true, anyResident: false, anyActive: false, anyInactive: false,
+        matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 }));
+    const model = install(f.win);
+    await new Promise(setImmediate);
+    const panel = f.win.document.getElementById('mc-native-runtime');
+    assert.equal(panel.children[0].textContent, 'Unload');
+    assert.match(panel.children[0].title, /enabled; waiting for an eligible application/);
+    assert.match(panel.children[1].textContent, /enabled; waiting for an eligible application/);
+    assert.equal(model.nextOperation(), 'unload');
+});
+
+test('visible viewer refreshes status before the relay baseline expires', async () => {
+    const f = viewerFixture('classic');
+    install(f.win);
+    await new Promise(setImmediate);
+    assert.equal(f.intervals.length, 1);
+    f.intervals[0]();
+    assert.equal(f.win.document.getElementById('mc-native-runtime').children[0].textContent, 'Activate');
+    await new Promise(setImmediate);
+    assert.equal(f.requests.length, 2);
+    assert.deepEqual(f.requests.map(request => request.operation), ['getStatus', 'getStatus']);
 });
 
 test('view-only viewer shows status without exposing a mutation', async () => {
@@ -741,16 +867,17 @@ test('unknown status renders unknown with a recoverable status retry', async () 
     assert.equal(model.nextOperation(), 'getStatus');
 });
 
-test('pending status renders pending rather than unloaded and remains refreshable', async () => {
+test('pending status enters reconciliation and never renders as unloaded', async () => {
     const f = viewerFixture('classic', status({ operationPending: true }));
     const model = install(f.win);
     await new Promise(setImmediate);
     const panel = f.win.document.getElementById('mc-native-runtime');
-    assert.equal(panel.children[0].textContent, 'Retry Status');
-    assert.equal(panel.children[0].disabled, false);
+    assert.equal(panel.children[0].textContent, 'Unload');
+    assert.equal(panel.children[0].disabled, true);
     assert.match(panel.children[1].textContent, /^Runtime: operation pending/);
     assert.doesNotMatch(panel.children[1].textContent, /unloaded/);
-    assert.equal(model.nextOperation(), 'getStatus');
+    assert.equal(model.nextOperation(), null);
+    assert.equal(model.state.polling, true);
 });
 
 test('deployment wiring loads both local plugins from the pinned MeshCentral data path', () => {
@@ -767,6 +894,15 @@ test('deployment wiring loads both local plugins from the pinned MeshCentral dat
     assert.equal(Object.hasOwn(config.settings.plugins, 'nativeruntime'), false);
     assert.equal(config.settings.plugins.stfdeploy.enabled, true);
     assert.equal(config.domains[''].WebPublicPath, './meshcentral-data/public');
+
+    const custom = fs.readFileSync(path.join(root, 'public', 'scripts', 'custom.js'), 'utf8');
+    assert.match(custom, /plugin\/nativeruntime\/client\.js\?v=activate-rdp-v2/);
+    const runtimeServer = fs.readFileSync(path.join(root, 'plugins', 'nativeruntime', 'nativeruntime.js'), 'utf8');
+    assert.match(runtimeServer, /Cache-Control', 'no-store, max-age=0'/);
+
+    const agentServer = fs.readFileSync(path.join(root, 'meshagent.js'), 'utf8');
+    assert.match(agentServer, /case 'nativeRuntimeResult':/);
+    assert.match(agentServer, /callHook\('hook_processAgentData', command, obj, parent\)/);
 
     const compose = fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
     assert.match(compose, /image:\s*ghcr\.io\/ylianst\/meshcentral:1\.2\.1/);
