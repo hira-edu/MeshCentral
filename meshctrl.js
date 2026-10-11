@@ -1755,7 +1755,7 @@ function serverConnect() {
                 if (args.runasuser) { runAsUser = 1; } else if (args.runasuseronly) { runAsUser = 2; }
                 var reply = false;
                 if (args.reply) { reply = true; }
-                ws.send(JSON.stringify({ action: 'runcommands', nodeids: [args.id], type: ((args.powershell) ? 2 : 1), cmds: args.run, responseid: 'meshctrl', runAsUser: runAsUser, reply: reply }));
+                ws.send(JSON.stringify({ action: 'runcommands', nodeids: [args.id], type: ((args.powershell) ? 2 : 0), cmds: args.run, responseid: 'meshctrl', runAsUser: runAsUser, reply: reply }));
                 break;
             }
             case 'shell':
@@ -3205,6 +3205,12 @@ function displayDeviceInfo(sysinfo, lastconnect, network, nodes) {
                 }
             }
         }
+    
+        // Windows volumes
+        if ((hardware?.windows?.volumes)) { info["Volumes"] = hardware.windows.volumes; }
+    
+        // Bitlocker cache
+        if ((hardware?.windows?.bitlocker)) { info["Bitlocker cache"] = hardware.windows.bitlocker; }
     }
 
     // Display everything
