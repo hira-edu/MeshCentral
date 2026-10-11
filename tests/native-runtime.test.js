@@ -7,48 +7,36 @@ const path = require('node:path');
 const { createController, decodeRuntimeCookie, validShareWindow, nativeruntime } = require('../plugins/nativeruntime/nativeruntime');
 const { createModel, install } = require('../plugins/nativeruntime/client');
 
-const EPOCH = 'a'.repeat(32);
 const NODE = 'node//A234';
 const USER = 'user//operator';
 const command = (operation = 'getStatus', fields = {}) => ({ action: 'nativeRuntime', version: 1, operation, requestId: crypto.randomUUID(), ...fields });
 const status = (fields = {}) => ({
-    state: 'ready', canControl: true, loadEnabled: true, operationPending: false,
-    anyResident: true, anyActive: false, anyInactive: true, restartRequired: false,
-    matchedTargetCount: 1, residentTargetCount: 1, activeTargetCount: 0,
-    inactiveTargetCount: 1, failedTargetCount: 0, ...fields
+    state: 'ready', canControl: true, loadEnabled: true, running: true, ...fields
 });
-function endpoint(fields = {}) {
-    const snapshot = status(fields);
-    let flags = 0;
-    if (snapshot.loadEnabled) flags |= 0x1;
-    if (snapshot.operationPending) flags |= 0x2;
-    if (snapshot.anyResident) flags |= 0x4;
-    if (snapshot.anyActive) flags |= 0x8;
-    if (snapshot.anyInactive) flags |= 0x10;
-    if (snapshot.state === 'degraded') flags |= 0x20;
-    if (snapshot.restartRequired) flags |= 0x40;
-    return {
-        transportSuccess: true, transportError: 0, result: 0, flags,
-        matchedTargetCount: snapshot.matchedTargetCount, residentTargetCount: snapshot.residentTargetCount,
-        activeTargetCount: snapshot.activeTargetCount, inactiveTargetCount: snapshot.inactiveTargetCount,
-        failedTargetCount: snapshot.failedTargetCount, lastError: 0
-    };
-}
+
 function result(request, fields = {}) {
-    const emptyArchitecture = endpoint({ anyResident: false, anyActive: false, anyInactive: false,
-        matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 });
+    const isRunning = fields.running != null ? fields.running : (fields.loadEnabled != null ? fields.loadEnabled : true);
+    const endpoint = (active, err = 0) => ({
+        transportSuccess: err === 0, transportError: err, result: 0,
+        flags: active ? 1 : 0, matchedTargetCount: 0, residentTargetCount: 0,
+        activeTargetCount: active ? 1 : 0, inactiveTargetCount: active ? 0 : 1,
+        failedTargetCount: 0, lastError: err
+    });
     return {
         action: 'nativeRuntimeResult', version: 1, operation: fields.operation || request.operation, requestId: request.requestId,
         ok: fields.ok == null ? true : fields.ok,
-        controllers: fields.controllers || { x86: endpoint(fields), x64: emptyArchitecture },
         error: fields.error || null,
         arbitrary: fields.arbitrary,
-        package: fields.package
+        package: fields.package,
+        controllers: fields.controllers || { x86: endpoint(isRunning), x64: endpoint(isRunning) }
     };
 }
 const uiResult = (request, fields = {}) => ({
     action: 'nativeRuntimeResult', version: 1, operation: request.operation, requestId: request.requestId,
-    ok: true, error: null, ...status(), ...fields
+    ok: fields.ok == null ? true : fields.ok,
+    error: fields.error || null,
+    ...status(),
+    ...fields
 });
 
 function controllerFixture(options = {}) {
@@ -57,7 +45,6 @@ function controllerFixture(options = {}) {
     const controller = createController({
         getAgent: () => agent,
         authorize: async () => ({ principal: USER, nodeid: NODE, canControl: true }),
-        controllerEpoch: EPOCH,
         timeoutMs: 200,
         ...options
     });
@@ -70,123 +57,56 @@ function controllerFixture(options = {}) {
     return { controller, agent, sent, complete };
 }
 
-test('server relays only confirmed controller state and adds relay epoch/generation', async t => {
+test('server relays confirmed process status without private agent data', async t => {
     const f = controllerFixture(); t.after(f.controller.close);
     const request = command();
-    const response = await f.complete(request, { arbitrary: 'private-agent-data', package: { path: 'C:\\private' } });
+    const controller = { transportSuccess: true, transportError: 0, result: 0, flags: 1, matchedTargetCount: 0, residentTargetCount: 0,
+        activeTargetCount: 1, inactiveTargetCount: 0, failedTargetCount: 0, lastError: 0 };
+    const response = await f.complete(request, { arbitrary: 'private-agent-data', package: { path: 'C:\\private' },
+        controllers: { x86: { ...controller, path: 'C:\\private' }, x64: controller, extra: 'private-agent-data' } });
+    assert.deepEqual(response.controllers, { x86: controller, x64: controller });
     assert.equal(response.requestId, request.requestId);
     assert.equal(response.state, 'ready');
-    assert.equal(response.anyInactive, true);
-    assert.equal(response.anyActive, false);
-    assert.equal(response.canControl, true);
-    assert.equal(response.controllerEpoch, EPOCH);
-    assert.equal(response.generation, '0');
-    assert.equal(f.sent[0].nodeid, undefined);
-    assert.equal(f.sent[0].controllerEpoch, undefined);
-    assert.equal(f.sent[0].expectedGeneration, undefined);
-    assert.notEqual(f.sent[0].requestId, request.requestId);
-    assert.doesNotMatch(JSON.stringify(response), /private-agent-data|private|capabilities|policy/);
-});
-
-test('malformed or internally inconsistent agent state cannot confirm a request', async t => {
-    const f = controllerFixture({ timeoutMs: 10 }); t.after(f.controller.close);
-    const promise = f.controller.request(command(), {});
-    await new Promise(setImmediate);
-    const malformed = endpoint();
-    malformed.flags |= 0x8;
-    f.controller.receive(result(f.sent[0], { controllers: { x86: malformed, x64: endpoint({ anyResident: false, anyActive: false, anyInactive: false,
-        matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 }) } }), f.agent);
-    const response = await promise;
-    assert.equal(response.error.code, 'outcome-unknown');
-    assert.equal(response.state, 'unknown');
-});
-
-test('controller result is restricted to the five-value protocol enum', async t => {
-    const f = controllerFixture({ timeoutMs: 10 }); t.after(f.controller.close);
-    const promise = f.controller.request(command(), {});
-    await new Promise(setImmediate);
-    const invalid = endpoint();
-    invalid.result = 5;
-    f.controller.receive(result(f.sent[0], { ok: false, controllers: {
-        x86: invalid,
-        x64: endpoint({ anyResident: false, anyActive: false, anyInactive: false,
-            matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 })
-    } }), f.agent);
-    assert.equal((await promise).error.code, 'outcome-unknown');
-});
-
-test('controller persistence failure remains a degraded command failure', async t => {
-    const f = controllerFixture(); t.after(f.controller.close);
-    const failed = endpoint();
-    failed.result = 4;
-    failed.lastError = 5;
-    const response = await f.complete(command(), { ok: false, controllers: {
-        x86: failed,
-        x64: endpoint({ anyResident: false, anyActive: false, anyInactive: false,
-            matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 })
-    }, error: { code: 'controller-command-failed' } });
-    assert.equal(response.state, 'degraded');
-    assert.equal(response.controllers.x86.result, 4);
-    assert.equal(response.controllers.x86.lastError, 5);
-    assert.equal(response.error.code, 'controller-command-failed');
-});
-
-test('agent ok must agree with both confirmed controller results', async t => {
-    const f = controllerFixture({ timeoutMs: 10 }); t.after(f.controller.close);
-    const promise = f.controller.request(command(), {});
-    await new Promise(setImmediate);
-    const failed = endpoint();
-    failed.result = 1;
-    f.controller.receive(result(f.sent[0], { ok: true, controllers: {
-        x86: failed,
-        x64: endpoint({ anyResident: false, anyActive: false, anyInactive: false,
-            matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 })
-    } }), f.agent);
-    const response = await promise;
-    assert.equal(response.error.code, 'outcome-unknown');
-    assert.equal(response.state, 'unknown');
-});
-
-test('a controller reconciliation error produces degraded state', async t => {
-    const f = controllerFixture(); t.after(f.controller.close);
-    const warning = endpoint();
-    warning.lastError = 193;
-    const response = await f.complete(command(), { controllers: {
-        x86: warning,
-        x64: endpoint({ anyResident: false, anyActive: false, anyInactive: false,
-            matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 })
-    } });
-    assert.equal(response.ok, true);
-    assert.equal(response.state, 'degraded');
-    assert.equal(response.controllers.x86.lastError, 193);
-});
-
-test('architecture disagreement on load-enabled desired state is degraded', async t => {
-    const f = controllerFixture(); t.after(f.controller.close);
-    const response = await f.complete(command(), { controllers: {
-        x86: endpoint({ loadEnabled: true }),
-        x64: endpoint({ loadEnabled: false, anyResident: false, anyActive: false, anyInactive: false,
-            matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 })
-    } });
-    assert.equal(response.ok, true);
-    assert.equal(response.state, 'degraded');
     assert.equal(response.loadEnabled, true);
+    assert.equal(response.running, true);
+    assert.equal(response.canControl, true);
+    assert.equal(f.sent[0].nodeid, undefined);
+    assert.notEqual(f.sent[0].requestId, request.requestId);
+    assert.doesNotMatch(JSON.stringify(response), /private-agent-data|private/);
 });
 
-test('controller-wide enumeration failure may exceed the matched target count', async t => {
+test('malformed agent state cannot confirm a request', async t => {
+    const f = controllerFixture({ timeoutMs: 10 }); t.after(f.controller.close);
+    const promise = f.controller.request(command(), {});
+    await new Promise(setImmediate);
+    f.controller.receive({ action: 'nativeRuntimeResult', version: 1, requestId: f.sent[0].requestId, operation: f.sent[0].operation, ok: true }, f.agent);
+    const response = await promise;
+    assert.equal(response.error.code, 'outcome-unknown');
+    assert.equal(response.state, 'unknown');
+});
+
+test('clean process start sets running state to active', async t => {
     const f = controllerFixture(); t.after(f.controller.close);
-    const failedSnapshot = endpoint({ anyResident: false, anyActive: false, anyInactive: false,
-        matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0,
-        failedTargetCount: 1 });
-    const response = await f.complete(command(), { controllers: {
-        x86: failedSnapshot,
-        x64: endpoint({ anyResident: false, anyActive: false, anyInactive: false,
-            matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 })
-    } });
+    const startRequest = command('start');
+    const response = await f.complete(startRequest, { running: true });
+    assert.equal(f.sent.at(-1).operation, 'load', 'the agent only accepts load, never start');
+    assert.equal(response.operation, 'start');
     assert.equal(response.ok, true);
-    assert.equal(response.state, 'degraded');
-    assert.equal(response.matchedTargetCount, 0);
-    assert.equal(response.failedTargetCount, 1);
+    assert.equal(response.running, true);
+    assert.equal(response.loadEnabled, true);
+    assert.equal(response.state, 'ready');
+});
+
+test('clean process stop sets running state to stopped', async t => {
+    const f = controllerFixture(); t.after(f.controller.close);
+    const stopRequest = command('stop');
+    const response = await f.complete(stopRequest, { running: false, loadEnabled: false });
+    assert.equal(f.sent.at(-1).operation, 'unload');
+    assert.equal(response.operation, 'stop');
+    assert.equal(response.ok, true);
+    assert.equal(response.running, false);
+    assert.equal(response.loadEnabled, false);
+    assert.equal(response.state, 'ready');
 });
 
 test('duplicate request IDs share one result and changed contents conflict', async t => {
@@ -196,7 +116,7 @@ test('duplicate request IDs share one result and changed contents conflict', asy
     const duplicate = f.controller.request(request, {});
     await new Promise(setImmediate);
     assert.equal(f.sent.length, 1);
-    assert.equal((await f.controller.request({ ...request, operation: 'load', controllerEpoch: EPOCH, expectedGeneration: '0' }, {})).error.code, 'request-id-conflict');
+    assert.equal((await f.controller.request({ ...request, operation: 'load' }, {})).error.code, 'request-id-conflict');
     f.controller.receive(result(f.sent[0]), f.agent);
     assert.deepEqual(await first, await duplicate);
 });
@@ -214,86 +134,79 @@ test('wrong agent and operation replies cannot confirm a request', async t => {
     assert.equal((await promise).ok, true);
 });
 
-test('load and unload require fresh state and serialize changes per node', async t => {
+test('load and unload serialize changes per node', async t => {
     const f = controllerFixture(); t.after(f.controller.close);
     const initial = await f.complete(command());
-    assert.equal(initial.generation, '0');
+    assert.equal(initial.ok, true);
 
-    const loadRequest = command('load', { controllerEpoch: initial.controllerEpoch, expectedGeneration: initial.generation });
+    const loadRequest = command('load');
     const loading = f.controller.request(loadRequest, {});
     await new Promise(setImmediate);
     assert.deepEqual(f.sent.at(-1), { action: 'nativeRuntime', version: 1, operation: 'load', requestId: loadRequest.requestId });
-    const busy = await f.controller.request(command('unload', { controllerEpoch: EPOCH, expectedGeneration: '0' }), {});
+    const busy = await f.controller.request(command('unload'), {});
     assert.equal(busy.error.code, 'busy');
-    f.controller.receive(result(f.sent.at(-1), status({ anyActive: true, anyInactive: false, activeTargetCount: 1, inactiveTargetCount: 0 })), f.agent);
+    f.controller.receive(result(f.sent.at(-1), { running: true, loadEnabled: true }), f.agent);
     const loaded = await loading;
-    assert.equal(loaded.generation, '1');
-    assert.equal(loaded.anyActive, true);
+    assert.equal(loaded.running, true);
+    assert.equal(loaded.loadEnabled, true);
 
-    assert.equal((await f.controller.request(command('unload', { controllerEpoch: EPOCH, expectedGeneration: '0' }), {})).error.code, 'stale-generation');
-    const unloadRequest = command('unload', { controllerEpoch: EPOCH, expectedGeneration: '1' });
-    const unloaded = await f.complete(unloadRequest, status({ loadEnabled: false, restartRequired: true }));
-    assert.equal(unloaded.generation, '2');
-    assert.equal(unloaded.restartRequired, true);
-    assert.equal(unloaded.anyInactive, true);
-});
-
-test('an older in-flight status cannot overwrite a confirmed mutation', async t => {
-    const f = controllerFixture(); t.after(f.controller.close);
-    await f.complete(command());
-    const slowStatus = f.controller.request(command(), {});
-    await new Promise(setImmediate);
-    const slowWire = f.sent.at(-1);
-    const loadRequest = command('load', { controllerEpoch: EPOCH, expectedGeneration: '0' });
-    const loading = f.controller.request(loadRequest, {});
-    await new Promise(setImmediate);
-    const loadWire = f.sent.at(-1);
-    f.controller.receive(result(loadWire, status({ anyActive: true, anyInactive: false, activeTargetCount: 1, inactiveTargetCount: 0 })), f.agent);
-    assert.equal((await loading).generation, '1');
-    f.controller.receive(result(slowWire), f.agent);
-    assert.equal((await slowStatus).error.code, 'stale-generation');
-});
-
-test('a later-sequenced status started during a mutation cannot replace its baseline', async t => {
-    const f = controllerFixture(); t.after(f.controller.close);
-    await f.complete(command());
-
-    const loadRequest = command('load', { controllerEpoch: EPOCH, expectedGeneration: '0' });
-    const loading = f.controller.request(loadRequest, {});
-    await new Promise(setImmediate);
-    const loadWire = f.sent.at(-1);
-
-    const overlappingStatus = f.controller.request(command(), {});
-    await new Promise(setImmediate);
-    const statusWire = f.sent.at(-1);
-    f.controller.receive(result(statusWire), f.agent);
-    assert.equal((await overlappingStatus).generation, '0');
-
-    f.controller.receive(result(loadWire, status({ anyActive: true, anyInactive: false,
-        activeTargetCount: 1, inactiveTargetCount: 0 })), f.agent);
-    const loaded = await loading;
-    assert.equal(loaded.generation, '1');
-
-    const unloadRequest = command('unload', { controllerEpoch: EPOCH, expectedGeneration: '1' });
+    const unloadRequest = command('unload');
     const unloading = f.controller.request(unloadRequest, {});
     await new Promise(setImmediate);
     assert.equal(f.sent.at(-1).operation, 'unload');
-    f.controller.receive(result(f.sent.at(-1), status({ restartRequired: true })), f.agent);
-    assert.equal((await unloading).generation, '2');
+    f.controller.receive(result(f.sent.at(-1), { running: false, loadEnabled: false }), f.agent);
+    const unloaded = await unloading;
+    assert.equal(unloaded.running, false);
+    assert.equal(unloaded.loadEnabled, false);
 });
 
-test('unknown agent errors are replaced and Win32 lastError remains bounded', async t => {
+test('out-of-order replies resolve only their own requests', async t => {
     const f = controllerFixture(); t.after(f.controller.close);
-    const failed = endpoint();
-    failed.result = 1;
-    failed.lastError = 193;
+    await f.complete(command());
+    const statusRequest = command();
+    const slowStatus = f.controller.request(statusRequest, {});
+    await new Promise(setImmediate);
+    const slowWire = f.sent.at(-1);
+    const loadRequest = command('load');
+    const loading = f.controller.request(loadRequest, {});
+    await new Promise(setImmediate);
+    const loadWire = f.sent.at(-1);
+    f.controller.receive(result(loadWire, { running: true, loadEnabled: true }), f.agent);
+    f.controller.receive(result(slowWire, { running: false, loadEnabled: false }), f.agent);
+    const [load, status] = await Promise.all([loading, slowStatus]);
+    assert.deepEqual([load.requestId, load.operation, load.running], [loadRequest.requestId, 'load', true]);
+    assert.deepEqual([status.requestId, status.operation, status.running], [statusRequest.requestId, 'getStatus', false]);
+});
+
+test('controller transport and launch failures are not reported as a healthy stop', async t => {
+    const f = controllerFixture(); t.after(f.controller.close);
+    const ok = { transportSuccess: true, transportError: 0, result: 0, flags: 0, matchedTargetCount: 0, residentTargetCount: 0,
+        activeTargetCount: 0, inactiveTargetCount: 1, failedTargetCount: 0, lastError: 0 };
+    const failed = { ...ok, transportSuccess: false, transportError: 2, lastError: 2 };
+    const crashed = { ...ok, transportError: 1067, lastError: 1067 };
+    const cases = [[ok, ok, 'ready'], [ok, failed, 'degraded'], [ok, crashed, 'degraded'], [failed, failed, 'unavailable']];
+    for (const [x86, x64, state] of cases) {
+        const response = await f.complete(command(), { running: false, state: 'ready', controllers: { x86, x64 } });
+        assert.equal(response.state, state);
+        assert.equal(response.running, false);
+    }
+});
+
+test('removed stale-browser fields are rejected', async t => {
+    const f = controllerFixture(); t.after(f.controller.close);
+    for (const fields of [{ controllerEpoch: '0'.repeat(32) }, { expectedGeneration: '0' }]) {
+        assert.equal((await f.controller.request(command('load', fields), {})).error.code, 'invalid-request');
+    }
+    assert.equal(f.sent.length, 0);
+});
+
+test('unknown agent errors are replaced', async t => {
+    const f = controllerFixture(); t.after(f.controller.close);
     const response = await f.complete(command(), {
-        ok: false, controllers: { x86: failed, x64: endpoint({ anyResident: false, anyActive: false, anyInactive: false,
-            matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 }) },
-        error: { code: 'secret-code', message: 'C:\\private\\detail', lastError: 193 }
+        ok: false,
+        error: { code: 'secret-code', message: 'C:\\private\\detail' }
     });
     assert.deepEqual(response.error, { code: 'invalid-agent-result', message: 'The agent returned an invalid runtime result.' });
-    assert.equal(response.controllers.x86.lastError, 193);
     assert.doesNotMatch(JSON.stringify(response), /secret-code|private/);
 });
 
@@ -302,7 +215,6 @@ test('legacy policy, capability and physical unload operations are rejected', as
     for (const operation of ['getCapabilities', 'setPolicy', 'deactivate', 'freeLibrary']) {
         assert.equal((await f.controller.request(command(operation), {})).error.code, 'invalid-request');
     }
-    assert.equal((await f.controller.request(command('getStatus', { controllerEpoch: EPOCH }), {})).error.code, 'invalid-request');
     assert.equal(f.sent.length, 0);
 });
 
@@ -348,9 +260,10 @@ function pluginFixture() {
     const sent = [];
     const agent = { dbNodeKey: NODE, send(value) {
         const request = JSON.parse(value); sent.push(request);
-        const fields = request.operation === 'load' ?
-            status({ anyActive: true, anyInactive: false, activeTargetCount: 1, inactiveTargetCount: 0 }) :
-            request.operation === 'unload' ? status({ loadEnabled: false, restartRequired: true }) : status();
+        const fields = (request.operation === 'load' || request.operation === 'start') ?
+            { running: true, loadEnabled: true } :
+            (request.operation === 'unload' || request.operation === 'stop') ?
+            { running: false, loadEnabled: false } : { running: false, loadEnabled: false };
         queueMicrotask(() => plugin['hook_processAgentData'](result(request, fields), agent));
     } };
     web.wsagents[NODE] = agent;
@@ -370,9 +283,9 @@ test('authenticated desktop rights authorize load without a plugin ACL', async t
     const f = pluginFixture(); t.after(f.plugin.close);
     const initial = await f.request();
     assert.equal(initial.value.ok, true);
-    const loaded = await f.request(command('load', { nodeid: NODE, controllerEpoch: initial.value.controllerEpoch, expectedGeneration: initial.value.generation }));
+    const loaded = await f.request(command('load', { nodeid: NODE }));
     assert.equal(loaded.value.ok, true);
-    assert.equal(loaded.value.anyActive, true);
+    assert.equal(loaded.value.running, true);
     f.web.GetNodeRights = () => 0;
     assert.equal((await f.request()).status, 403);
 });
@@ -384,8 +297,7 @@ test('authenticated remote-view-only rights expose status but deny mutations', a
     assert.equal(initial.status, 200);
     assert.equal(initial.value.canControl, false);
     assert.equal(f.sent.length, 1);
-    const denied = await f.request(command('load', { nodeid: NODE, controllerEpoch: initial.value.controllerEpoch,
-        expectedGeneration: initial.value.generation }));
+    const denied = await f.request(command('load', { nodeid: NODE }));
     assert.equal(denied.status, 403);
     assert.equal(denied.value.canControl, false);
     assert.equal(f.sent.length, 1);
@@ -397,8 +309,7 @@ test('domain desktop view-only exposes authenticated status but denies mutations
     const initial = await f.request();
     assert.equal(initial.status, 200);
     assert.equal(initial.value.canControl, false);
-    const denied = await f.request(command('load', { nodeid: NODE, controllerEpoch: initial.value.controllerEpoch,
-        expectedGeneration: initial.value.generation }));
+    const denied = await f.request(command('load', { nodeid: NODE }));
     assert.equal(denied.status, 403);
     assert.equal(denied.value.canControl, false);
     assert.equal(f.sent.length, 1);
@@ -412,10 +323,10 @@ test('live desktop guest shares may load and unload; expiry and revocation deny 
     f.web.GetNodeRights = () => 0;
     f.setToken({ userid: USER, domainid: '', ip: '127.0.0.1', nid: NODE, pid: 'share', p: 2 });
     const initial = await f.request(command());
-    const loaded = await f.request(command('load', { controllerEpoch: initial.value.controllerEpoch, expectedGeneration: initial.value.generation }));
-    assert.equal(loaded.value.anyActive, true);
-    const unloaded = await f.request(command('unload', { controllerEpoch: loaded.value.controllerEpoch, expectedGeneration: loaded.value.generation }));
-    assert.equal(unloaded.value.restartRequired, true);
+    const loaded = await f.request(command('load'));
+    assert.equal(loaded.value.running, true);
+    const unloaded = await f.request(command('unload'));
+    assert.equal(unloaded.value.running, false);
     share.revoked = true;
     assert.equal((await f.request(command())).status, 403);
     share.revoked = false;
@@ -436,8 +347,7 @@ test('view-only guest shares expose status but deny mutations', async t => {
     f.setToken({ userid: USER, domainid: '', ip: '127.0.0.1', nid: NODE, pid: 'share', p: 2, vo: 1 });
     const tokenViewOnly = await f.request(command());
     assert.equal(tokenViewOnly.value.canControl, false);
-    const denied = await f.request(command('unload', { controllerEpoch: tokenViewOnly.value.controllerEpoch,
-        expectedGeneration: tokenViewOnly.value.generation }));
+    const denied = await f.request(command('unload'));
     assert.equal(denied.status, 403);
     assert.equal(denied.value.canControl, false);
     assert.equal(f.sent.length, 2);
@@ -453,8 +363,7 @@ test('domain desktop view-only exposes guest status but denies mutations', async
     const initial = await f.request(command());
     assert.equal(initial.status, 200);
     assert.equal(initial.value.canControl, false);
-    const denied = await f.request(command('unload', { controllerEpoch: initial.value.controllerEpoch,
-        expectedGeneration: initial.value.generation }));
+    const denied = await f.request(command('unload'));
     assert.equal(denied.status, 403);
     assert.equal(denied.value.canControl, false);
     assert.equal(f.sent.length, 1);
@@ -474,11 +383,11 @@ test('share revocation while waiting hides the completed result', async t => {
     assert.equal((await pending).error.code, 'access-denied');
 });
 
-test('model drives one stateful toggle and permits reloading with a restoration warning', async () => {
+test('model drives one stateful toggle between stopped and running', async () => {
     const replies = [
-        status({ controllerEpoch: EPOCH, generation: '0', loadEnabled: false }),
-        status({ controllerEpoch: EPOCH, generation: '1', anyActive: true, anyInactive: false, activeTargetCount: 1, inactiveTargetCount: 0 }),
-        status({ controllerEpoch: EPOCH, generation: '2', loadEnabled: false, restartRequired: true })
+        status({ loadEnabled: false, running: false }),
+        status({ loadEnabled: true, running: true }),
+        status({ loadEnabled: false, running: false })
     ];
     const requests = [];
     const model = createModel(async request => {
@@ -488,61 +397,37 @@ test('model drives one stateful toggle and permits reloading with a restoration 
     await model.request('getStatus');
     assert.equal(model.nextOperation(), 'load');
     await model.request('load');
-    assert.equal(requests[1].controllerEpoch, EPOCH);
-    assert.equal(requests[1].expectedGeneration, '0');
     assert.equal(model.nextOperation(), 'unload');
     await model.request('unload');
-    assert.equal(requests[2].expectedGeneration, '1');
-    assert.equal(model.state.status.restartRequired, true);
     assert.equal(model.nextOperation(), 'load');
 });
 
-test('settled disabled state without active or resident targets offers Load', async () => {
+test('settled stopped state offers Activate', async () => {
     const request = command();
-    const model = createModel(async value => uiResult(value, status({ controllerEpoch: EPOCH, generation: '0',
-        loadEnabled: false, anyResident: false, anyActive: false, anyInactive: false,
-        matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 })),
-    crypto.randomUUID, () => {});
+    const model = createModel(async value => uiResult(value, status({ loadEnabled: false, running: false })),
+        crypto.randomUUID, () => {});
     await model.request(request.operation);
     assert.equal(model.nextOperation(), 'load');
 });
 
-test('settled enabled state without targets remains armed and offers Unload', async () => {
+test('settled running state offers Unload', async () => {
     const request = command();
-    const model = createModel(async value => uiResult(value, status({ controllerEpoch: EPOCH, generation: '0',
-        loadEnabled: true, anyResident: false, anyActive: false, anyInactive: false,
-        matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 })),
-    crypto.randomUUID, () => {});
+    const model = createModel(async value => uiResult(value, status({ loadEnabled: true, running: true })),
+        crypto.randomUUID, () => {});
     await model.request(request.operation);
     assert.equal(model.nextOperation(), 'unload');
-});
-
-test('a confirmed controller failure remains actionable from its reported state', async () => {
-    const requests = [];
-    const model = createModel(async request => {
-        requests.push(request);
-        if (request.operation === 'getStatus') return uiResult(request, status({ controllerEpoch: EPOCH, generation: '0', loadEnabled: false }));
-        return uiResult(request, status({ ok: false, state: 'degraded', controllerEpoch: EPOCH, generation: '1',
-            loadEnabled: false, failedTargetCount: 1, error: { code: 'controller-command-failed', message: 'The controller could not complete the command.' } }));
-    }, crypto.randomUUID, () => {});
-    await model.request('getStatus');
-    await model.request('load');
-    assert.equal(model.state.error, 'The controller could not complete the command.');
-    assert.equal(model.nextOperation(), 'load');
-    assert.deepEqual(requests.map(request => request.operation), ['getStatus', 'load']);
 });
 
 test('an unknown mutation outcome is reconciled with getStatus and never retried', async () => {
     const requests = [];
     const model = createModel(async request => {
         requests.push(request);
-        if (requests.length === 1) return uiResult(request, status({ controllerEpoch: EPOCH, generation: '0', loadEnabled: false }));
+        if (requests.length === 1) return uiResult(request, status({ loadEnabled: false, running: false }));
         if (request.operation === 'load') return {
             action: 'nativeRuntimeResult', version: 1, operation: 'load', requestId: request.requestId,
             ok: false, state: 'unknown', error: { code: 'outcome-unknown', message: 'Status unknown.' }
         };
-        return uiResult(request, status({ controllerEpoch: EPOCH, generation: '1', anyActive: true,
-            anyInactive: false, activeTargetCount: 1, inactiveTargetCount: 0 }));
+        return uiResult(request, status({ loadEnabled: true, running: true }));
     }, crypto.randomUUID, () => {});
     await model.request('getStatus');
     await model.request('load');
@@ -551,127 +436,42 @@ test('an unknown mutation outcome is reconciled with getStatus and never retried
     assert.equal(model.nextOperation(), 'unload');
 });
 
-test('a stale click performs a read-only preflight before one mutation', async () => {
+test('model accepts start and stop aliases matching load and unload', async () => {
     const requests = [];
-    let clock = 0;
     const model = createModel(async request => {
         requests.push(request);
-        return uiResult(request, status({ controllerEpoch: EPOCH, generation: request.operation === 'load' ? '1' : '0',
-            loadEnabled: request.operation === 'load', anyActive: request.operation === 'load',
-            anyInactive: request.operation !== 'load', activeTargetCount: request.operation === 'load' ? 1 : 0,
-            inactiveTargetCount: request.operation === 'load' ? 0 : 1 }));
-    }, crypto.randomUUID, () => {}, async () => {}, () => clock);
+        if (request.operation === 'getStatus') return uiResult(request, status({ loadEnabled: false, running: false }));
+        if (request.operation === 'start') return uiResult(request, status({ loadEnabled: true, running: true }));
+        if (request.operation === 'stop') return uiResult(request, status({ loadEnabled: false, running: false }));
+        return uiResult(request);
+    }, crypto.randomUUID, () => {});
     await model.request('getStatus');
-    clock = 13000;
-    await model.request('load');
-    assert.deepEqual(requests.map(request => request.operation), ['getStatus', 'getStatus', 'load']);
-    assert.equal(requests.filter(request => request.operation === 'load').length, 1);
+    assert.equal(model.nextOperation(), 'load');
+    assert.equal(await model.request('stop'), false, 'cannot stop when stopped');
+    assert.equal(await model.request('start'), true);
     assert.equal(model.nextOperation(), 'unload');
-});
-
-test('a successful pending mutation polls status until the controller settles', async () => {
-    const requests = [];
-    let statusReads = 0;
-    const model = createModel(async request => {
-        requests.push(request);
-        if (request.operation === 'load') return uiResult(request, status({ controllerEpoch: EPOCH, generation: '1',
-            operationPending: true, anyActive: true, anyInactive: false, activeTargetCount: 1, inactiveTargetCount: 0 }));
-        statusReads++;
-        return uiResult(request, status({ controllerEpoch: EPOCH, generation: statusReads === 1 ? '0' : '1', loadEnabled: statusReads !== 1,
-            operationPending: statusReads === 2, anyActive: statusReads > 1, anyInactive: statusReads <= 1,
-            activeTargetCount: statusReads > 1 ? 1 : 0, inactiveTargetCount: statusReads <= 1 ? 1 : 0 }));
-    }, crypto.randomUUID, () => {}, async () => {});
-    await model.request('getStatus');
-    await model.request('load');
-    assert.deepEqual(requests.map(request => request.operation), ['getStatus', 'load', 'getStatus', 'getStatus']);
-    assert.equal(model.state.status.operationPending, false);
-    assert.equal(model.nextOperation(), 'unload');
-});
-
-test('pending polling is bounded and leaves a manual status retry path', async () => {
-    const requests = [];
-    let statusReads = 0;
-    const model = createModel(async request => {
-        requests.push(request);
-        if (request.operation === 'load') return uiResult(request, status({ controllerEpoch: EPOCH, generation: '1',
-            operationPending: true }));
-        statusReads++;
-        return uiResult(request, status({ controllerEpoch: EPOCH, generation: statusReads === 1 ? '0' : '1', loadEnabled: statusReads !== 1,
-            operationPending: statusReads > 1 && statusReads < 6 }));
-    }, crypto.randomUUID, () => {}, async () => {});
-    await model.request('getStatus');
-    await model.request('load');
-    assert.equal(requests.filter(request => request.operation === 'load').length, 1);
-    assert.equal(requests.filter(request => request.operation === 'getStatus').length, 5);
-    assert.equal(model.state.status.operationPending, true);
-    assert.match(model.state.error, /still pending/);
-    assert.equal(model.nextOperation(), 'getStatus');
-    await model.request('getStatus');
-    assert.equal(model.state.status.operationPending, false);
-    assert.equal(model.nextOperation(), 'unload');
-});
-
-test('an initial pending status enters the bounded reconciliation loop', async () => {
-    const requests = [];
-    const model = createModel(async request => {
-        requests.push(request);
-        return uiResult(request, status({ controllerEpoch: EPOCH, generation: '0', loadEnabled: false,
-            operationPending: requests.length === 1 }));
-    }, crypto.randomUUID, () => {}, async () => {});
-    await model.request('getStatus');
-    assert.deepEqual(requests.map(request => request.operation), ['getStatus', 'getStatus']);
-    assert.equal(model.state.polling, false);
-    assert.equal(model.state.status.operationPending, false);
+    assert.equal(await model.request('start'), false, 'cannot start when running');
+    assert.equal(await model.request('stop'), true);
     assert.equal(model.nextOperation(), 'load');
 });
 
-test('same-scope reset cancels a sleeping pending-status loop', async () => {
+test('a confirmed controller failure remains actionable from its reported state', async () => {
     const requests = [];
-    let releasePause;
     const model = createModel(async request => {
         requests.push(request);
-        return uiResult(request, status({ controllerEpoch: EPOCH, generation: request.operation === 'load' ? '1' : '0',
-            loadEnabled: request.operation === 'load',
-            operationPending: request.operation === 'load' }));
-    }, crypto.randomUUID, () => {}, () => new Promise(resolve => { releasePause = resolve; }));
-    model.reset('A');
+        if (request.operation === 'getStatus') return uiResult(request, status({ loadEnabled: false, running: false }));
+        return uiResult(request, status({ ok: false, state: 'degraded', loadEnabled: false, running: false,
+            error: { code: 'controller-command-failed', message: 'The controller could not complete the command.' } }));
+    }, crypto.randomUUID, () => {});
     await model.request('getStatus');
-    const loading = model.request('load');
-    await new Promise(setImmediate);
-    assert.equal(model.state.polling, true);
-    model.reset('A');
-    releasePause();
-    await loading;
+    await model.request('load');
+    assert.equal(model.state.error, 'The controller could not complete the command.');
+    assert.equal(model.nextOperation(), 'load');
     assert.deepEqual(requests.map(request => request.operation), ['getStatus', 'load']);
-    assert.equal(model.state.status, null);
-    assert.equal(model.state.polling, false);
-});
-
-test('A-B-A reset sequence cannot revive an earlier pending-status loop', async () => {
-    const requests = [];
-    let releasePause;
-    const model = createModel(async request => {
-        requests.push(request);
-        return uiResult(request, status({ controllerEpoch: EPOCH, generation: request.operation === 'load' ? '1' : '0',
-            loadEnabled: request.operation === 'load',
-            operationPending: request.operation === 'load' }));
-    }, crypto.randomUUID, () => {}, () => new Promise(resolve => { releasePause = resolve; }));
-    model.reset('A');
-    await model.request('getStatus');
-    const loading = model.request('load');
-    await new Promise(setImmediate);
-    model.reset('B');
-    model.reset('A');
-    releasePause();
-    await loading;
-    assert.deepEqual(requests.map(request => request.operation), ['getStatus', 'load']);
-    assert.equal(model.state.scope, 'A');
-    assert.equal(model.state.status, null);
-    assert.equal(model.state.polling, false);
 });
 
 // Minimal DOM with the insertion semantics of all five MeshCentral 1.2.1 viewers.
-function viewerFixture(kind, replyFields = status({ loadEnabled: false })) {
+function viewerFixture(kind, replyFields = status({ loadEnabled: false, running: false })) {
     const elements = [];
     const intervals = [];
     const observations = [];
@@ -723,7 +523,7 @@ function viewerFixture(kind, replyFields = status({ loadEnabled: false })) {
         URL, AbortController, setTimeout, clearTimeout, setInterval(fn) { intervals.push(fn); return intervals.length; }, clearInterval() {}, addEventListener() {},
         MutationObserver: class { constructor(callback) { this.callback = callback; observers.push(this); } observe(target, options) { observations.push({ target, options }); } },
         fetch: async (url, options) => { const request = JSON.parse(options.body); requestUrls.push(url); requests.push(request); return {
-            status: 200, json: async () => uiResult(request, { controllerEpoch: EPOCH, generation: '0', ...replyFields }) }; } };
+            status: 200, json: async () => uiResult(request, replyFields) }; } };
     return { win, anchor, connect, rdpAnchor, disconnectAnchor, disconnect, intervals, observations, observers, requests, requestUrls };
 }
 
@@ -741,12 +541,13 @@ for (const surface of ['classic', 'modern', 'mobile', 'guest', 'guest-mobile']) 
         assert.equal(panel.children[0].textContent, 'Activate');
         assert.equal(panel.children[0].value, surface === 'modern' ? '' : 'Activate');
         assert.equal(panel.children[0].disabled, false);
+        assert.equal(panel.children[0].title, 'Activate the runtime binary with elevated permissions.');
         assert.equal(panel.children[0].tagName, surface === 'modern' ? 'BUTTON' : 'INPUT');
         assert.equal(panel.children[0].className, f.connect.className);
         assert.equal(panel.children[0].style.cssText, f.connect.style.cssText);
         assert.equal(panel.children[1].attributes['aria-live'], 'polite');
         assert.match(panel.children[1].style.cssText, /position:absolute/);
-        assert.match(panel.children[1].textContent, /Runtime: disabled \(resident, pass-through\)/);
+        assert.match(panel.children[1].textContent, /Runtime: stopped/);
         assert.doesNotMatch(panel.style.cssText, /flex-wrap/);
         assert.match(panel.style.cssText, /margin-inline:4px/);
         assert.deepEqual(f.observations[0].options, { childList: true, subtree: true });
@@ -777,51 +578,18 @@ for (const surface of ['classic', 'modern', 'mobile']) {
     });
 }
 
-test('loaded viewer exposes Unload and explains that unload is pass-through', async () => {
-    const f = viewerFixture('classic', status({ anyActive: true, anyInactive: false, activeTargetCount: 1, inactiveTargetCount: 0 }));
+test('running viewer exposes Unload and explains stop tooltip', async () => {
+    const f = viewerFixture('classic', status({ running: true, loadEnabled: true }));
     install(f.win);
     await new Promise(setImmediate);
     const control = f.win.document.getElementById('mc-native-runtime').children[0];
     assert.equal(control.textContent, 'Unload');
-    assert.match(control.title, /keeping the component resident/);
-    assert.match(control.title, /never physically unloads/);
+    assert.equal(control.title, 'Stop the runtime binary.');
+    const statusSpan = f.win.document.getElementById('mc-native-runtime').children[1];
+    assert.match(statusSpan.textContent, /Runtime: active/);
 });
 
-test('restart-required viewer keeps Activate available and reports incomplete restoration', async () => {
-    const f = viewerFixture('guest', status({ loadEnabled: false, restartRequired: true }));
-    install(f.win);
-    await new Promise(setImmediate);
-    const panel = f.win.document.getElementById('mc-native-runtime');
-    assert.equal(panel.children[0].textContent, 'Activate');
-    assert.equal(panel.children[0].disabled, false);
-    assert.match(panel.children[1].textContent, /restart required for complete restoration/);
-    assert.match(panel.children[0].title, /Activate the runtime again/);
-});
-
-test('zero-target settled viewer keeps Activate available', async () => {
-    const f = viewerFixture('classic', status({ loadEnabled: false, anyResident: false, anyActive: false, anyInactive: false,
-        matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 }));
-    const model = install(f.win);
-    await new Promise(setImmediate);
-    const control = f.win.document.getElementById('mc-native-runtime').children[0];
-    assert.equal(control.textContent, 'Activate');
-    assert.equal(control.disabled, false);
-    assert.equal(model.nextOperation(), 'load');
-});
-
-test('zero-target enabled viewer shows an armed Unload control without a visible count label', async () => {
-    const f = viewerFixture('modern', status({ loadEnabled: true, anyResident: false, anyActive: false, anyInactive: false,
-        matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0, inactiveTargetCount: 0 }));
-    const model = install(f.win);
-    await new Promise(setImmediate);
-    const panel = f.win.document.getElementById('mc-native-runtime');
-    assert.equal(panel.children[0].textContent, 'Unload');
-    assert.match(panel.children[0].title, /enabled; waiting for an eligible application/);
-    assert.match(panel.children[1].textContent, /enabled; waiting for an eligible application/);
-    assert.equal(model.nextOperation(), 'unload');
-});
-
-test('visible viewer refreshes status before the relay baseline expires', async () => {
+test('visible viewer refreshes status periodically', async () => {
     const f = viewerFixture('classic');
     install(f.win);
     await new Promise(setImmediate);
@@ -844,16 +612,6 @@ test('view-only viewer shows status without exposing a mutation', async () => {
     assert.equal(model.nextOperation(), null);
 });
 
-test('failed targets render degraded rather than unloaded', async () => {
-    const f = viewerFixture('classic', status({ state: 'degraded', failedTargetCount: 1 }));
-    install(f.win);
-    await new Promise(setImmediate);
-    const text = f.win.document.getElementById('mc-native-runtime').children[1].textContent;
-    assert.match(text, /^Runtime: degraded/);
-    assert.match(text, /1 failed/);
-    assert.doesNotMatch(text, /unloaded/);
-});
-
 test('unknown status renders unknown with a recoverable status retry', async () => {
     const f = viewerFixture('classic', { ok: false, state: 'unknown', canControl: false,
         error: { code: 'outcome-unknown', message: 'Status unknown.' } });
@@ -863,21 +621,35 @@ test('unknown status renders unknown with a recoverable status retry', async () 
     assert.equal(panel.children[0].textContent, 'Retry Status');
     assert.equal(panel.children[0].disabled, false);
     assert.match(panel.children[1].textContent, /status unavailable; Status unknown/);
-    assert.doesNotMatch(panel.children[1].textContent, /unloaded/);
     assert.equal(model.nextOperation(), 'getStatus');
 });
 
-test('pending status enters reconciliation and never renders as unloaded', async () => {
-    const f = viewerFixture('classic', status({ operationPending: true }));
+test('failed targets render degraded rather than stopped', async () => {
+    const f = viewerFixture('classic', status({ state: 'degraded', running: false, loadEnabled: false }));
+    install(f.win);
+    await new Promise(setImmediate);
+    const text = f.win.document.getElementById('mc-native-runtime').children[1].textContent;
+    assert.match(text, /^Runtime: degraded/);
+    assert.doesNotMatch(text, /stopped/);
+});
+
+test('degraded active targets render degraded active', async () => {
+    const f = viewerFixture('classic', status({ state: 'degraded', running: true, loadEnabled: true }));
+    install(f.win);
+    await new Promise(setImmediate);
+    const text = f.win.document.getElementById('mc-native-runtime').children[1].textContent;
+    assert.match(text, /^Runtime: degraded \(active\)/);
+    assert.doesNotMatch(text, /Runtime: active$/);
+});
+
+test('view-only viewer with unavailable status allows retry', async () => {
+    const f = viewerFixture('classic', status({ state: 'unavailable', canControl: false }));
     const model = install(f.win);
     await new Promise(setImmediate);
     const panel = f.win.document.getElementById('mc-native-runtime');
-    assert.equal(panel.children[0].textContent, 'Unload');
-    assert.equal(panel.children[0].disabled, true);
-    assert.match(panel.children[1].textContent, /^Runtime: operation pending/);
-    assert.doesNotMatch(panel.children[1].textContent, /unloaded/);
-    assert.equal(model.nextOperation(), null);
-    assert.equal(model.state.polling, true);
+    assert.equal(panel.children[0].textContent, 'Retry Status');
+    assert.equal(panel.children[0].disabled, false);
+    assert.equal(model.nextOperation(), 'getStatus');
 });
 
 test('deployment wiring loads both local plugins from the pinned MeshCentral data path', () => {
@@ -896,7 +668,7 @@ test('deployment wiring loads both local plugins from the pinned MeshCentral dat
     assert.equal(config.domains[''].WebPublicPath, './meshcentral-data/public');
 
     const custom = fs.readFileSync(path.join(root, 'public', 'scripts', 'custom.js'), 'utf8');
-    assert.match(custom, /plugin\/nativeruntime\/client\.js\?v=activate-rdp-v2/);
+    assert.match(custom, /plugin\/nativeruntime\/client\.js\?v=binary-lifecycle-v1/);
     const runtimeServer = fs.readFileSync(path.join(root, 'plugins', 'nativeruntime', 'nativeruntime.js'), 'utf8');
     assert.match(runtimeServer, /Cache-Control', 'no-store, max-age=0'/);
 

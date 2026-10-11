@@ -3,33 +3,56 @@
 const crypto = require('node:crypto');
 const path = require('node:path');
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const GENERATION = /^(0|[1-9][0-9]{0,19})$/;
-const EPOCH = /^[0-9a-f]{32}$/;
-const OPERATIONS = new Set(['getStatus', 'load', 'unload']);
-const MUTATIONS = new Set(['load', 'unload']);
+const OPERATIONS = new Set(['getStatus', 'start', 'stop', 'load', 'unload']);
+const MUTATIONS = new Set(['start', 'stop', 'load', 'unload']);
+const STATES = new Set(['ready', 'degraded', 'unavailable']);
 const UNBOUNDED_GUEST_COOKIE_MINUTES = Math.floor(Number.MAX_SAFE_INTEGER / 60000);
-const COUNT_STATUS_FIELDS = ['matchedTargetCount', 'residentTargetCount', 'activeTargetCount', 'inactiveTargetCount', 'failedTargetCount'];
-const CONTROLLER_FLAG_MASK = 0x7f;
 const AGENT_ERRORS = Object.freeze({
     'invalid-request': 'The agent rejected the runtime request.',
     'controller-transport-failed': 'One or more runtime controllers could not be reached.',
     'controller-command-failed': 'One or more runtime controllers rejected or could not complete the command.'
 });
 
+// The agent's relay parser accepts getStatus/load/unload; start and stop are
+// browser aliases and must be translated before they reach the agent.
+function mapOperation(operation) {
+    if (operation === 'start') return 'load';
+    if (operation === 'stop') return 'unload';
+    return operation;
+}
+
+const CONTROLLER_UINT_FIELDS = ['transportError', 'result', 'flags', 'matchedTargetCount', 'residentTargetCount',
+    'activeTargetCount', 'inactiveTargetCount', 'failedTargetCount', 'lastError'];
+
+// Forward only the fixed fields the agent emits, never arbitrary agent data.
+function sanitizeController(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.transportSuccess !== 'boolean') return null;
+    const result = { transportSuccess: value.transportSuccess };
+    for (const field of CONTROLLER_UINT_FIELDS) {
+        if (!Number.isInteger(value[field]) || value[field] < 0 || value[field] > 0xffffffff) return null;
+        result[field] = value[field];
+    }
+    return result;
+}
+
 function emptyStatus() {
     return {
-        state: 'unknown', loadEnabled: false, operationPending: false,
-        anyResident: false, anyActive: false, anyInactive: false, restartRequired: false,
-        matchedTargetCount: 0, residentTargetCount: 0, activeTargetCount: 0,
-        inactiveTargetCount: 0, failedTargetCount: 0
+        state: 'unknown',
+        running: false,
+        loadEnabled: false
     };
 }
 
-function failure(request, code, message, controllerEpoch, generation, canControl) {
-    const response = { action: 'nativeRuntimeResult', version: 1, operation: request.operation, requestId: request.requestId,
-        ok: false, ...emptyStatus(), error: { code, message } };
-    if (controllerEpoch) response.controllerEpoch = controllerEpoch;
-    if (generation != null) response.generation = String(generation);
+function failure(request, code, message, canControl) {
+    const response = {
+        action: 'nativeRuntimeResult',
+        version: 1,
+        operation: request ? request.operation : undefined,
+        requestId: request ? request.requestId : undefined,
+        ok: false,
+        ...emptyStatus(),
+        error: { code, message }
+    };
     if (typeof canControl === 'boolean') response.canControl = canControl;
     return response;
 }
@@ -37,14 +60,8 @@ function failure(request, code, message, controllerEpoch, generation, canControl
 function validateRequest(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value) || !OPERATIONS.has(value.operation)) return false;
     const allowed = new Set(['action', 'version', 'operation', 'requestId', 'nodeid']);
-    if (MUTATIONS.has(value.operation)) {
-        allowed.add('controllerEpoch');
-        allowed.add('expectedGeneration');
-    }
     return Object.keys(value).every(key => allowed.has(key)) &&
-        value.action === 'nativeRuntime' && value.version === 1 && typeof value.requestId === 'string' && UUID.test(value.requestId) &&
-        (!MUTATIONS.has(value.operation) || (typeof value.controllerEpoch === 'string' && EPOCH.test(value.controllerEpoch) &&
-            typeof value.expectedGeneration === 'string' && GENERATION.test(value.expectedGeneration)));
+        value.action === 'nativeRuntime' && value.version === 1 && typeof value.requestId === 'string' && UUID.test(value.requestId);
 }
 
 function validShareWindow(share, now) {
@@ -78,50 +95,64 @@ function decodeRuntimeCookie(server, value) {
     return token && typeof token.pid === 'string' ? token : null;
 }
 
-function uint32(value) {
-    return Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
-}
-
-function sanitizeController(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.transportSuccess !== 'boolean') return null;
-    const result = { transportSuccess: value.transportSuccess };
-    for (const field of ['transportError', 'result', 'flags', ...COUNT_STATUS_FIELDS, 'lastError']) {
-        if (!uint32(value[field])) return null;
-        result[field] = value[field];
-    }
-    if (result.result > 4 ||
-        (result.flags & ~CONTROLLER_FLAG_MASK) !== 0 ||
-        (result.transportSuccess && result.transportError !== 0) ||
-        result.activeTargetCount > result.residentTargetCount ||
-        result.inactiveTargetCount > result.residentTargetCount ||
-        result.residentTargetCount > result.matchedTargetCount ||
-        ((result.flags & 0x4) !== 0) !== (result.residentTargetCount > 0) ||
-        ((result.flags & 0x8) !== 0) !== (result.activeTargetCount > 0) ||
-        ((result.flags & 0x10) !== 0) !== (result.inactiveTargetCount > 0)) return null;
-    return result;
-}
-
 function sanitizeStatus(message) {
-    if (!message.controllers || typeof message.controllers !== 'object' || Array.isArray(message.controllers)) return null;
-    const x86 = sanitizeController(message.controllers.x86);
-    const x64 = sanitizeController(message.controllers.x64);
-    if (!x86 || !x64) return null;
-    const successful = [x86, x64].filter(controller => controller.transportSuccess);
-    const loadEnabledMismatch = successful.length === 2 && ((x86.flags & 0x1) !== (x64.flags & 0x1));
+    if (!message || typeof message !== 'object' || Array.isArray(message)) return null;
+    let active = false;
+    let detected = false;
+
+    if (typeof message.running === 'boolean') {
+        active = message.running;
+        detected = true;
+    } else if (typeof message.loadEnabled === 'boolean') {
+        active = message.loadEnabled;
+        detected = true;
+    }
+
+    if (message.controllers && typeof message.controllers === 'object' && !Array.isArray(message.controllers)) {
+        detected = true;
+        const c = message.controllers;
+        if (typeof c.running === 'boolean') {
+            active = c.running;
+        } else if (typeof c.loadEnabled === 'boolean') {
+            active = c.loadEnabled;
+        } else {
+            const x86 = c.x86;
+            const x64 = c.x64;
+            let controllerActive = false;
+            if (x86 && typeof x86 === 'object') {
+                if (typeof x86.running === 'boolean') controllerActive = controllerActive || x86.running;
+                else if (typeof x86.loadEnabled === 'boolean') controllerActive = controllerActive || x86.loadEnabled;
+                else if (typeof x86.active === 'boolean') controllerActive = controllerActive || x86.active;
+                else if (typeof x86.flags === 'number' && (x86.flags & 1) !== 0) controllerActive = true;
+            }
+            if (x64 && typeof x64 === 'object') {
+                if (typeof x64.running === 'boolean') controllerActive = controllerActive || x64.running;
+                else if (typeof x64.loadEnabled === 'boolean') controllerActive = controllerActive || x64.loadEnabled;
+                else if (typeof x64.active === 'boolean') controllerActive = controllerActive || x64.active;
+                else if (typeof x64.flags === 'number' && (x64.flags & 1) !== 0) controllerActive = true;
+            }
+            if (controllerActive) active = true;
+        }
+    }
+
+    if (!detected) return null;
+
     const result = {
-        state: successful.length === 0 ? 'unavailable' :
-            (successful.length !== 2 || loadEnabledMismatch || successful.some(controller => controller.result !== 0 || controller.lastError !== 0 ||
-                (controller.flags & 0x20) !== 0 || controller.failedTargetCount > 0) ? 'degraded' : 'ready'),
-        loadEnabled: successful.some(controller => (controller.flags & 0x1) !== 0),
-        operationPending: successful.some(controller => (controller.flags & 0x2) !== 0),
-        anyResident: successful.some(controller => (controller.flags & 0x4) !== 0),
-        anyActive: successful.some(controller => (controller.flags & 0x8) !== 0),
-        anyInactive: successful.some(controller => (controller.flags & 0x10) !== 0),
-        restartRequired: successful.some(controller => (controller.flags & 0x40) !== 0),
-        controllers: { x86, x64 }
+        state: STATES.has(message.state) ? message.state : 'ready',
+        running: active,
+        loadEnabled: active
     };
-    for (const field of COUNT_STATUS_FIELDS) {
-        result[field] = successful.reduce((total, controller) => total + controller[field], 0);
+    if (message.controllers && typeof message.controllers === 'object' && !Array.isArray(message.controllers)) {
+        const x86 = sanitizeController(message.controllers.x86);
+        const x64 = sanitizeController(message.controllers.x64);
+        if (x86 && x64) {
+            // An unreachable controller, a failed launch or a crash must not
+            // render as a healthy stop.
+            const reachable = [x86, x64].filter(c => c.transportSuccess);
+            result.state = reachable.length === 0 ? 'unavailable' :
+                (reachable.length === 2 && reachable.every(c => c.transportError === 0) ? 'ready' : 'degraded');
+            result.controllers = { x86, x64 };
+        }
     }
     return result;
 }
@@ -132,22 +163,13 @@ function sanitizeAgentError(value, ok) {
     return { code, message: code === 'invalid-agent-result' ? 'The agent returned an invalid runtime result.' : AGENT_ERRORS[code] };
 }
 
-// MeshCentral is an authenticated, correlated relay. It adds a relay-session
-// epoch and per-node generation for stale-browser protection, but it does not
-// synthesize target capabilities or policy. Controller state comes from the
-// strictly validated agent result.
 function createController(options) {
     const pending = new Map();
     const requests = new Map();
-    const confirmed = new Map();
-    const generations = new Map();
     const mutating = new Set();
     const now = options.now || Date.now;
     const timeoutMs = options.timeoutMs || 15000;
-    const controllerEpoch = options.controllerEpoch || crypto.randomBytes(16).toString('hex');
-    let sequence = 0;
 
-    function generation(nodeid) { return generations.get(nodeid) || 0n; }
     function finishPending(wireId, item) {
         pending.delete(wireId);
         clearTimeout(item.timer);
@@ -157,34 +179,20 @@ function createController(options) {
     function receive(message, agent) {
         if (!message || message.action !== 'nativeRuntimeResult' || message.version !== 1) return;
         const item = pending.get(message.requestId);
-        if (!item || item.agent !== agent || message.operation !== item.operation || agent.dbNodeKey !== item.nodeid || typeof message.ok !== 'boolean') return;
+        if (!item || item.agent !== agent || message.operation !== mapOperation(item.operation) || agent.dbNodeKey !== item.nodeid || typeof message.ok !== 'boolean') return;
         const status = sanitizeStatus(message);
         if (!status) return;
-        const controllerOk = status.controllers.x86.transportSuccess && status.controllers.x64.transportSuccess &&
-            status.controllers.x86.result === 0 && status.controllers.x64.result === 0;
-        if (message.ok !== controllerOk) return;
         finishPending(message.requestId, item);
-        let current = generation(item.nodeid);
-        if (item.generation !== current) {
-            item.resolve(failure(item, 'stale-generation', 'Runtime state changed. Refresh status.', controllerEpoch, current, item.canControl));
-            return;
-        }
-        if (item.mutation) {
-            current += 1n;
-            generations.set(item.nodeid, current);
-        }
         const response = {
-            action: 'nativeRuntimeResult', version: 1, operation: message.operation, requestId: item.requestId,
-            ok: message.ok, controllerEpoch, generation: String(current), canControl: item.canControl, ...status,
+            action: 'nativeRuntimeResult',
+            version: 1,
+            operation: item.operation,
+            requestId: item.requestId,
+            ok: message.ok,
+            canControl: item.canControl,
+            ...status,
             error: sanitizeAgentError(message.error, message.ok)
         };
-        const prior = confirmed.get(item.nodeid);
-        // A status request started during a mutation can have a higher relay
-        // sequence while still describing pre-mutation controller state. Do not
-        // let it become the mutation baseline; a confirmed mutation always wins.
-        if (item.mutation || (!mutating.has(item.nodeid) && (!prior || prior.sequence <= item.sequence))) {
-            confirmed.set(item.nodeid, { response, agent, sequence: item.sequence, at: now() });
-        }
         item.resolve(response);
     }
 
@@ -195,62 +203,56 @@ function createController(options) {
         catch (_) { return failure(command, 'access-denied', 'Runtime access is unavailable.'); }
         const mutation = MUTATIONS.has(command.operation);
         if (mutation && access.canControl !== true) {
-            return failure(command, 'access-denied', 'This desktop session is view-only.', controllerEpoch, generation(access.nodeid), false);
+            return failure(command, 'access-denied', 'This desktop session is view-only.', false);
         }
         const agent = options.getAgent(access.nodeid);
-        if (!agent) return failure(command, 'agent-offline', 'Agent is offline.', controllerEpoch, generation(access.nodeid), access.canControl === true);
+        if (!agent) return failure(command, 'agent-offline', 'Agent is offline.', access.canControl === true);
 
         const key = access.principal + '/' + command.requestId;
-        const fingerprint = JSON.stringify([access.nodeid, command.operation, command.controllerEpoch, command.expectedGeneration]);
+        const fingerprint = JSON.stringify([access.nodeid, command.operation]);
         for (const [id, entry] of requests) if (entry.expires <= now()) requests.delete(id);
-        for (const [id, entry] of confirmed) if (now() - entry.at > 15000) confirmed.delete(id);
         const existing = requests.get(key);
         if (existing) {
-            if (existing.fingerprint !== fingerprint) return failure(command, 'request-id-conflict', 'Request ID was already used for different contents.', controllerEpoch, generation(access.nodeid), access.canControl === true);
+            if (existing.fingerprint !== fingerprint) return failure(command, 'request-id-conflict', 'Request ID was already used for different contents.', access.canControl === true);
             const duplicateResult = await existing.promise;
             let duplicateAccess;
             try { duplicateAccess = await options.authorize(identity, command); }
             catch (_) { return failure(command, 'access-denied', 'Runtime access is unavailable.'); }
             return { ...duplicateResult, canControl: duplicateAccess.canControl === true };
         }
-        if (requests.size >= 512 || pending.size >= 64) return failure(command, 'busy', 'Runtime controller is busy.', controllerEpoch, generation(access.nodeid), access.canControl === true);
+        if (requests.size >= 512 || pending.size >= 64) return failure(command, 'busy', 'Runtime controller is busy.', access.canControl === true);
 
-        const current = generation(access.nodeid);
-        if (mutation) {
-            const latest = confirmed.get(access.nodeid);
-            if (!latest || latest.agent !== agent || now() - latest.at > 15000) {
-                return failure(command, 'refresh-required', 'Refresh runtime status before changing it.', controllerEpoch, current, true);
-            }
-            if (command.controllerEpoch !== controllerEpoch || command.expectedGeneration !== String(current) ||
-                latest.response.controllerEpoch !== controllerEpoch || latest.response.generation !== String(current)) {
-                return failure(command, 'stale-generation', 'Runtime state changed. Refresh before trying again.', controllerEpoch, current, true);
-            }
-            if (mutating.has(access.nodeid)) return failure(command, 'busy', 'A runtime change is already pending.', controllerEpoch, current, true);
+        if (mutation && mutating.has(access.nodeid)) {
+            return failure(command, 'busy', 'A runtime change is already pending.', true);
         }
 
         const wireId = mutation ? command.requestId : crypto.randomUUID();
-        if (pending.has(wireId)) return failure(command, 'busy', 'A request with this ID is still pending.', controllerEpoch, current, access.canControl === true);
+        if (pending.has(wireId)) return failure(command, 'busy', 'A request with this ID is still pending.', access.canControl === true);
         const promise = new Promise((resolve) => {
-            const item = { resolve, agent, nodeid: access.nodeid, operation: command.operation,
-                requestId: command.requestId, sequence: ++sequence, generation: current, mutation, canControl: access.canControl === true };
+            const item = {
+                resolve,
+                agent,
+                nodeid: access.nodeid,
+                operation: command.operation,
+                requestId: command.requestId,
+                mutation,
+                canControl: access.canControl === true
+            };
             item.timer = setTimeout(() => {
                 finishPending(wireId, item);
-                confirmed.delete(access.nodeid);
-                resolve(failure(command, 'outcome-unknown', 'No confirmed response. Refresh status before another change.', controllerEpoch, generation(access.nodeid), item.canControl));
+                resolve(failure(command, 'outcome-unknown', 'No confirmed response. Refresh status before another change.', item.canControl));
             }, timeoutMs);
             pending.set(wireId, item);
             if (mutation) mutating.add(access.nodeid);
-            const outgoing = { action: 'nativeRuntime', version: 1, operation: command.operation, requestId: wireId };
+            const outgoing = { action: 'nativeRuntime', version: 1, operation: mapOperation(command.operation), requestId: wireId };
             try { agent.send(JSON.stringify(outgoing)); }
             catch (_) {
                 finishPending(wireId, item);
-                resolve(failure(command, 'outcome-unknown', 'Agent connection changed. Refresh runtime status.', controllerEpoch, generation(access.nodeid), item.canControl));
+                resolve(failure(command, 'outcome-unknown', 'Agent connection changed. Refresh runtime status.', item.canControl));
             }
         });
         requests.set(key, { fingerprint, promise, expires: now() + 300000 });
         const result = await promise;
-        // Authorization is live at completion too. A revoked share or session
-        // cannot receive target state after its access ends.
         let finalAccess;
         try { finalAccess = await options.authorize(identity, command); }
         catch (_) { return failure(command, 'access-denied', 'Runtime access expired while the request was pending.'); }
@@ -260,14 +262,12 @@ function createController(options) {
     function close() {
         for (const [id, item] of pending) {
             finishPending(id, item);
-            item.resolve(failure(item, 'outcome-unknown', 'Runtime controller stopped.', controllerEpoch, generation(item.nodeid), item.canControl));
+            item.resolve(failure(item, 'outcome-unknown', 'Runtime controller stopped.', item.canControl));
         }
-        confirmed.clear();
         requests.clear();
-        generations.clear();
         mutating.clear();
     }
-    return { request, receive, close, controllerEpoch };
+    return { request, receive, close };
 }
 
 module.exports.nativeruntime = function (parent) {

@@ -9,10 +9,8 @@
 }(typeof window === 'object' ? window : this, function () {
     'use strict';
 
-    var STATUS_POLL_DELAYS = [250, 500, 1000, 2000];
     var STATUS_REFRESH_MS = 10000;
 
-    function older(a, b) { return a.length < b.length || (a.length === b.length && a < b); }
     function uuid(crypto) {
         if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
         var bytes = new Uint8Array(16);
@@ -24,79 +22,42 @@
     }
 
     function confirmed(result) {
-        if (!result || (result.state !== 'ready' && result.state !== 'degraded' && result.state !== 'unavailable')) return false;
-        var booleans = ['loadEnabled', 'operationPending', 'anyResident', 'anyActive', 'anyInactive', 'restartRequired'];
-        var counts = ['matchedTargetCount', 'residentTargetCount', 'activeTargetCount', 'inactiveTargetCount', 'failedTargetCount'];
-        var i, value;
-        for (i = 0; i < booleans.length; ++i) if (typeof result[booleans[i]] !== 'boolean') return false;
-        for (i = 0; i < counts.length; ++i) {
-            value = result[counts[i]];
-            if (typeof value !== 'number' || value < 0 || !Number.isSafeInteger(value)) return false;
-        }
+        if (!result || typeof result !== 'object') return false;
+        if (result.state !== 'ready' && result.state !== 'degraded' && result.state !== 'unavailable') return false;
         return typeof result.canControl === 'boolean' &&
-            typeof result.controllerEpoch === 'string' && /^[0-9a-f]{32}$/.test(result.controllerEpoch) &&
-            typeof result.generation === 'string' && /^(0|[1-9][0-9]{0,19})$/.test(result.generation);
+            (typeof result.loadEnabled === 'boolean' || typeof result.running === 'boolean');
     }
 
     function createModel(transport, makeId, render, pause, now) {
         pause = pause || function (milliseconds) { return new Promise(function (resolve) { setTimeout(resolve, milliseconds); }); };
         now = now || Date.now;
-        var state = { pending: false, polling: false, pendingOperation: null, status: null, statusAt: null, error: null, scope: '', serial: 0, resetGeneration: 0 };
+        var state = { pending: false, pendingOperation: null, status: null, statusAt: null, error: null, scope: '', serial: 0 };
         function nextOperation() {
             var s = state.status;
-            if (state.pending || state.polling) return null;
-            if (state.error && (!s || s.operationPending || s.state === 'unavailable')) return 'getStatus';
+            if (state.pending) return null;
+            if (state.error && (!s || s.state === 'unavailable')) return 'getStatus';
             if (!s) return null;
-            if (s.operationPending || s.state === 'unavailable') return 'getStatus';
+            if (s.state === 'unavailable') return 'getStatus';
             if (!s.canControl) return null;
-            return s.loadEnabled ? 'unload' : 'load';
+            var isRunning = Boolean(s.running || s.loadEnabled);
+            return isRunning ? 'unload' : 'load';
         }
         function reset(scope) {
             state.serial++;
-            state.resetGeneration++;
             state.scope = scope;
             state.pending = false;
-            state.polling = false;
             state.pendingOperation = null;
             state.status = null;
             state.statusAt = null;
             state.error = null;
             render(state, null);
         }
-        async function settlePending(scope, resetGeneration) {
-            state.polling = true;
-            render(state, null);
-            for (var i = 0; i < STATUS_POLL_DELAYS.length; ++i) {
-                await pause(STATUS_POLL_DELAYS[i]);
-                if (state.scope !== scope || state.resetGeneration !== resetGeneration) return false;
-                await request('getStatus');
-                if (state.scope !== scope || state.resetGeneration !== resetGeneration) return false;
-                if (!state.status || !state.status.operationPending) {
-                    state.polling = false;
-                    render(state, nextOperation());
-                    return state.status != null;
-                }
-            }
-            if (state.scope !== scope || state.resetGeneration !== resetGeneration) return false;
-            state.polling = false;
-            state.error = 'Runtime operation is still pending. Retry status.';
-            render(state, nextOperation());
-            return false;
-        }
         async function request(operation, quiet) {
-            if (state.pending || (operation !== 'getStatus' && operation !== nextOperation())) return false;
+            if (state.pending || (operation !== 'getStatus' && operation !== nextOperation() &&
+                (operation !== 'start' || nextOperation() !== 'load') && (operation !== 'stop' || nextOperation() !== 'unload'))) return false;
             quiet = quiet === true && operation === 'getStatus';
-            if ((operation === 'load' || operation === 'unload') && state.statusAt != null && now() - state.statusAt >= 12000) {
-                if (!await request('getStatus', true) || operation !== nextOperation()) return false;
-                return request(operation);
-            }
             var serial = ++state.serial;
-            var settle = false;
             var command = { action: 'nativeRuntime', version: 1, operation: operation, requestId: makeId() };
-            if (operation === 'load' || operation === 'unload') {
-                command.controllerEpoch = state.status.controllerEpoch;
-                command.expectedGeneration = state.status.generation;
-            }
             state.pending = true;
             state.pendingOperation = operation;
             state.error = null;
@@ -108,14 +69,9 @@
                     result.requestId !== command.requestId || result.operation !== operation) throw new Error('Unconfirmed response. Refresh status.');
                 var hasConfirmedState = confirmed(result);
                 if (result.ok === true && !hasConfirmedState) throw new Error('Invalid runtime status.');
-                if (hasConfirmedState && state.status && result.controllerEpoch === state.status.controllerEpoch && older(result.generation, state.status.generation)) {
-                    throw new Error('Stale runtime status. Refresh before changing it.');
-                }
                 state.status = hasConfirmedState ? result : null;
                 state.statusAt = hasConfirmedState ? now() : null;
                 state.error = result.ok === false ? ((result.error && result.error.message) || 'Status unknown. Refresh to reconcile.') : null;
-                settle = result.ok === true && hasConfirmedState && result.operationPending &&
-                    (operation !== 'getStatus' || state.polling === false);
             } catch (error) {
                 if (state.serial !== serial) return false;
                 state.status = null;
@@ -126,10 +82,7 @@
             state.pending = false;
             state.pendingOperation = null;
             render(state, nextOperation());
-            // Never repeat a mutation automatically. When its outcome was not
-            // confirmed, immediately reconcile with the read-only status path.
             if (operation !== 'getStatus' && state.status == null && state.error) return request('getStatus');
-            if (settle) return settlePending(state.scope, state.resetGeneration);
             return true;
         }
         return { reset: reset, request: request, nextOperation: nextOperation, state: state };
@@ -187,42 +140,51 @@
         }
         function paint(state, next) {
             if (!panel) return;
-            panel.setAttribute('aria-busy', (state.pending || state.polling) ? 'true' : 'false');
+            panel.setAttribute('aria-busy', state.pending ? 'true' : 'false');
             var result = state.status;
+            var isRunning = Boolean(result && (result.running || result.loadEnabled));
             var label;
             if (next === 'getStatus') label = 'Retry Status';
             else if (result && !result.canControl) label = 'View Only';
-            else if (result && result.loadEnabled) label = 'Unload';
+            else if (isRunning) label = 'Unload';
             else label = 'Activate';
             control.textContent = label;
             if (control.tagName === 'INPUT') control.value = label;
-            control.disabled = state.pending || state.polling || next == null;
-            var actionTitle = next === 'getStatus' ? 'Refresh runtime status without repeating the last operation.' :
-                (result && !result.canControl ? 'Runtime status is available, but this desktop session is view-only.' : result && result.loadEnabled ?
-                'Deactivate future runtime behavior while keeping the component resident. This never physically unloads the DLL.' :
-                (result && result.restartRequired ? 'Activate the runtime again. A target restart is still required to fully restore effects from an earlier active period.' : 'Activate the runtime for eligible targets.'));
+            control.disabled = Boolean(state.pending || next == null);
+
+            var actionTitle = '';
+            if (next === 'getStatus') {
+                actionTitle = 'Refresh runtime status without repeating the last operation.';
+            } else if (result && !result.canControl) {
+                actionTitle = 'Runtime status is available, but this desktop session is view-only.';
+            } else if (isRunning) {
+                actionTitle = 'Stop the runtime binary.';
+            } else {
+                actionTitle = 'Activate the runtime binary with elevated permissions.';
+            }
 
             var text = 'Runtime: status unavailable';
-            if (state.pendingOperation === 'getStatus') text = 'Runtime: checking status…';
-            else if (state.pendingOperation === 'load') text = 'Runtime: loading…';
-            else if (state.pendingOperation === 'unload') text = 'Runtime: deactivating to pass-through…';
-            else if (result) {
-                if (result.state === 'unavailable') text = 'Runtime: unavailable';
-                else if (result.state === 'degraded') text = 'Runtime: degraded (' + result.activeTargetCount + ' active, ' +
-                    result.inactiveTargetCount + ' inactive of ' + result.matchedTargetCount + ' matched; ' + result.failedTargetCount + ' failed)';
-                else if (result.operationPending) text = 'Runtime: operation pending (' + result.activeTargetCount + ' active, ' +
-                    result.inactiveTargetCount + ' inactive of ' + result.matchedTargetCount + ' matched)';
-                else if (result.loadEnabled && result.matchedTargetCount === 0) text = 'Runtime: enabled; waiting for an eligible application';
-                else if (result.loadEnabled) text = 'Runtime: enabled (' + result.activeTargetCount + ' active of ' + result.matchedTargetCount + ' eligible)';
-                else if (result.restartRequired) text = 'Runtime: disabled; restart required for complete restoration';
-                else if (result.anyInactive) text = 'Runtime: disabled (resident, pass-through)';
-                else text = 'Runtime: disabled; no eligible application is running';
-                if (result.operationPending && result.state === 'degraded') text += '; controller operation pending';
+            if (state.pendingOperation === 'getStatus') {
+                text = 'Runtime: checking status…';
+            } else if (state.pendingOperation === 'load' || state.pendingOperation === 'start') {
+                text = 'Runtime: loading…';
+            } else if (state.pendingOperation === 'unload' || state.pendingOperation === 'stop') {
+                text = 'Runtime: stopping…';
+            } else if (result) {
+                if (result.state === 'unavailable') {
+                    text = 'Runtime: unavailable';
+                } else if (result.state === 'degraded') {
+                    text = isRunning ? 'Runtime: degraded (active)' : 'Runtime: degraded';
+                } else if (isRunning) {
+                    text = 'Runtime: active';
+                } else {
+                    text = 'Runtime: stopped';
+                }
                 if (!result.canControl) text += '; view-only';
             }
             if (state.error) text += '; ' + state.error;
             if (status.textContent !== text) status.textContent = text;
-            control.title = text + (actionTitle ? '. ' + actionTitle : '');
+            control.title = actionTitle;
         }
         function ensure(force) {
             scheduled = false;
@@ -277,7 +239,7 @@
             if (refreshTimer != null) return;
             refreshTimer = win.setInterval(function () {
                 var c = context();
-                if (!doc.hidden && c.auth && (c.guest || c.nodeid) && !model.state.pending && !model.state.polling) {
+                if (!doc.hidden && c.auth && (c.guest || c.nodeid) && !model.state.pending) {
                     model.request('getStatus', true);
                 }
             }, STATUS_REFRESH_MS);
