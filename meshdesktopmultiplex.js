@@ -79,6 +79,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
     obj.lastScreenSizeCmd = null;       // Pointer to the last screen size command from the agent.
     obj.lastScreenSizeCounter = 0;      // Index into the image table of the screen size command, this is generally also the first command.
     obj.lastConsoleMessage = null;      // Last agent console message.
+    obj.lastAudioMessage = null;        // Last agent desktop audio availability message.
     obj.firstData = null;               // Index in the image table of the first image in the table, generally this points to the display resolution command.
     obj.lastData = null;                // Index in the images table of the last image in the table.
     obj.lastDisplayInfoData = null;     // Pointer to the last display information command from the agent (Number of displays).
@@ -189,6 +190,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 if (obj.lastDisplayInfoData != null) { obj.sendToViewer(peer, obj.lastDisplayInfoData); }
                 if (obj.lastDisplayLocationData != null) { obj.sendToViewer(peer, obj.lastDisplayLocationData); }
                 if (obj.lastConsoleMessage != null) { obj.sendToViewer(peer, obj.lastConsoleMessage); }
+                if (obj.lastAudioMessage != null) { obj.sendToViewer(peer, obj.lastAudioMessage); }
                 if (obj.lastKeyState != null) { obj.sendToViewer(peer, obj.lastKeyState); }
                 
                 // Log joining the multiplex session
@@ -445,6 +447,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         obj.lastScreenSizeCounter = 0;
         obj.firstData = null;
         obj.lastData = null;
+        obj.lastAudioMessage = null; // A replacement agent tunnel advertises audio again once it is consented
         obj.viewersOverflowCount = 0;
         for (var i in obj.viewers) {
             const v = obj.viewers[i];
@@ -840,6 +843,10 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 if (json.type == 'console') {
                     // This is a console message, store it and forward this to all viewers
                     if (json.msg != null) { obj.lastConsoleMessage = data; } else { obj.lastConsoleMessage = null; }
+                    obj.sendToAllViewers(data);
+                } else if ((json.ctrlChannel == '102938') && (json.type == 'audio') && (json.state == 'available')) {
+                    // Desktop audio is offered once per consented agent desktop session; keep it for viewers that join later
+                    obj.lastAudioMessage = data;
                     obj.sendToAllViewers(data);
                 }
                 // All other control messages (notably WebRTC), are ignored for now.

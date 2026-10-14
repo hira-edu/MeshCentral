@@ -7,6 +7,7 @@ Files:
 - `Server-Operations-Plan.md`: remediation plan and remaining operational blockers.
 - `Server-Setup-SSOT.md`: verified live topology, runtime settings, edge stack, Cloudflare control path, and database model.
 - `Backup-and-Restore-Runbook.md`: backup scope, restore order, and recovery rules.
+- `Desktop-Audio.md`: desktop audio (relay protocol 20) behavior, disable switches, audit msgids, and the session-recording requirement.
 
 Current verified state, reconciled July 26, 2026:
 - The SSH administration target after the April 19, 2026 VPS move is `meshcentral` -> `74.208.52.191`; a July 26 direct capture succeeded and a later read-only recheck timed out.
