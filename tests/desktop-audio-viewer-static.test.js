@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const scriptsDir = path.join(__dirname, '../public/scripts');
 const custom = fs.readFileSync(path.join(scriptsDir, 'custom.js'), 'utf8');
@@ -21,8 +22,31 @@ const audioBlockStart = custom.indexOf('__meshDesktopAudioControl');
 assert.ok(audioBlockStart > 0, 'custom.js must contain the desktop-audio control block');
 const audioBlock = custom.slice(audioBlockStart);
 
+test('audio observer survives a redirector assigning its handler after module.parent', () => {
+    const start = custom.indexOf('  function wrapCtrl(');
+    const end = custom.indexOf('  function attachDesktopCtrlObserver(', start);
+    const wrapCtrl = vm.runInNewContext('(' + custom.slice(start, end).trim() + ')', { CTRL_CHANNEL: '102938' });
+    const redir = {}, audioMessages = [], delegated = [];
+    // The canary constructor assigns module.parent before defining xxOnControlCommand.
+    wrapCtrl(redir, message => audioMessages.push(message));
+    redir.xxOnControlCommand = function () { delegated.push({ receiver: this, args: Array.from(arguments) }); return 'handled'; };
+    wrapCtrl(redir, () => assert.fail('observer must only be installed once'));
+    const message = JSON.stringify({ ctrlChannel: '102938', type: 'audio', state: 'available', protocol: 20 });
+    const channel = {};
+    assert.equal(redir.xxOnControlCommand(message, 7, channel), 'handled');
+    assert.equal(audioMessages.length, 1);
+    assert.equal(audioMessages[0].state, 'available');
+    assert.equal(delegated[0].receiver, redir);
+    assert.deepEqual(delegated[0].args, [message, 7, channel]);
+    redir.xxOnControlCommand('not JSON', 8, channel);
+    assert.equal(audioMessages.length, 1);
+    assert.equal(delegated.length, 2, 'malformed and unrelated messages still reach the redirector');
+});
+
 test('custom.js hooks the shared desktop redirector factory', () => {
     assert.match(audioBlock, /window\.CreateAgentRedirect/, 'wraps the CreateAgentRedirect factory used by both pages');
+    assert.match(audioBlock, /window\.CreateAgentRemoteDesktop/, 'wraps CreateAgentRemoteDesktop so custom Modern UI redirectors are also observed');
+    assert.match(audioBlock, /hookCreateAgentRedirect\(\);\s*if \(document\.readyState === 'loading'\)/, 'hooks synchronously in <head> before Modern UI canary scripts snapshot CreateAgentRedirect');
     assert.match(audioBlock, /module\.protocol === DESKTOP_PROTOCOL/, 'identifies desktop (protocol 2) tunnels');
     assert.match(audioBlock, /DESKTOP_PROTOCOL = 2/);
 });

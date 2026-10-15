@@ -996,9 +996,12 @@
       xxStateChange: function () { /* redir drives state; see onStateChanged */ }
     };
     var meshserver = desktop.meshserver != null ? desktop.meshserver : null;
+    var authCookie = desktop.authCookie != null ? desktop.authCookie : window.authCookie;
+    var rauthCookie = desktop.rauthCookie != null ? desktop.rauthCookie : window.authRelayCookie;
+    var nodeid = desktop.nodeid != null ? desktop.nodeid : (window.desktopNode && window.desktopNode._id != null ? window.desktopNode._id : null);
     var redir;
     try {
-      redir = make(meshserver, module, window.serverPublicNamePort, desktop.authCookie, desktop.rauthCookie, window.domainUrl);
+      redir = make(meshserver, module, window.serverPublicNamePort, authCookie, rauthCookie, window.domainUrl);
     } catch (ex) { handleAgentStatus('error', 'relay error'); return; }
     audioRedir = redir;
     redir.options = {};
@@ -1006,7 +1009,7 @@
     if (tsid != null) { redir.options.tsid = tsid; }
     redir.onStateChanged = function (obj, state) { if (state === 0 && audioRedir === redir) { onAudioTunnelClosed(); } };
     attachAudioCtrlObserver(redir);
-    try { redir.Start(desktop.nodeid != null ? desktop.nodeid : null); } catch (ex2) { handleAgentStatus('error', 'relay error'); }
+    try { redir.Start(nodeid); } catch (ex2) { handleAgentStatus('error', 'relay error'); }
   }
 
   function onAudioTunnelClosed() {
@@ -1052,15 +1055,28 @@
   // "audio" messages, then delegate to the original handler unchanged.
   function wrapCtrl(redir, onAudioMsg) {
     if (!redir || redir.__mcAudioCtrlWrapped) return;
+    function observe(handler) {
+      if (typeof handler !== 'function') return handler;
+      return function (msg) {
+        try {
+          var m = JSON.parse(msg);
+          if (m && String(m.ctrlChannel) === CTRL_CHANNEL && m.type === 'audio') { onAudioMsg(m); }
+        } catch (ex) { /* not JSON / not ours */ }
+        return handler.apply(this, arguments);
+      };
+    }
+    var wrapped = observe(redir.xxOnControlCommand);
+    // Custom redirectors assign module.parent before initializing this handler.
+    // Observe subsequent assignments so constructor initialization retains the hook.
+    try {
+      Object.defineProperty(redir, 'xxOnControlCommand', {
+        configurable: true,
+        enumerable: true,
+        get: function () { return wrapped; },
+        set: function (handler) { if (handler !== wrapped) { wrapped = observe(handler); } }
+      });
+    } catch (ex) { redir.xxOnControlCommand = wrapped; }
     redir.__mcAudioCtrlWrapped = true;
-    var original = redir.xxOnControlCommand;
-    redir.xxOnControlCommand = function (msg) {
-      try {
-        var m = JSON.parse(msg);
-        if (m && String(m.ctrlChannel) === CTRL_CHANNEL && m.type === 'audio') { onAudioMsg(m); }
-      } catch (ex) { /* not JSON / not ours */ }
-      if (typeof original === 'function') { return original.apply(this, arguments); }
-    };
   }
 
   function attachDesktopCtrlObserver(redir) {
@@ -1100,7 +1116,44 @@
   }
 
   // ---- Hook the factory --------------------------------------------------
+  function observeDesktopModule(module) {
+    if (!module || module.__mcAudioModuleObserved) return;
+    module.__mcAudioModuleObserved = true;
+    var parentRedir = module.parent || null;
+    try {
+      Object.defineProperty(module, 'parent', {
+        configurable: true,
+        enumerable: true,
+        get: function () { return parentRedir; },
+        set: function (redir) {
+          parentRedir = redir;
+          try {
+            if (redir && module.protocol === DESKTOP_PROTOCOL && isSingleDesktopViewer(module)) {
+              attachDesktopCtrlObserver(redir);
+              chainDesktopStateChanged(redir);
+            }
+          } catch (ex) { /* never break tunnel creation */ }
+        }
+      });
+    } catch (ex) { }
+  }
+
+  function hookCreateAgentRemoteDesktop() {
+    if (typeof window.CreateAgentRemoteDesktop !== 'function' || window.CreateAgentRemoteDesktop.__mcAudioHooked) return;
+    var originalDesktop = window.CreateAgentRemoteDesktop;
+    var wrappedDesktop = function () {
+      var module = originalDesktop.apply(this, arguments);
+      try {
+        if (module && isSingleDesktopViewer(module)) { observeDesktopModule(module); }
+      } catch (ex) { }
+      return module;
+    };
+    wrappedDesktop.__mcAudioHooked = true;
+    window.CreateAgentRemoteDesktop = wrappedDesktop;
+  }
+
   function hookCreateAgentRedirect() {
+    hookCreateAgentRemoteDesktop();
     if (typeof window.CreateAgentRedirect !== 'function' || window.CreateAgentRedirect.__mcAudioHooked) return;
     var original = window.CreateAgentRedirect;
     var wrapped = function (meshserver, module) {
@@ -1125,6 +1178,7 @@
     // keep the control mounted on a light interval, matching the idiom used above.
     setInterval(function () { hookCreateAgentRedirect(); if (uiState.available) { ensureControlMounted(); } }, 1500);
   }
+  hookCreateAgentRedirect();
   if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', init); } else { init(); }
 
   // Expose a tiny surface for tests / debugging without leaking internals.
