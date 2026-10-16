@@ -189,14 +189,61 @@ test('state machine shows icon only after availability', () => {
     assert.equal(m.onAvailable().available, true);
 });
 
-test('state machine start -> started -> stopped lifecycle', () => {
+test('state machine start -> started -> playback ready -> stopped lifecycle', () => {
     const m = createAudioStateMachine();
     m.onAvailable();
     assert.equal(m.onStartRequested().state, AUDIO_STATES.CONNECTING);
     assert.equal(m.isActive(), true);
-    assert.equal(m.onAgentStatus('started').state, AUDIO_STATES.PLAYING);
+    assert.equal(m.onAgentStatus('started').state, AUDIO_STATES.CONNECTING, 'device capture alone is not browser playback');
+    assert.equal(m.onPlaybackReady().state, AUDIO_STATES.PLAYING);
     assert.equal(m.onAgentStatus('stopped').state, AUDIO_STATES.OFF);
     assert.equal(m.isActive(), false);
+});
+
+test('state machine: Playing needs both agent start and browser readiness, in either order', () => {
+    const m = createAudioStateMachine();
+    m.onAvailable();
+    m.onStartRequested();
+    assert.equal(m.onPlaybackReady().state, AUDIO_STATES.CONNECTING, 'browser ready before the agent confirmed capture');
+    assert.equal(m.onAgentStatus('started').state, AUDIO_STATES.PLAYING);
+});
+
+test('state machine: readiness is session-scoped and ignored when idle', () => {
+    const m = createAudioStateMachine();
+    m.onAvailable();
+    assert.equal(m.onPlaybackReady().state, AUDIO_STATES.OFF, 'no session, no playback');
+    m.onStartRequested(); m.onAgentStatus('started'); m.onPlaybackReady();
+    m.onStopRequested();
+    m.onStartRequested();
+    assert.equal(m.onAgentStatus('started').state, AUDIO_STATES.CONNECTING, 'a new session does not inherit the old readiness');
+});
+
+test('state machine: a blocked or suspended browser ends the session with its reason', () => {
+    const m = createAudioStateMachine();
+    m.onAvailable();
+    m.onStartRequested(); m.onAgentStatus('started');
+    const snap = m.onLocalError('The browser blocked audio playback; click the speaker to try again');
+    assert.equal(snap.state, AUDIO_STATES.ERROR);
+    assert.match(snap.reason, /blocked audio playback/);
+    assert.equal(m.onPlaybackReady().state, AUDIO_STATES.ERROR, 'a late readiness report cannot revive an ended session');
+});
+
+test('playback readiness reports ready once all three conditions hold, then suspended', () => {
+    const { createPlaybackReadiness } = audio;
+    const r = createPlaybackReadiness();
+    assert.equal(r.setContextRunning(true), null);
+    assert.equal(r.setDecoderReady(), null);
+    assert.equal(r.isReady(), false, 'no stream proof yet');
+    assert.equal(r.markStreamLive(), 'ready');
+    assert.equal(r.markStreamLive(), null, 'reported once');
+    assert.equal(r.setContextRunning(false), 'suspended');
+    assert.equal(r.isReady(), false);
+    assert.equal(r.setContextRunning(true), 'ready', 'a context that runs again is ready again');
+
+    const blocked = createPlaybackReadiness();
+    blocked.setDecoderReady(); blocked.markStreamLive();
+    assert.equal(blocked.setContextRunning(false), null, 'never running: never ready, nothing to suspend');
+    assert.equal(blocked.isReady(), false);
 });
 
 test('state machine maps denied/nodesktop/unavailable to unavailable with default reason', () => {
@@ -246,6 +293,7 @@ test('state machine: double start is idempotent', () => {
     m.onAvailable();
     m.onStartRequested();
     m.onAgentStatus('started');
+    m.onPlaybackReady();
     assert.equal(m.onStartRequested().state, AUDIO_STATES.PLAYING);
 });
 

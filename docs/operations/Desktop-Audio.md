@@ -23,8 +23,10 @@ agents through the runtime core override (`agents/meshcore.js`, deployed as
   ` - audio on` while anyone listens; if it shows nothing, audio adds nothing.
 - When the last consented desktop tunnel for the `tsid` closes, the agent closes
   every audio tunnel for it with state `stopped`.
-- Audio is live only. The agent never queues packets: while the relay socket is
-  backed up, packets are dropped until it drains.
+- Audio is live only. While the relay socket is backed up, captured audio
+  packets are dropped until it drains. Only the latest configuration packet
+  (format metadata) is retained and sent on drain; resumed packets mark the
+  discontinuity without changing packets shared with other listeners.
 - Agents without the `desktop-audio` module (older agent builds, non-Windows,
   console-mode agents) never advertise audio and answer `unavailable`.
 
@@ -90,8 +92,19 @@ needed. The mobile views do not load `custom.js` and have no audio control.
 - Speaker button: hidden until the agent sends the `available` advertisement;
   off at the start of every session. Click starts audio, click again stops it
   and closes the protocol-20 tunnel. States: off, connecting (spinner),
-  playing (sound waves, animated only while audio is actually flowing), muted
+  playing (sound waves, animated only for recently scheduled non-silent PCM), muted
   (volume 0), unavailable or error (slashed, reason in the tooltip).
+- Starting capture alone does not show Playing: the browser context must be
+  running, the decoder ready, and either a decoded frame scheduled or a silence
+  heartbeat received. The tooltip distinguishes playing from listening without
+  an audible signal. It cannot detect a muted browser tab or physical speaker.
+- The audio context is created and resumed inside the speaker click. Blocked or
+  suspended playback reports a retryable error and closes the audio session.
+  Cancelling during script loading, changing desktops, and late callbacks from
+  old sessions cannot restart playback or affect the replacement session.
+- Configuration changes and discontinuities discard scheduled audio before
+  resynchronizing. Decoder startup is cancellable; captured packets are dropped
+  while WASM initializes, and the WebCodecs input backlog is bounded.
 - Volume: a slider left of the speaker, shown while connecting or playing, so
   the speaker never moves under the pointer. The speaker faces the slider. The
   level is remembered per browser (`localStorage` key `meshDesktopAudioVolume`;
@@ -146,3 +159,13 @@ and update the pinned version and hash together; the test fails until then.
   `available` advertisement to every current viewer and replays it to viewers
   that join later. It forwards no other `audio` control message; audio itself
   always travels on each viewer's own protocol-20 tunnel.
+
+## Local validation
+
+Run `node --test tests/desktop-audio-*.test.js` for the relay, agent core,
+recording policy, viewer logic, and control wiring. The playback and control
+runtime fixtures execute production JavaScript with deterministic browser API
+adapters, including blocked contexts, cancellation, late callbacks, decoder
+startup, and transport backpressure. These fixtures do not prove Windows
+capture or physical speaker output; use a live authorized Windows session for
+that end-to-end check.

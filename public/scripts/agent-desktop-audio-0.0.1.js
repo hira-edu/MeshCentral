@@ -53,7 +53,8 @@
     // ---- Scheduler / latency defaults (spec section 6) ---------------------
     var MAX_LATENCY_MS = 300;   // hard cap on scheduled playback lead
     var BUFFER_LEAD_MS = 60;    // initial jitter cushion when (re)priming
-    var ACTIVITY_HOLD_MS = 600; // audio counts as flowing until this long after the last AUDIO packet
+    var ACTIVITY_HOLD_MS = 600; // audio counts as flowing until this long after the last frame was scheduled
+    var CONTEXT_START_TIMEOUT_MS = 2000; // a context still not running this long after resume() is blocked
     var VOLUME_RAMP_SEC = 0.03; // gain time constant, so volume changes do not click
 
     // ---- Packet parser (strict, fail-closed) ------------------------------
@@ -241,6 +242,12 @@
         var available = false; // icon visible only after the agent advertises it
         var state = AUDIO_STATES.OFF;
         var reason = '';
+        // PLAYING needs both: the agent started capture, and the browser proved it outputs the stream
+        // (player 'ready'). Either may come first; until both have, the session stays CONNECTING.
+        var agentStarted = false;
+        var playbackReady = false;
+        function resetSession() { agentStarted = false; playbackReady = false; }
+        function connectingOrPlaying() { return (agentStarted && playbackReady) ? AUDIO_STATES.PLAYING : AUDIO_STATES.CONNECTING; }
 
         function snapshot() { return { available: available, state: state, reason: reason }; }
 
@@ -253,27 +260,62 @@
             // User clicked the icon to start listening.
             onStartRequested: function () {
                 if (state === AUDIO_STATES.CONNECTING || state === AUDIO_STATES.PLAYING) { return snapshot(); }
+                resetSession();
                 state = AUDIO_STATES.CONNECTING; reason = ''; return snapshot();
             },
             // User clicked again (or desktop ended) to stop.
-            onStopRequested: function () { state = AUDIO_STATES.OFF; reason = ''; return snapshot(); },
+            onStopRequested: function () { resetSession(); state = AUDIO_STATES.OFF; reason = ''; return snapshot(); },
+            // The player proved browser output is live (context running, decoder ready, stream live).
+            onPlaybackReady: function () {
+                if (state !== AUDIO_STATES.CONNECTING && state !== AUDIO_STATES.PLAYING) { return snapshot(); }
+                playbackReady = true;
+                state = connectingOrPlaying(); return snapshot();
+            },
             // Agent ctrl status message.
             onAgentStatus: function (agentState, agentReason) {
                 var mapped = mapAgentStatus(agentState);
                 if (mapped === null) { return snapshot(); }
+                if (mapped.state === AUDIO_STATES.PLAYING) {
+                    // Capture started on the device; this alone does not mean the viewer hears anything.
+                    if (state !== AUDIO_STATES.CONNECTING && state !== AUDIO_STATES.PLAYING) { return snapshot(); }
+                    agentStarted = true;
+                    state = connectingOrPlaying(); reason = ''; return snapshot();
+                }
+                resetSession();
                 state = mapped.state;
                 reason = (agentReason != null && agentReason !== '') ? String(agentReason) : defaultReasonFor(agentState);
                 return snapshot();
             },
             // Local decode / audio-context failure.
-            onLocalError: function (message) { state = AUDIO_STATES.ERROR; reason = message || 'Audio playback error'; return snapshot(); },
+            onLocalError: function (message) { resetSession(); state = AUDIO_STATES.ERROR; reason = message || 'Audio playback error'; return snapshot(); },
             // Audio tunnel closed unexpectedly while active.
             onTunnelClosed: function () {
-                if (state === AUDIO_STATES.CONNECTING || state === AUDIO_STATES.PLAYING) { state = AUDIO_STATES.ERROR; reason = 'Audio connection closed'; }
+                if (state === AUDIO_STATES.CONNECTING || state === AUDIO_STATES.PLAYING) { resetSession(); state = AUDIO_STATES.ERROR; reason = 'Audio connection closed'; }
                 return snapshot();
             },
             // Desktop session ended: hide the icon and stop.
-            onDesktopClosed: function () { available = false; state = AUDIO_STATES.OFF; reason = ''; return snapshot(); }
+            onDesktopClosed: function () { resetSession(); available = false; state = AUDIO_STATES.OFF; reason = ''; return snapshot(); }
+        };
+    }
+
+    // ---- Playback readiness (pure, testable) -----------------------------
+    // "Playing" means the browser really outputs the stream, not just that the agent started capture:
+    // the AudioContext is running, an Opus decoder is configured, and the stream has proven live (a
+    // decoded frame was scheduled, or a SILENCE heartbeat arrived because nothing plays on the device).
+    // Each setter returns 'ready' when that first becomes true, 'suspended' when the context stops
+    // running after it, otherwise null.
+    function createPlaybackReadiness() {
+        var contextRunning = false, decoderReady = false, streamLive = false, ready = false;
+        function evaluate() {
+            if (!ready && contextRunning && decoderReady && streamLive) { ready = true; return 'ready'; }
+            if (ready && !contextRunning) { ready = false; return 'suspended'; }
+            return null;
+        }
+        return {
+            setContextRunning: function (value) { contextRunning = !!value; return evaluate(); },
+            setDecoderReady: function () { decoderReady = true; return evaluate(); },
+            markStreamLive: function () { streamLive = true; return evaluate(); },
+            isReady: function () { return ready; }
         };
     }
 
@@ -310,8 +352,11 @@
         playerOptions = playerOptions || {};
         var onStatus = typeof playerOptions.onStatus === 'function' ? playerOptions.onStatus : function () { };
         var onError = typeof playerOptions.onError === 'function' ? playerOptions.onError : function () { };
-        // onActivity(true|false): audio is (not) actually flowing. SILENCE heartbeats do not count.
+        // onActivity(true|false): non-silent decoded PCM was recently scheduled.
         var onActivity = typeof playerOptions.onActivity === 'function' ? playerOptions.onActivity : function () { };
+        // onPlayback('ready' | 'blocked' | 'suspended', reason): the browser output path started, was
+        // refused by the autoplay policy, or stopped (for example the OS took the audio device).
+        var onPlayback = typeof playerOptions.onPlayback === 'function' ? playerOptions.onPlayback : function () { };
         var decoderScriptUrl = playerOptions.decoderScriptUrl || 'scripts/opus-decoder-0.7.11.min.js';
         var maxLatencyMs = playerOptions.maxLatencyMs != null ? playerOptions.maxLatencyMs : MAX_LATENCY_MS;
         var bufferLeadMs = playerOptions.bufferLeadMs != null ? playerOptions.bufferLeadMs : BUFFER_LEAD_MS;
@@ -324,7 +369,8 @@
         var decoderKind = null;         // 'webcodecs' | 'opus-decoder'
         var webDecoder = null;          // WebCodecs AudioDecoder
         var wasmDecoder = null;         // opus-decoder OpusDecoder
-        var wasmReady = null;           // Promise
+        var wasmReady = false;          // decoder initialization completed
+        var decoderGeneration = 0;     // invalidates asynchronous setup and output
         var activeSources = [];         // scheduled AudioBufferSourceNodes
         var running = false;
         var teardownCalled = false;
@@ -332,9 +378,31 @@
         var volume = normalizeVolume(playerOptions.volume != null ? playerOptions.volume : 1);
         var active = false;             // last value reported through onActivity
         var activityTimer = null;
+        var readiness = createPlaybackReadiness();
+        var contextTimer = null;        // fires 'blocked' if the context never starts running
+        var sawRunning = false;         // the context ran at least once in this session
 
-        // Create (or resume) the AudioContext. MUST be called from a user
-        // gesture (the icon click) so autoplay policy allows playback.
+        function reportPlayback(transition, reason) {
+            if (transition == null || !running) { return; }
+            try { onPlayback(transition, reason || ''); } catch (ex) { /* UI callback errors must not stop playback */ }
+        }
+
+        function onContextStateChange() {
+            if (audioContext == null) { return; }
+            var isRunning = (audioContext.state === 'running');
+            if (isRunning && contextTimer != null) { clearTimeout(contextTimer); contextTimer = null; }
+            var transition = readiness.setContextRunning(isRunning);
+            // A context that ran and then stopped before playback was ready (device switch, OS audio
+            // interruption) is a suspension too; with a silent device nothing else would ever report it.
+            if (transition == null && !isRunning && sawRunning) { transition = 'suspended'; }
+            sawRunning = sawRunning || isRunning;
+            reportPlayback(transition, 'The browser paused audio playback');
+        }
+
+        // Use (or create) the AudioContext and make it run. The caller should pass a context created
+        // and resumed inside the user's click, because autoplay policy only lets a gesture start
+        // audio. The context's real state decides readiness: a resume() that is refused, or that never
+        // completes, reports 'blocked' instead of letting the UI claim playback.
         function ensureContext() {
             if (audioContext == null) {
                 var Ctor = (typeof AudioContext !== 'undefined') ? AudioContext : (typeof webkitAudioContext !== 'undefined' ? webkitAudioContext : null);
@@ -347,36 +415,60 @@
                 gainNode.gain.value = volume;
                 gainNode.connect(audioContext.destination);
             }
-            if (audioContext.state === 'suspended' && typeof audioContext.resume === 'function') {
-                try { audioContext.resume(); } catch (ex) { /* best effort */ }
+            if (typeof audioContext.addEventListener === 'function') { audioContext.addEventListener('statechange', onContextStateChange); }
+            if (audioContext.state !== 'running' && typeof audioContext.resume === 'function') {
+                var resumed = null;
+                try { resumed = audioContext.resume(); } catch (ex) { resumed = null; }
+                if (resumed && typeof resumed.then === 'function') {
+                    resumed.then(onContextStateChange, function (err) {
+                        reportPlayback('blocked', 'The browser blocked audio playback (' + (err && err.message ? err.message : err) + '); click the speaker to try again');
+                    });
+                }
+                contextTimer = setTimeout(function () {
+                    contextTimer = null;
+                    if (running && audioContext != null && audioContext.state !== 'running') {
+                        reportPlayback('blocked', 'The browser blocked audio playback; click the speaker to try again');
+                    }
+                }, CONTEXT_START_TIMEOUT_MS);
             }
+            onContextStateChange();
             return audioContext;
         }
 
         // Pick a decoder for the negotiated CONFIG. Resolves to the decoder kind.
-        function selectDecoder(cfg) {
+        function selectDecoder(cfg, generation) {
             var webConfig = { codec: 'opus', sampleRate: cfg.sampleRate, numberOfChannels: cfg.channels };
             return probeWebCodecsOpus(webConfig).then(function (supported) {
-                if (supported) { setupWebCodecs(webConfig); return 'webcodecs'; }
-                return setupWasmDecoder(cfg).then(function () { return 'opus-decoder'; });
-            });
-        }
-
-        function setupWebCodecs(webConfig) {
-            decoderKind = 'webcodecs';
-            webDecoder = new AudioDecoder({
-                output: function (audioData) { try { onDecodedAudioData(audioData); } finally { if (typeof audioData.close === 'function') { audioData.close(); } } },
-                error: function (err) { failLocal('Audio decode error: ' + (err && err.message ? err.message : err)); }
-            });
-            webDecoder.configure(webConfig);
-        }
-
-        function setupWasmDecoder(cfg) {
-            decoderKind = 'opus-decoder';
-            return loadDecoderScript().then(function (OpusDecoder) {
-                wasmDecoder = new OpusDecoder({ channels: cfg.channels, sampleRate: cfg.sampleRate, forceStereo: cfg.channels === 2 });
-                wasmReady = wasmDecoder.ready;
-                return wasmReady;
+                if (!running || generation !== decoderGeneration) { return; }
+                if (supported) {
+                    decoderKind = 'webcodecs';
+                    webDecoder = new AudioDecoder({
+                        output: function (audioData) {
+                            try {
+                                if (running && generation === decoderGeneration) { onDecodedAudioData(audioData); }
+                            } finally { audioData.close(); }
+                        },
+                        error: function (err) {
+                            if (running && generation === decoderGeneration) { failLocal('Audio decode error: ' + err.message); }
+                        }
+                    });
+                    webDecoder.configure(webConfig);
+                    return;
+                }
+                return loadDecoderScript().then(function (OpusDecoder) {
+                    if (!running || generation !== decoderGeneration) { return; }
+                    var decoder = new OpusDecoder({ channels: cfg.channels, sampleRate: cfg.sampleRate, forceStereo: cfg.channels === 2 });
+                    // An initializing WASM decoder cannot safely be freed until ready.
+                    return decoder.ready.then(function () {
+                        if (!running || generation !== decoderGeneration) { decoder.free(); return; }
+                        wasmDecoder = decoder;
+                        wasmReady = true;
+                        decoderKind = 'opus-decoder';
+                    }, function (err) {
+                        try { decoder.free(); } catch (ex) { }
+                        throw err;
+                    });
+                });
             });
         }
 
@@ -411,7 +503,12 @@
             switch (packet.type) {
                 case PACKET_TYPE.CONFIG: applyConfig(packet); break;
                 case PACKET_TYPE.AUDIO: handleAudio(packet); break;
-                case PACKET_TYPE.SILENCE: /* treat as silence, not loss: keep cursor as-is */ break;
+                case PACKET_TYPE.SILENCE:
+                    if (packet.discontinuity) { resetPlayback(); }
+                    // Silence, not loss: keep the cursor as-is. After CONFIG it proves the stream is live
+                    // even when nothing plays on the device.
+                    if (config != null) { reportPlayback(readiness.markStreamLive()); }
+                    break;
                 case PACKET_TYPE.STATUS: onStatus({ state: 'error', code: packet.status.code, reason: packet.status.reason }); break;
                 default: break;
             }
@@ -419,18 +516,17 @@
         }
 
         function applyConfig(packet) {
-            // CONFIG always carries DISCONTINUITY (first packet of a tunnel, and
-            // the replayed CONFIG sent to a late-joining viewer). Re-prime the
-            // jitter buffer; only rebuild the decoder when the format changes so
-            // a same-format replay does not glitch an already-running decoder.
-            var cfg = packet.config;
-            var changed = (config == null) || config.codec !== cfg.codec || config.sampleRate !== cfg.sampleRate || config.channels !== cfg.channels;
-            config = cfg;
-            scheduler.reset();
-            if (changed) {
-                resetDecoder();
-                selectDecoder(cfg).then(function (kind) { decoderKind = kind; }, function (err) { failLocal('No usable Opus decoder: ' + (err && err.message ? err.message : err)); });
-            }
+            // Device changes and replayed CONFIG are boundaries, including when
+            // the format is unchanged. Discard queued output from the old decoder.
+            config = packet.config;
+            resetPlayback();
+            resetDecoder();
+            var generation = decoderGeneration;
+            selectDecoder(config, generation).then(function () {
+                if (running && generation === decoderGeneration) { reportPlayback(readiness.setDecoderReady()); }
+            }).catch(function (err) {
+                if (running && generation === decoderGeneration) { failLocal('No usable Opus decoder: ' + (err && err.message ? err.message : err)); }
+            });
         }
 
         function setActive(value) {
@@ -454,31 +550,30 @@
         }
 
         function handleAudio(packet) {
-            markActivity();
             // Reset is driven solely by the DISCONTINUITY flag, never by gaps in
             // sequence/timestamp. The agent replays the live CONFIG (and may
             // deliver audio) with the original sequence/timestamp and the
             // DISCONTINUITY flag set to a viewer that joins a running helper, so
             // a backward/forward jump is a resync point, not packet loss.
-            if (packet.discontinuity) { scheduler.reset(); }
+            if (packet.discontinuity) { resetPlayback(); }
             if (config == null) { return; } // no CONFIG yet; drop until negotiated
             if (decoderKind === 'webcodecs') {
-                if (webDecoder == null) { return; }
+                if (webDecoder == null || webDecoder.decodeQueueSize >= Math.ceil(maxLatencyMs / config.frameMs)) { return; }
                 try {
                     var chunk = new EncodedAudioChunk({ type: 'key', timestamp: decodeTimestamp, duration: config.frameMs * 1000, data: packet.payload });
                     decodeTimestamp += config.frameMs * 1000;
                     webDecoder.decode(chunk);
                 } catch (ex) { failLocal('Audio decode error: ' + ex.message); }
             } else if (decoderKind === 'opus-decoder') {
-                if (wasmDecoder == null || wasmReady == null) { return; }
-                wasmReady.then(function () {
-                    if (!running || wasmDecoder == null) { return; }
-                    var decoded;
-                    try { decoded = wasmDecoder.decodeFrame(packet.payload); } catch (ex) { failLocal('Audio decode error: ' + ex.message); return; }
+                // Drop while initializing: never queue live audio in ready.then().
+                if (wasmDecoder == null || !wasmReady) { return; }
+                try {
+                    var decoded = wasmDecoder.decodeFrame(packet.payload);
+                    if (decoded && decoded.errors && decoded.errors.length) { throw new Error('Invalid Opus frame'); }
                     if (decoded && decoded.channelData && decoded.samplesDecoded > 0) {
                         playPcm(decoded.channelData, decoded.samplesDecoded, decoded.sampleRate || config.sampleRate);
                     }
-                }, function () { /* decoder not ready */ });
+                } catch (ex) { failLocal('Audio decode error: ' + ex.message); }
             }
         }
 
@@ -501,20 +596,35 @@
         // Build an AudioBuffer from decoded PCM and schedule it per the jitter buffer.
         function playPcm(channelData, frames, rate) {
             if (!running || audioContext == null || frames <= 0) { return; }
-            var frameDurSec = frames / rate;
-            var decision = scheduler.schedule(audioContext.currentTime, frameDurSec);
-            if (decision.dropped) { return; }
-            var buffer = audioContext.createBuffer(channelData.length, frames, rate);
-            for (var c = 0; c < channelData.length; c++) {
-                if (typeof buffer.copyToChannel === 'function') { buffer.copyToChannel(channelData[c], c, 0); }
-                else { buffer.getChannelData(c).set(channelData[c]); }
-            }
-            var src = audioContext.createBufferSource();
-            src.buffer = buffer;
-            src.connect(gainNode);
-            src.onended = function () { removeSource(src); };
-            try { src.start(decision.startTime); } catch (ex) { removeSource(src); return; }
-            activeSources.push(src);
+            // Not running yet (resume() still settling) or paused: drop the frame. A context that never
+            // starts is reported by the start timer, one that stops by the statechange handler.
+            if (audioContext.state !== 'running') { return; }
+            try {
+                var frameDurSec = frames / rate;
+                var decision = scheduler.schedule(audioContext.currentTime, frameDurSec);
+                if (decision.dropped) { return; }
+                var buffer = audioContext.createBuffer(channelData.length, frames, rate);
+                for (var c = 0; c < channelData.length; c++) {
+                    if (typeof buffer.copyToChannel === 'function') { buffer.copyToChannel(channelData[c], c, 0); }
+                    else { buffer.getChannelData(c).set(channelData[c]); }
+                }
+                var src = audioContext.createBufferSource();
+                src.buffer = buffer;
+                src.connect(gainNode);
+                src.onended = function () { removeSource(src); };
+                activeSources.push(src);
+                src.start(decision.startTime);
+                // Any scheduled frame proves the stream is live (readiness below); only audible
+                // samples drive the playing animation, so encoded silence does not animate it.
+                var audible = false;
+                for (var ch = 0; ch < channelData.length && !audible; ch++) {
+                    for (var sample = 0; sample < frames; sample++) {
+                        if (Math.abs(channelData[ch][sample]) > 0.00001) { audible = true; break; }
+                    }
+                }
+                if (audible) { markActivity(); }
+                reportPlayback(readiness.markStreamLive());
+            } catch (ex) { failLocal('Audio playback error: ' + ex.message); }
         }
 
         function removeSource(src) {
@@ -523,34 +633,48 @@
             try { src.disconnect(); } catch (ex) { /* ignore */ }
         }
 
+        function resetPlayback() {
+            for (var i = 0; i < activeSources.length; i++) {
+                try { activeSources[i].stop(); } catch (ex) { }
+                try { activeSources[i].disconnect(); } catch (ex2) { }
+            }
+            activeSources = [];
+            scheduler.reset();
+        }
+
         function resetDecoder() {
+            decoderGeneration++;
+            decoderKind = null;
             if (webDecoder != null) { try { webDecoder.close(); } catch (ex) { } webDecoder = null; }
-            if (wasmDecoder != null) { try { wasmDecoder.free(); } catch (ex) { } wasmDecoder = null; wasmReady = null; }
+            if (wasmDecoder != null) { try { wasmDecoder.free(); } catch (ex) { } wasmDecoder = null; wasmReady = false; }
             decodeTimestamp = 0;
         }
 
         function failLocal(message) {
-            onError(message);
+            if (!running) { return; }
             teardown();
+            onError(message);
         }
 
         function start() {
             if (running) { return; }
             running = true;
             teardownCalled = false;
-            ensureContext();
+            readiness = createPlaybackReadiness();
+            try { ensureContext(); } catch (ex) { failLocal('Audio playback error: ' + ex.message); }
         }
 
         function teardown() {
             if (teardownCalled) { return; }
             teardownCalled = true;
             running = false;
+            config = null;
             if (activityTimer != null) { clearTimeout(activityTimer); activityTimer = null; }
+            if (contextTimer != null) { clearTimeout(contextTimer); contextTimer = null; }
+            if (audioContext != null && typeof audioContext.removeEventListener === 'function') { audioContext.removeEventListener('statechange', onContextStateChange); }
             setActive(false);
-            for (var i = 0; i < activeSources.length; i++) { try { activeSources[i].stop(); } catch (ex) { } try { activeSources[i].disconnect(); } catch (ex2) { } }
-            activeSources = [];
+            resetPlayback();
             resetDecoder();
-            scheduler.reset();
             if (gainNode != null) { try { gainNode.disconnect(); } catch (ex) { } gainNode = null; }
             if (ownsContext && audioContext != null) { try { audioContext.close(); } catch (ex) { } audioContext = null; }
         }
@@ -562,6 +686,7 @@
             setVolume: setVolume,
             getVolume: function () { return volume; },
             isActive: function () { return active; },
+            isPlaybackReady: function () { return readiness.isReady(); },
             getDecoderKind: function () { return decoderKind; },
             getStats: function () { return scheduler.getStats(); },
             isRunning: function () { return running; }
@@ -584,6 +709,7 @@
         parsePacket: parsePacket,
         createAudioScheduler: createAudioScheduler,
         createAudioStateMachine: createAudioStateMachine,
+        createPlaybackReadiness: createPlaybackReadiness,
         normalizeVolume: normalizeVolume,
         mapAgentStatus: mapAgentStatus,
         defaultReasonFor: defaultReasonFor,

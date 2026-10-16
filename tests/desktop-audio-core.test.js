@@ -70,6 +70,16 @@ class FakeSocket extends EventEmitter {
     get binary() { return this.writes.filter(w => Buffer.isBuffer(w)); }
 }
 
+// The agent runs on Duktape, whose Buffer.from(buffer) returns an EMPTY buffer (verified on the agent
+// binary). Node's copies correctly, so without this the tests would pass code that breaks on the agent.
+const DuktapeBuffer = {
+    alloc: (size, fill) => Buffer.alloc(size, fill),
+    isBuffer: value => Buffer.isBuffer(value),
+    concat: (list, length) => Buffer.concat(list, length),
+    byteLength: (value, encoding) => Buffer.byteLength(value, encoding),
+    from: (value, encodingOrOffset, length) => Buffer.isBuffer(value) ? Buffer.alloc(0) : Buffer.from(value, encodingOrOffset, length)
+};
+
 class FakeSession extends EventEmitter {
     constructor(tsid) { super(); this.tsid = tsid; this.closed = 0; }
     close() { this.closed++; }
@@ -92,7 +102,7 @@ function createSandbox(options = {}) {
         }
     };
     const sandbox = {
-        Buffer, String, JSON, Object,
+        Buffer: DuktapeBuffer, String, JSON, Object,
         global: {},
         tunnels: {},
         color_options: { background: '0,0,0', foreground: '1,1,1' },
@@ -278,7 +288,8 @@ test('packets stream live as binary messages and are dropped while the socket is
     assert.deepEqual(audio.ws.binary, [packets[0], packets[1]], 'dropped until drain, never queued');
     audio.ws.emit('drain');
     audio.session.emit('packet', packets[3]);
-    assert.deepEqual(audio.ws.binary, [packets[0], packets[1], packets[3]]);
+    assert.deepEqual(audio.ws.binary.map(b => b[4]), [1, 2, 4]);
+    assert.equal(audio.ws.binary[2].readUInt16LE(2) & 1, 1);
 
     const stray = new FakeSession(1);
     stray.ws = audio.ws;
@@ -458,4 +469,16 @@ test('static contract: consent paths advertise, tunnel_kvm_end closes, and meshc
     }
     assert.equal(slice(minSource, helpersMarker, 'function kvm_tunnel_consentpromise_closehandler()', 'min helpers'), helpers, 'helper block identical in meshcore.min.js');
     assert.equal(slice(minSource, branchMarker, '} else if (this.httprequest.protocol == 1) {', 'min branch').slice(branchMarker.length), branchBody, 'protocol branch identical in meshcore.min.js');
+});
+
+test('backpressure retains the latest CONFIG and resumes at a discontinuity without retaining audio', () => {
+    const sandbox = createSandbox(); addDesktop(sandbox); const audio = openAudio(sandbox);
+    function frame(type, sequence) { const b = Buffer.alloc(type === 1 ? 32 : 17); b[0] = 1; b[1] = type; b.writeUInt32LE(sequence, 4); b.writeUInt32LE(b.length - 16, 12); return b; }
+    const first = frame(2, 1), config = frame(1, 2), newer = frame(1, 3), dropped = frame(2, 4), live = frame(2, 5);
+    audio.ws.writeResult = false; audio.session.emit('packet', first);
+    audio.session.emit('packet', config); audio.session.emit('packet', newer); audio.session.emit('packet', dropped);
+    audio.ws.writeResult = true; audio.ws.emit('drain'); audio.session.emit('packet', live);
+    assert.deepEqual(audio.ws.binary.map(b => b.readUInt32LE(4)), [1, 3, 5]);
+    assert.equal(audio.ws.binary.at(-1).readUInt16LE(2) & 1, 1, 'signal the dropped interval');
+    assert.equal(live.readUInt16LE(2), 0, 'never mutate packets shared with other listeners');
 });

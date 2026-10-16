@@ -84,7 +84,7 @@ test('custom.js volume: native range input, remembered per browser, applied to t
 });
 
 test('custom.js animates the waves only while audio flows, and honours reduced motion', () => {
-    assert.match(audioBlock, /onActivity: function \(flowing\) \{ audioFlowing = flowing; renderControl\(\); \}/);
+    assert.match(audioBlock, /onActivity: function \(flowing\) \{ if \(audioCtx === ctx\) \{ audioFlowing = flowing; renderControl\(\); \} \}/);
     assert.match(audioBlock, /#mc-desk-audio\.mcaudio-flowing \.mcaudio-wave\{animation:mcaudiowave/);
     assert.match(audioBlock, /@media \(prefers-reduced-motion:reduce\)\{#mc-desk-audio \.mcaudio-spin,#mc-desk-audio \.mcaudio-wave\{animation:none\}\}/);
 });
@@ -181,4 +181,29 @@ test('vendored opus-decoder is present with its license and matches the pinned n
     assert.ok(!/XMLHttpRequest/.test(text), 'no XMLHttpRequest');
     assert.ok(!/importScripts/.test(text), 'no importScripts');
     assert.ok(!/https?:\/\/[A-Za-z0-9.-]+\//.test(text.replace(/github\.com[^\s"']*/g, '')), 'no external URLs beyond the attribution comment');
+});
+
+test('custom.js shows Playing only after the browser proves output, with the context created in the click', () => {
+    // The AudioContext is created and resumed synchronously in the click, before the player script loads.
+    const start = audioBlock.slice(audioBlock.indexOf('function startAudio()'));
+    assert(start.indexOf('ctx = createGestureAudioContext();') >= 0 && start.indexOf('ctx = createGestureAudioContext();') < start.indexOf('loadPlayerModule()'),
+        'context created before the asynchronous player load');
+    assert.match(audioBlock, /audioContext: ctx,/, 'the player uses the click-created context');
+    assert.match(audioBlock, /onPlayback: function \(transition, reason\) \{ if \(audioCtx === ctx\) \{ onPlayerPlayback\(transition, reason\); \} \}/);
+    assert.match(audioBlock, /if \(transition === 'ready'\) \{\s*if \(api\) \{ applySnapshot\(api\.onPlaybackReady\(\)\); \}/, "only the player's 'ready' moves the control to Playing");
+    assert.match(audioBlock, /uiState\.state = \(agentState === 'started'\) \? 'connecting'/, "the pre-load fallback never maps 'started' to playing");
+    const stopTunnel = audioBlock.slice(audioBlock.indexOf('function stopTunnelOnly()'), audioBlock.indexOf('function stopAudio('));
+    assert.match(stopTunnel, /audioCtx = null;/, 'the controller releases the context it created');
+    assert.match(stopTunnel, /\.close\(\)/, 'and closes it');
+    assert.match(stopTunnel, /closing\.catch\(/, 'a rejected close() (already closed) is handled');
+});
+
+test('player verifies the context actually runs instead of assuming resume() succeeded', () => {
+    assert.match(player, /audioContext\.addEventListener\('statechange', onContextStateChange\)/);
+    assert.match(player, /resumed\.then\(onContextStateChange, function \(err\) \{\s*reportPlayback\('blocked'/);
+    assert.match(player, /if \(running && audioContext != null && audioContext\.state !== 'running'\) \{\s*reportPlayback\('blocked'/, 'a resume that never completes is reported as blocked');
+    // Activity and stream liveness come from a scheduled frame, not from a received packet.
+    const handleAudio = player.slice(player.indexOf('function handleAudio(packet)'), player.indexOf('function onDecodedAudioData'));
+    assert.doesNotMatch(handleAudio, /markActivity\(\)/);
+    assert.match(player, /if \(audible\) \{ markActivity\(\); \}\s*reportPlayback\(readiness\.markStreamLive\(\)\);/);
 });

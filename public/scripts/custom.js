@@ -688,7 +688,7 @@
       s.onload = function () { if (window.MeshDesktopAudio) { resolve(window.MeshDesktopAudio); } else { reject(new Error('audio player did not register')); } };
       s.onerror = function () { reject(new Error('failed to load audio player')); };
       document.head.appendChild(s);
-    });
+    }).catch(function (err) { playerModulePromise = null; throw err; });
     return playerModulePromise;
   }
 
@@ -699,6 +699,7 @@
   var boundDesktop = null;   // the desktop redir object that advertised audio
   var audioRedir = null;     // the protocol-20 relay tunnel
   var player = null;         // MeshDesktopAudio player instance
+  var audioCtx = null;       // AudioContext created inside the click that started the session
   var stateMachine = null;   // player state machine (loaded lazily)
   var uiState = { available: false, state: 'off', reason: '' };
 
@@ -806,7 +807,7 @@
 
   function tooltipFor(state, reason, muted) {
     switch (state) {
-      case 'playing': return muted ? 'Device audio muted (volume 0); click to stop listening' : 'Stop listening to device audio';
+      case 'playing': return muted ? 'Device audio muted (volume 0); click to stop listening' : (audioFlowing ? 'Playing device audio; click to stop listening' : 'Listening; no audible signal detected; click to stop');
       case 'connecting': return 'Connecting device audio... click to cancel';
       case 'unavailable': return reason || 'Device audio is unavailable';
       case 'error': return (reason || 'Device audio error') + '; click to retry';
@@ -960,28 +961,62 @@
     startAudio();
   }
 
+  // Autoplay policy lets only a user gesture start audio, and the player script may still have to load
+  // asynchronously, so the AudioContext is created and resumed here, synchronously inside the click.
+  // The player then verifies that it actually runs before the control shows Playing.
+  function createGestureAudioContext() {
+    var Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) { throw new Error('This browser cannot play audio (Web Audio is unavailable)'); }
+    var ctx;
+    try { ctx = new Ctor({ latencyHint: 'interactive', sampleRate: 48000 }); }
+    catch (ex) { ctx = new Ctor(); } // engines that reject these options; 48 kHz buffers are resampled
+    if (ctx.state !== 'running' && typeof ctx.resume === 'function') {
+      // The player re-checks the outcome; this call only has to happen inside the gesture.
+      try { var resumed = ctx.resume(); if (resumed && typeof resumed.catch === 'function') { resumed.catch(function () { }); } } catch (ex2) { }
+    }
+    return ctx;
+  }
+
+  function onPlayerPlayback(transition, reason) {
+    var api = getStateApi();
+    if (transition === 'ready') {
+      if (api) { applySnapshot(api.onPlaybackReady()); }
+      return;
+    }
+    // 'blocked' or 'suspended': the browser produces no sound, so end the session instead of claiming playback.
+    if (api) { applySnapshot(api.onLocalError(reason)); }
+    else { uiState.state = 'error'; uiState.reason = reason || 'Audio playback stopped'; renderControl(); }
+    stopTunnelOnly();
+  }
+
   function startAudio() {
     var desktop = boundDesktop;
     if (!desktop) return;
     var api = getStateApi();
     if (api) { applySnapshot(api.onStartRequested()); }
-    else { uiState.state = 'connecting'; renderControl(); }
+    else { uiState.state = 'connecting'; uiState.reason = ''; renderControl(); }
 
-    // Load the player (and create the AudioContext inside this click gesture).
+    var ctx;
+    try { ctx = createGestureAudioContext(); }
+    catch (ex) { handleAgentStatus('error', ex.message); return; }
+    audioCtx = ctx;
+
     loadPlayerModule().then(function (mod) {
-      if (boundDesktop !== desktop) { return; } // desktop changed while loading
+      if (boundDesktop !== desktop || audioCtx !== ctx) { return; } // stopped or rebound while loading
       if (!stateMachine && mod.createAudioStateMachine) { stateMachine = mod.createAudioStateMachine(); stateMachine.onAvailable(); stateMachine.onStartRequested(); }
       player = mod.createMeshDesktopAudioPlayer({
+        audioContext: ctx,
         decoderScriptUrl: DECODER_URL,
-        onStatus: function (st) { if (st && st.state === 'error') { handleAgentStatus('error', st.reason); } },
-        onError: function (message) { handleAgentStatus('error', message); stopTunnelOnly(); },
-        onActivity: function (flowing) { audioFlowing = flowing; renderControl(); },
+        onStatus: function (st) { if (audioCtx === ctx && st && st.state === 'error') { handleAgentStatus('error', st.reason); } },
+        onError: function (message) { if (audioCtx === ctx) { handleAgentStatus('error', message); } },
+        onActivity: function (flowing) { if (audioCtx === ctx) { audioFlowing = flowing; renderControl(); } },
+        onPlayback: function (transition, reason) { if (audioCtx === ctx) { onPlayerPlayback(transition, reason); } },
         volume: volumePercent / 100
       });
-      player.start(); // creates/resumes AudioContext within the user gesture
-      openAudioTunnel(desktop);
-    }, function (err) {
-      handleAgentStatus('error', (err && err.message) ? err.message : 'audio unavailable');
+      player.start(); // attaches to the click-created context and watches whether it really runs
+      if (player) { openAudioTunnel(desktop); } // start() may already have reported the context as blocked
+    }).catch(function (err) {
+      if (audioCtx === ctx) { handleAgentStatus('error', (err && err.message) ? err.message : 'audio unavailable'); }
     });
   }
 
@@ -991,7 +1026,7 @@
     var module = {
       protocol: AUDIO_PROTOCOL,
       parent: null,
-      ProcessBinaryData: function (u8) { if (player) { if (player.handlePacket(u8) === false) { stopTunnelOnly(); } } },
+      ProcessBinaryData: function (u8) { if (audioRedir === redir && player) { if (player.handlePacket(u8) === false) { stopTunnelOnly(); } } },
       ProcessData: function () { /* protocol 20 carries no inner string data */ },
       xxStateChange: function () { /* redir drives state; see onStateChanged */ }
     };
@@ -1025,7 +1060,8 @@
     var api = getStateApi();
     if (api) { applySnapshot(api.onAgentStatus(agentState, reason)); }
     else {
-      uiState.state = (agentState === 'started') ? 'playing' : (agentState === 'stopped' ? 'off' : (agentState === 'error' ? 'error' : 'unavailable'));
+      // Capture starting on the device is not playback in the browser; only the player's 'ready' is.
+      uiState.state = (agentState === 'started') ? 'connecting' : (agentState === 'stopped' ? 'off' : (agentState === 'error' ? 'error' : 'unavailable'));
       uiState.reason = reason || '';
       renderControl();
     }
@@ -1039,6 +1075,11 @@
   function stopTunnelOnly() {
     if (audioRedir) { var r = audioRedir; audioRedir = null; try { r.onStateChanged = null; } catch (ex) { } try { r.Stop(); } catch (ex2) { } }
     if (player) { var p = player; player = null; try { p.stop(); } catch (ex3) { } }
+    // The player does not own the click-created context, so the controller closes it.
+    if (audioCtx) {
+      var c = audioCtx; audioCtx = null;
+      try { var closing = c.close(); if (closing && typeof closing.catch === 'function') { closing.catch(function () { }); } } catch (ex4) { }
+    }
     audioFlowing = false;
   }
 
@@ -1046,8 +1087,8 @@
   function stopAudio(cause) {
     stopTunnelOnly();
     var api = getStateApi();
-    if (cause === 'user' && api) { applySnapshot(api.onStopRequested()); }
-    else if (cause === 'user') { uiState.state = 'off'; uiState.reason = ''; renderControl(); }
+    if (api) { applySnapshot(api.onStopRequested()); }
+    else { uiState.state = 'off'; uiState.reason = ''; renderControl(); }
   }
 
   // ---- Ctrl-message observation ------------------------------------------
@@ -1092,7 +1133,7 @@
 
   function attachAudioCtrlObserver(redir) {
     wrapCtrl(redir, function (m) {
-      if (m.state) { handleAgentStatus(m.state, m.reason); }
+      if (audioRedir === redir && m.state) { handleAgentStatus(m.state, m.reason); }
     });
   }
 
