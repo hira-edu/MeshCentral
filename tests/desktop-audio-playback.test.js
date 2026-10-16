@@ -135,3 +135,14 @@ test('a frame decoded while resume() is still settling is dropped, not fatal', a
     assert.equal(f.sources.length, 1); assert.deepEqual(f.playback, ['ready']);
     f.player.stop();
 });
+test('diagnostics distinguish decoder drops from scheduled frames without exposing audio', async () => {
+    const f = fixture(); f.player.start(); f.player.handlePacket(packet(2));
+    f.player.handlePacket(packet(1, 1)); await flush();
+    f.decoders[0].decodeQueueSize = 20; f.player.handlePacket(packet(2));
+    f.decoders[0].decodeQueueSize = 0; f.player.handlePacket(packet(2)); f.player.handlePacket(packet(3));
+    const d = f.player.getDiagnostics();
+    assert.equal(d.audioPackets, 3); assert.equal(d.decoderNotReadyDrops, 1); assert.equal(d.decoderBackpressureDrops, 1);
+    assert.equal(d.decodedFrames, 1); assert.equal(d.silencePackets, 1); assert.equal(d.discontinuities, 1);
+    assert.equal(d.scheduler.scheduled, 1); assert.equal(d.decoder, 'webcodecs'); assert.equal(d.context, 'running');
+    d.audioPackets = -1; assert.equal(f.player.getDiagnostics().audioPackets, 3); f.player.stop();
+});

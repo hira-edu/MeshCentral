@@ -144,7 +144,7 @@ test('scheduler re-primes on underrun when the cursor falls behind real time', (
     const d = s.schedule(11.0, FRAME); // now jumped past the cursor
     assert.equal(d.underrun, true);
     assert.equal(d.reset, true);
-    assert.ok(Math.abs(d.startTime - 11.06) < 1e-9);
+    assert.ok(Math.abs(d.startTime - 11.18) < 1e-9);
     assert.equal(s.getStats().underruns, 1);
 });
 
@@ -320,4 +320,18 @@ test('normalizeVolume maps slider percents and gains to [0, 1] and never mutes b
     for (const bad of [undefined, null, NaN, Infinity, 'loud', {}]) {
         assert.equal(normalizeVolume(bad), 1, 'invalid input falls back to full volume: ' + String(bad));
     }
+});
+
+test('scheduler learns recurring 100ms delivery stalls without unbounded latency', () => {
+    const scheduler = createAudioScheduler({ maxLatencyMs: 300, bufferLeadMs: 60 });
+    // Repeated transport resyncs followed by a 100ms delivery stall.
+    for (let i = 0; i < 300; i++) {
+        const nominal = i * 0.02;
+        const phase = i % 20;
+        if (phase === 0) scheduler.reset();
+        const arrival = phase >= 4 && phase <= 8 ? nominal + (8 - phase) * 0.02 : nominal;
+        scheduler.schedule(arrival, 0.02);
+    }
+    assert.ok(scheduler.getStats().underruns <= 2, 'recurring jitter should not repeatedly drain playback');
+    assert.ok(scheduler.getStats().targetLeadMs <= 180);
 });

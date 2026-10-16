@@ -778,6 +778,9 @@
       // Volume: native range input, tinted to the playing colour.
       + '#mc-desk-audio-vol{box-sizing:border-box;width:72px;height:22px;margin:0;padding:0;background:transparent;cursor:pointer;accent-color:#176428;border-radius:2px}'
       + '.night #mc-desk-audio-vol{accent-color:#5fd27a}'
+      + '#mc-desk-audio[data-mobile="true"]{height:28px;top:0}'
+      + '#mc-desk-audio[data-mobile="true"] #mc-desk-audio-btn{width:28px;height:28px;touch-action:manipulation}'
+      + '#mc-desk-audio[data-mobile="true"] #mc-desk-audio-vol{width:52px;height:28px}'
       + '@media (max-width:800px){#mc-desk-audio-vol{width:52px}}'
       + '@media (prefers-reduced-motion:reduce){#mc-desk-audio .mcaudio-spin,#mc-desk-audio .mcaudio-wave{animation:none}}';
     var st = document.createElement('style');
@@ -906,7 +909,8 @@
   function findMountAnchor() {
     var settings = document.getElementById('deskActionsSettings');
     var group = settings ? settings.parentNode : null;
-    if (!group) return null;
+    // Both mobile viewer templates use Full Screen in their top toolbar.
+    if (!group) return document.getElementById('deskFullScreen');
     for (var el = group.firstElementChild; el != null; el = el.nextElementSibling) {
       if (el.tagName === 'INPUT') { return el; }
     }
@@ -916,6 +920,7 @@
     var anchor = findMountAnchor();
     if (!anchor) return;
     if (!controlEl) { createControl(); spacerEl = document.createTextNode(' '); }
+    controlEl.setAttribute('data-mobile', document.getElementById('deskActionsSettings') ? 'false' : 'true');
     if (controlEl.parentNode !== anchor.parentNode || controlEl.nextSibling !== spacerEl || spacerEl.nextSibling !== anchor) {
       anchor.parentNode.insertBefore(controlEl, anchor);
       anchor.parentNode.insertBefore(spacerEl, anchor);
@@ -1226,6 +1231,7 @@
   window.MeshDesktopAudioControl = {
     _getUiState: function () { return { available: uiState.available, state: uiState.state, reason: uiState.reason }; },
     _hasIcon: function () { return !!document.getElementById('mc-desk-audio-btn'); },
-    _getVolume: function () { return volumePercent; }
+    _getVolume: function () { return volumePercent; },
+    _getDiagnostics: function () { return player ? player.getDiagnostics() : null; }
   };
 })();

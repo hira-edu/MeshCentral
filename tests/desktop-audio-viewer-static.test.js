@@ -207,3 +207,17 @@ test('player verifies the context actually runs instead of assuming resume() suc
     assert.doesNotMatch(handleAudio, /markActivity\(\)/);
     assert.match(player, /if \(audible\) \{ markActivity\(\); \}\s*reportPlayback\(readiness\.markStreamLive\(\)\);/);
 });
+
+test('both redirector assets bundle the current audio control for pages without custom.js', () => {
+    const { execFileSync } = require('node:child_process');
+    execFileSync(process.execPath, [path.join(__dirname, '../scripts/build-desktop-audio-control.js'), '--check']);
+    for (const name of ['agent-redir-ws-0.1.1.js', 'agent-redir-ws-0.1.1-min.js']) {
+        const asset = fs.readFileSync(path.join(scriptsDir, name), 'utf8');
+        assert.equal(asset.split('// BEGIN GENERATED DESKTOP AUDIO CONTROL').length, 2);
+        const sandbox = {};
+        vm.runInNewContext(asset, sandbox);
+        assert.equal(typeof sandbox.CreateAgentRedirect, 'function', 'bundle boundary must not invoke the redirector');
+        assert.match(asset, /if \(window\.__meshDesktopAudioControl\) return/);
+        assert.match(asset, /return document\.getElementById\('deskFullScreen'\)/);
+    }
+});

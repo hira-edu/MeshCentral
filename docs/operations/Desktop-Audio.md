@@ -80,11 +80,19 @@ affected.
 
 ## Viewer
 
-`public/scripts/custom.js` adds an audio control to the top toolbar of both
-desktop viewer pages: the main web UI (`views/default.handlebars`, including its
-stand-alone desktop window) and guest desktop share links
-(`views/sharing.handlebars`). No view or server configuration changes are
-needed. The mobile views do not load `custom.js` and have no audio control.
+The standalone audio control in `public/scripts/custom.js` is also bundled
+into both `agent-redir-ws-0.1.1.js` and `agent-redir-ws-0.1.1-min.js`. This makes
+it available on the main UI, stand-alone desktop, guest share links, and their
+mobile views without replacing any Handlebars template. It installs once even
+when a page also loads `custom.js`. Mobile controls mount beside Full Screen
+with 28px controls matching that toolbar; desktop controls retain their existing
+position beside Actions/Settings.
+
+After editing the audio control or rebuilding a redirector, run
+`node scripts/build-desktop-audio-control.js`; `--check` verifies the generated
+copies. Publish both redirectors along with `custom.js`, the audio player, and
+the vendored decoder. The canonical control remains in `custom.js`; do not edit
+the generated blocks separately.
 
 - Position: the first button of the toolbar's right-hand group, directly left of
   Actions (main UI) or Settings (share links), with the stock button spacing.
@@ -105,6 +113,11 @@ needed. The mobile views do not load `custom.js` and have no audio control.
 - Configuration changes and discontinuities discard scheduled audio before
   resynchronizing. Decoder startup is cancellable; captured packets are dropped
   while WASM initializes, and the WebCodecs input backlog is bounded.
+- Playback starts with a 60ms jitter cushion. After an underrun it learns a
+  larger cushion, up to 180ms, retaining it across transport resynchronization.
+  This trades latency for resilience to recurring delivery or scheduling jitter;
+  the scheduled playback lead still has a 300ms cap. It cannot recover captured
+  audio already dropped by the transport.
 - Volume: a slider left of the speaker, shown while connecting or playing, so
   the speaker never moves under the pointer. The speaker faces the slider. The
   level is remembered per browser (`localStorage` key `meshDesktopAudioVolume`;
@@ -169,3 +182,27 @@ adapters, including blocked contexts, cancellation, late callbacks, decoder
 startup, and transport backpressure. These fixtures do not prove Windows
 capture or physical speaker output; use a live authorized Windows session for
 that end-to-end check.
+
+## Diagnosing uneven playback
+
+Audio uses its own protocol-20 WebSocket relay and 20ms Opus frames. It is not
+clocked by desktop video frames. KVM rendering and audio can still compete for
+bandwidth, endpoint CPU, and browser main-thread time.
+
+While listening, inspect `MeshDesktopAudioControl._getDiagnostics()` in the
+viewer console. It reports only counters and state, never audio content:
+
+- `scheduler.underruns` and `targetLeadMs`: playback ran out of scheduled audio
+  and the current learned buffer lead.
+- `scheduler.dropped`: decoded frames dropped to cap playback latency.
+- `decoderBackpressureDrops`: encoded frames dropped because decoder input was
+  backed up; `decoderNotReadyDrops` counts frames arriving before decoder setup.
+- `discontinuities`: boundaries reported by capture or transport, including the
+  initial configuration; this alone does not identify where loss occurred.
+- `audioPackets`, `silencePackets`, `decodedFrames`, `decoder`, and `context`:
+  distinguish incoming traffic, decoding, and browser playback state.
+
+Compare these counters while playing audio with a static desktop and while
+playing video. Correlation can narrow the bottleneck but is not proof of a
+specific encoder, network, or endpoint failure. The UI cannot detect OS volume,
+a muted browser tab, or whether a physical speaker is audible.

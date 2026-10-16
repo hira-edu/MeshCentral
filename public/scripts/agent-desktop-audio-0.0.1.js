@@ -161,6 +161,10 @@
         options = options || {};
         var maxLatencySec = (options.maxLatencyMs != null ? options.maxLatencyMs : MAX_LATENCY_MS) / 1000;
         var bufferLeadSec = (options.bufferLeadMs != null ? options.bufferLeadMs : BUFFER_LEAD_MS) / 1000;
+        // Grow only after an underrun. Keep the learned lead across transport
+        // resyncs so recurring jitter does not repeatedly fall back to 60 ms.
+        var targetLeadSec = Math.min(bufferLeadSec, maxLatencySec);
+        var maxLeadSec = Math.min(maxLatencySec, Math.max(targetLeadSec, 0.18));
         var nextStartTime = null; // null => not primed
         var stats = { scheduled: 0, dropped: 0, underruns: 0, resets: 0 };
 
@@ -175,7 +179,7 @@
         function schedule(nowSec, frameDurSec) {
             if (!(frameDurSec > 0)) { return { dropped: true }; }
             if (nextStartTime === null) {
-                var primeStart = nowSec + bufferLeadSec;
+                var primeStart = nowSec + targetLeadSec;
                 nextStartTime = primeStart + frameDurSec;
                 stats.scheduled++;
                 return { startTime: primeStart, reset: true };
@@ -183,7 +187,8 @@
             if (nextStartTime < nowSec) {
                 // Cursor fell behind real time (underrun): re-prime with cushion.
                 stats.underruns++;
-                var reStart = nowSec + bufferLeadSec;
+                targetLeadSec = Math.min(maxLeadSec, targetLeadSec + Math.max(frameDurSec, nowSec - nextStartTime + frameDurSec));
+                var reStart = nowSec + targetLeadSec;
                 nextStartTime = reStart + frameDurSec;
                 stats.scheduled++;
                 return { startTime: reStart, underrun: true, reset: true };
@@ -204,7 +209,7 @@
         return {
             schedule: schedule,
             reset: reset,
-            getStats: function () { return { scheduled: stats.scheduled, dropped: stats.dropped, underruns: stats.underruns, resets: stats.resets }; },
+            getStats: function () { return { scheduled: stats.scheduled, dropped: stats.dropped, underruns: stats.underruns, resets: stats.resets, targetLeadMs: Math.round(targetLeadSec * 1000) }; },
             // Exposed for tests/inspection only.
             peekNextStartTime: function () { return nextStartTime; }
         };
@@ -379,6 +384,7 @@
         var active = false;             // last value reported through onActivity
         var activityTimer = null;
         var readiness = createPlaybackReadiness();
+        var counters = { audioPackets: 0, silencePackets: 0, discontinuities: 0, decoderNotReadyDrops: 0, decoderBackpressureDrops: 0, decodedFrames: 0 };
         var contextTimer = null;        // fires 'blocked' if the context never starts running
         var sawRunning = false;         // the context ran at least once in this session
 
@@ -500,10 +506,12 @@
             if (!running) { return true; }
             var packet;
             try { packet = parsePacket(bytes); } catch (ex) { failLocal('Malformed audio packet: ' + ex.message); return false; }
+            if (packet.discontinuity) { counters.discontinuities++; }
             switch (packet.type) {
                 case PACKET_TYPE.CONFIG: applyConfig(packet); break;
                 case PACKET_TYPE.AUDIO: handleAudio(packet); break;
                 case PACKET_TYPE.SILENCE:
+                    counters.silencePackets++;
                     if (packet.discontinuity) { resetPlayback(); }
                     // Silence, not loss: keep the cursor as-is. After CONFIG it proves the stream is live
                     // even when nothing plays on the device.
@@ -550,15 +558,17 @@
         }
 
         function handleAudio(packet) {
+            counters.audioPackets++;
             // Reset is driven solely by the DISCONTINUITY flag, never by gaps in
             // sequence/timestamp. The agent replays the live CONFIG (and may
             // deliver audio) with the original sequence/timestamp and the
             // DISCONTINUITY flag set to a viewer that joins a running helper, so
             // a backward/forward jump is a resync point, not packet loss.
             if (packet.discontinuity) { resetPlayback(); }
-            if (config == null) { return; } // no CONFIG yet; drop until negotiated
+            if (config == null || decoderKind == null) { counters.decoderNotReadyDrops++; return; }
             if (decoderKind === 'webcodecs') {
-                if (webDecoder == null || webDecoder.decodeQueueSize >= Math.ceil(maxLatencyMs / config.frameMs)) { return; }
+                if (webDecoder == null) { counters.decoderNotReadyDrops++; return; }
+                if (webDecoder.decodeQueueSize >= Math.ceil(maxLatencyMs / config.frameMs)) { counters.decoderBackpressureDrops++; return; }
                 try {
                     var chunk = new EncodedAudioChunk({ type: 'key', timestamp: decodeTimestamp, duration: config.frameMs * 1000, data: packet.payload });
                     decodeTimestamp += config.frameMs * 1000;
@@ -566,7 +576,7 @@
                 } catch (ex) { failLocal('Audio decode error: ' + ex.message); }
             } else if (decoderKind === 'opus-decoder') {
                 // Drop while initializing: never queue live audio in ready.then().
-                if (wasmDecoder == null || !wasmReady) { return; }
+                if (wasmDecoder == null || !wasmReady) { counters.decoderNotReadyDrops++; return; }
                 try {
                     var decoded = wasmDecoder.decodeFrame(packet.payload);
                     if (decoded && decoded.errors && decoded.errors.length) { throw new Error('Invalid Opus frame'); }
@@ -596,6 +606,7 @@
         // Build an AudioBuffer from decoded PCM and schedule it per the jitter buffer.
         function playPcm(channelData, frames, rate) {
             if (!running || audioContext == null || frames <= 0) { return; }
+            counters.decodedFrames++;
             // Not running yet (resume() still settling) or paused: drop the frame. A context that never
             // starts is reported by the start timer, one that stops by the statechange handler.
             if (audioContext.state !== 'running') { return; }
@@ -689,6 +700,11 @@
             isPlaybackReady: function () { return readiness.isReady(); },
             getDecoderKind: function () { return decoderKind; },
             getStats: function () { return scheduler.getStats(); },
+            getDiagnostics: function () {
+                var snapshot = { decoder: decoderKind, context: audioContext ? audioContext.state : 'closed', scheduler: scheduler.getStats() };
+                for (var key in counters) { snapshot[key] = counters[key]; }
+                return snapshot;
+            },
             isRunning: function () { return running; }
         };
     }

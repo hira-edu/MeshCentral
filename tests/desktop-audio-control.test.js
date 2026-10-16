@@ -23,7 +23,7 @@ function fixture(options = {}) {
         addEventListener(k, fn) { this.listeners[k] = fn; }
         blur() {}
     }
-    const toolbar = new Element('div'), settings = new Element('input'); settings.id = 'deskActionsSettings'; toolbar.appendChild(settings);
+    const toolbar = new Element('div'), settings = new Element('input'); settings.id = options.mobile ? 'deskFullScreen' : 'deskActionsSettings'; toolbar.appendChild(settings);
     nodes.Desk = new Element('canvas');
     const document = { readyState: 'complete', head: new Element('head'), getElementById: id => nodes[id], createElement: tag => new Element(tag), createTextNode: () => new Element('text') };
     class Context {
@@ -84,4 +84,12 @@ test('late player callbacks cannot change a replacement session', async () => {
     f.click(); f.click(); await flush();
     old.opts.onPlayback('blocked', 'old context'); old.opts.onError('old decode'); old.opts.onActivity(true);
     assert.equal(f.state(), 'connecting'); assert.equal(f.players[1].stopped, undefined);
+});
+
+test('mobile toolbar mounts audio without a desktop-only Settings anchor', async () => {
+    const f = fixture({ mobile: true });
+    assert.ok(f.nodes['mc-desk-audio-btn']);
+    f.click(); await flush();
+    assert.equal(f.tunnels.at(-1).m.protocol, 20);
+    assert.equal(f.contexts[0].state, 'running');
 });
