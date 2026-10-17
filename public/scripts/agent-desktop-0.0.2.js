@@ -105,7 +105,6 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         obj.cancelPendingAltGr();
         obj.browserPressedKeys = Object.create(null);
         obj.resetDrawState(reason);
-        obj.stopInput = false;
         obj.firstUpKeys = [];
         obj.pressedKeys = [];
         obj.RemoteInputLock = null;
