@@ -41,6 +41,8 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.localKeyMap = true;
     obj.remoteKeyMap = false; // If false, the remote keyboard mapping is not used.
     obj.pressedKeys = [];
+    obj.browserPressedKeys = Object.create(null);
+    obj.browserPressedButtons = Object.create(null);
     obj._altGrArmed = false;       // Windows AltGr detection
     obj._altGrTimeout = 0;
     obj.isWindowsBrowser = isWindowsBrowser();
@@ -100,6 +102,8 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     }
 
     obj.resetStreamState = function (reason) {
+        obj.cancelPendingAltGr();
+        obj.browserPressedKeys = Object.create(null);
         obj.resetDrawState(reason);
         obj.stopInput = false;
         obj.firstUpKeys = [];
@@ -113,6 +117,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
 
     obj.resetSessionState = function (reason) {
         obj.resetStreamState(reason);
+        obj.browserPressedButtons = Object.create(null);
         obj.FirstDraw = false;
     }
 
@@ -508,9 +513,16 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     }
 
     obj._handleAltGrTimeout = function () { //Windows and no Ctrl+Alt -> send only Ctrl.
+        if (!obj._altGrArmed) return;
         obj._altGrArmed = false;
         clearTimeout(obj._altGrTimeout);
         obj.SendKeyMsgKC( 1, ControlLeftKc, false); // (KeyDown, "ControlLeft", false)
+    }
+
+    obj.cancelPendingAltGr = function () {
+        if (obj._altGrTimeout) { clearTimeout(obj._altGrTimeout); }
+        obj._altGrTimeout = 0;
+        obj._altGrArmed = false;
     }
 
     // Send remote input lock. 0 = Unlock, 1 = Lock, 2 = Query
@@ -669,24 +681,38 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.xxMouseInputGrab = false;
     obj.xxKeyInputGrab = false;
     obj.xxMouseMove = function (e) { if (obj.State == 3) obj.SendMouseMsg(obj.KeyAction.NONE, e); if (e.preventDefault) e.preventDefault(); if (e.stopPropagation) e.stopPropagation(); return false; }
-    obj.xxMouseUp = function (e) { if (obj.State == 3) obj.SendMouseMsg(obj.KeyAction.UP, e); if (e.preventDefault) e.preventDefault(); if (e.stopPropagation) e.stopPropagation(); return false; }
-    obj.xxMouseDown = function (e) { if (obj.State == 3) obj.SendMouseMsg(obj.KeyAction.DOWN, e); if (e.preventDefault) e.preventDefault(); if (e.stopPropagation) e.stopPropagation(); return false; }
+    function browserButton(e) { return e.which || (e.button + 1); }
+    obj.xxMouseUp = function (e) {
+        var button = browserButton(e);
+        if ((obj.State == 3) && obj.browserPressedButtons[button]) { obj.SendMouseMsg(obj.KeyAction.UP, e); }
+        delete obj.browserPressedButtons[button];
+        if (e.preventDefault) e.preventDefault(); if (e.stopPropagation) e.stopPropagation(); return false;
+    }
+    obj.xxMouseDown = function (e) {
+        if (obj.State == 3) { obj.browserPressedButtons[browserButton(e)] = true; obj.SendMouseMsg(obj.KeyAction.DOWN, e); }
+        if (e.preventDefault) e.preventDefault(); if (e.stopPropagation) e.stopPropagation(); return false;
+    }
     obj.xxMouseDblClick = function (e) { if (obj.State == 3) obj.SendMouseMsg(obj.KeyAction.DBLCLICK, e); if (e.preventDefault) e.preventDefault(); if (e.stopPropagation) e.stopPropagation(); return false; }
     obj.xxDOMMouseScroll = function (e) { if (obj.State == 3) { obj.SendMouseMsg(obj.KeyAction.SCROLL, e); return false; } return true; }
     obj.xxMouseWheel = function (e) { if (obj.State == 3) { obj.SendMouseMsg(obj.KeyAction.SCROLL, e); return false; } return true; }
     obj.xxKeyUp = function (e) {
-        if ((e.key != 'Dead') && (obj.State == 3)) {
-            if ((typeof e.key == 'string') && (e.key.length == 1) && (e.ctrlKey != true) && (e.altKey != true) && (obj.remoteKeyMap == false)) {
-                obj.SendKeyUnicode(obj.KeyAction.UP, e.key.charCodeAt(0));
+        // A browser can deliver releases from before connection/focus transfer.
+        // Only forward releases whose press this viewer actually handled.
+        var key = e.code || e.keyCode;
+        if ((e.key != 'Dead') && (obj.State == 3) && obj.browserPressedKeys[key]) {
+            if (obj.browserPressedKeys[key].unicode != null) {
+                obj.SendKeyUnicode(obj.KeyAction.UP, obj.browserPressedKeys[key].unicode);
             } else {
                 obj.SendKeyMsg(obj.KeyAction.UP, e);
             }
         }
+        delete obj.browserPressedKeys[key];
         if (e.preventDefault) e.preventDefault(); if (e.stopPropagation) e.stopPropagation(); return false;
     }
     obj.xxKeyDown = function (e) {
         if ((e.key != 'Dead') && (obj.State == 3)) {
             if (!((typeof e.key == 'string') && (e.key.length == 1) && (e.ctrlKey != true) && (e.altKey != true) && (obj.remoteKeyMap == false))) {
+                obj.browserPressedKeys[e.code || e.keyCode] = true;
                 obj.SendKeyMsg(obj.KeyAction.DOWN, e);
                 if (e.preventDefault) e.preventDefault(); if (e.stopPropagation) e.stopPropagation(); return false;
             }
@@ -695,6 +721,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.xxKeyPress = function (e) {
         if ((e.key != 'Dead') && (obj.State == 3)) {
             if ((typeof e.key == 'string') && (e.key.length == 1) && (e.ctrlKey != true) && (e.altKey != true) && (obj.remoteKeyMap == false)) {
+                obj.browserPressedKeys[e.code || e.keyCode] = { unicode: e.key.charCodeAt(0) };
                 obj.SendKeyUnicode(obj.KeyAction.DOWN, e.key.charCodeAt(0));
             } // else { obj.SendKeyMsg(obj.KeyAction.DOWN, e); }
         }
@@ -710,10 +737,8 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.handleKeyUp = function (e) {
         //console.log('keyup', e.code, e.key, e.keyCode, (e.key.length == 1)?e.key.charCodeAt(0):0);
         if (obj.stopInput == true || desktop.State != 3) return false;
-        if (obj.firstUpKeys.length < 5) {
-            obj.firstUpKeys.push(e.keyCode);
-            if ((obj.firstUpKeys.length == 5)) { var j = obj.firstUpKeys.join(','); if ((j == '16,17,91,91,16') || (j == '16,17,18,91,92')) { obj.stopInput = true; } }
-        }
+        // xxKeyUp filters unowned releases; do not disable the whole session
+        // when a browser supplies a modifier-release sequence on focus transfer.
         return obj.xxKeyUp(e);
     }
     obj.handleKeyDown = function (e) {
@@ -724,6 +749,11 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
 
     // Release the CTRL, ALT, SHIFT keys if they are pressed.
     obj.handleReleaseKeys = function () {
+        obj.cancelPendingAltGr();
+        for (var key in obj.browserPressedKeys) {
+            if (obj.browserPressedKeys[key].unicode != null) { obj.SendKeyUnicode(obj.KeyAction.UP, obj.browserPressedKeys[key].unicode); }
+        }
+        obj.browserPressedKeys = Object.create(null);
         var p = JSON.parse(JSON.stringify(obj.pressedKeys)); // Clone the pressed array
         for (var i in p) { obj.SendKeyMsgKC(obj.KeyAction.UP, p[i]); } // Release all keys
     }
