@@ -135,7 +135,8 @@ var MeshTrackpadEngine = (function () {
     function finite(v) { return (typeof v === 'number') && isFinite(v); }
 
     // options.clock:    { now(), setTimeout(fn, ms), clearTimeout(id) }
-    // options.geometry: () => { width, height, remotePerCss } for the current remote screen and zoom
+    // options.geometry: () => { width, height, remotePerCss } for the current remote screen and zoom;
+    //                   optional remotePerCssX/remotePerCssY when the canvas is stretched unevenly
     // options.output:   { pointer(x, y, buttons), wheel(x, y, notches), zoom(ratio, cssX, cssY), pinchSupported() }
     function create(options) {
         var clock = options.clock, geometry = options.geometry, output = options.output;
@@ -168,9 +169,12 @@ var MeshTrackpadEngine = (function () {
 
         function now() { return clock.now(); }
 
+        function axisScale(g, v) { return (finite(v) && v > 0) ? v : g.remotePerCss; }
+
         function screen() {
             var g = geometry();
-            return (g && g.width > 0 && g.height > 0 && finite(g.remotePerCss) && g.remotePerCss > 0) ? g : null;
+            if (!(g && g.width > 0 && g.height > 0 && finite(g.remotePerCss) && g.remotePerCss > 0)) return null;
+            return { width: g.width, height: g.height, sx: axisScale(g, g.remotePerCssX), sy: axisScale(g, g.remotePerCssY) };
         }
 
         function emit() {
@@ -373,8 +377,8 @@ var MeshTrackpadEngine = (function () {
             var g = screen();
             if (!g || !finite(dx) || !finite(dy)) return;
             var gain = gainFor(now(), Math.abs(dx) + Math.abs(dy));
-            cursor.x += dx * gain * g.remotePerCss;
-            cursor.y += dy * gain * g.remotePerCss;
+            cursor.x += dx * gain * g.sx;
+            cursor.y += dy * gain * g.sy;
             emit();
         }
 

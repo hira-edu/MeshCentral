@@ -117,6 +117,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.resetSessionState = function (reason) {
         obj.resetStreamState(reason);
         obj.browserPressedButtons = Object.create(null);
+        obj.remotePointerLast = null;
         obj.FirstDraw = false;
     }
 
@@ -763,6 +764,124 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.mouseup = function (e) { if (obj.stopInput == true) return false; return obj.xxMouseUp(e); }
     obj.mousemove = function (e) { if (obj.stopInput == true) return false; return obj.xxMouseMove(e); }
     obj.mousewheel = function (e) { if (obj.stopInput == true) return false; return obj.xxMouseWheel(e); }
+
+    // Pointer input in remote screen pixels (the SCREEN message's size), for touch gesture engines
+    // (trackpad mode). These take coordinates the remote already uses, so they never go through
+    // SendMouseMsg and leave the browser mouse path above unchanged. Pressed buttons share
+    // browserPressedButtons with that path, keyed the same way (browser which: 1 left, 2 middle,
+    // 3 right), and the button mask passed in is the whole truth: a button another path left pressed
+    // is released, including one a physical mouse holds on a device that has both. A caller that
+    // switches viewer instances (the WebRTC soft desktop draws on the same canvas) must release on
+    // the outgoing instance first; each instance has its own bookkeeping.
+    // A press made here stores the wire byte it sent (the browser path stores true), so a later
+    // SwapMouse change still releases the button that was pressed.
+    var remotePointerButtons = [[1, 1, obj.MouseButton.LEFT], [2, 3, obj.MouseButton.RIGHT], [4, 2, obj.MouseButton.MIDDLE]]; // mask bit, which, down byte
+    obj.remotePointerLast = null;
+
+    function remoteCoordinate(v, size) { v = Math.round(v); return (v < 0) ? 0 : ((v > size - 1) ? size - 1 : v); }
+
+    function sendRemoteMouse(button, x, y) {
+        obj.send(String.fromCharCode(0x00, obj.InputType.MOUSE, 0x00, 0x0A, 0x00, button, (x >> 8) & 0xFF, x & 0xFF, (y >> 8) & 0xFF, y & 0xFF));
+    }
+
+    function remoteButtonByte(down) {
+        if (obj.SwapMouse === true) {
+            if (down == obj.MouseButton.LEFT) return obj.MouseButton.RIGHT;
+            if (down == obj.MouseButton.RIGHT) return obj.MouseButton.LEFT;
+        }
+        return down;
+    }
+
+    function remoteReleaseByte(b) {
+        var pressed = obj.browserPressedButtons[b[1]];
+        return (((typeof pressed == 'number') ? pressed : remoteButtonByte(b[2])) * 2) & 0xFF;
+    }
+
+    function remoteInputAllowed() { return (obj.State == 3) && (obj.stopInput != true) && (obj.width > 0) && (obj.height > 0); }
+
+    // The remote screen and how the canvas shows it. width/height are the remote (unrotated) size;
+    // remotePerCssX/Y are remote pixels per CSS pixel along the remote X and Y axes (they differ
+    // when the page stretches the canvas, and swap with the displayed axes at 90/270 degrees);
+    // remotePerCss is the displayed-X scale; the converters take CSS pixels relative to the
+    // canvas's top-left corner. Between a SCREEN message and the first frame the
+    // canvas still has the old size, so the scale lags until it is redrawn.
+    obj.GetRemoteGeometry = function () {
+        var canvas = obj.Canvas.canvas, cssW = obj.CanvasId.clientWidth, cssH = obj.CanvasId.clientHeight;
+        var sx = (cssW > 0) ? (canvas.width / cssW) : 0, sy = (cssH > 0) ? (canvas.height / cssH) : 0;
+        return {
+            width: obj.width, height: obj.height, rotation: obj.rotation, remotePerCss: sx,
+            remotePerCssX: (obj.rotation % 2) ? sy : sx, remotePerCssY: (obj.rotation % 2) ? sx : sy,
+            cssToRemote: function (cx, cy) { var px = cx * sx, py = cy * sy; return { x: obj.crotX(px, py), y: obj.crotY(px, py) }; },
+            remoteToCss: function (x, y) {
+                var px = x, py = y;
+                if (obj.rotation == 1) { px = canvas.width - y; py = x; }
+                else if (obj.rotation == 2) { px = canvas.width - x; py = canvas.height - y; }
+                else if (obj.rotation == 3) { px = y; py = canvas.height - x; }
+                return { x: (sx > 0) ? (px / sx) : 0, y: (sy > 0) ? (py / sy) : 0 };
+            }
+        };
+    }
+
+    // Move the remote pointer to (x, y) with exactly the buttons in the integer mask (1 left,
+    // 2 right, 4 middle) held: releases first, then presses, each carrying the position; a plain move
+    // only when no button changed. Non-finite coordinates or mask send nothing.
+    obj.SendRemotePointer = function (x, y, buttons) {
+        if (!remoteInputAllowed()) return false;
+        x = Number(x); y = Number(y); buttons = Number(buttons);
+        if (!isFinite(x) || !isFinite(y) || !isFinite(buttons)) return false;
+        x = remoteCoordinate(x, obj.width); y = remoteCoordinate(y, obj.height);
+        var changed = false, i, b, down;
+        for (i = 0; i < remotePointerButtons.length; i++) {
+            b = remotePointerButtons[i];
+            if (obj.browserPressedButtons[b[1]] && !(buttons & b[0])) { down = remoteReleaseByte(b); delete obj.browserPressedButtons[b[1]]; sendRemoteMouse(down, x, y); changed = true; }
+        }
+        for (i = 0; i < remotePointerButtons.length; i++) {
+            b = remotePointerButtons[i];
+            if (!obj.browserPressedButtons[b[1]] && (buttons & b[0])) { down = remoteButtonByte(b[2]); obj.browserPressedButtons[b[1]] = down; sendRemoteMouse(down, x, y); changed = true; }
+        }
+        if (!changed && ((obj.remotePointerLast == null) || (obj.remotePointerLast.x != x) || (obj.remotePointerLast.y != y))) { sendRemoteMouse(0, x, y); }
+        obj.remotePointerLast = { x: x, y: y };
+        return true;
+    }
+
+    // One wheel packet of +/-120 per notch, so agents that apply one notch per packet scroll the
+    // same distance as those that apply the delta.
+    obj.SendRemoteWheel = function (x, y, notches) {
+        if (!remoteInputAllowed()) return false;
+        x = Number(x); y = Number(y); notches = Math.round(Number(notches));
+        if (!isFinite(x) || !isFinite(y) || !isFinite(notches) || (notches == 0)) return false;
+        if (obj.ReverseMouseWheel) { notches = -notches; }
+        x = remoteCoordinate(x, obj.width); y = remoteCoordinate(y, obj.height);
+        var delta = (notches > 0) ? 120 : -120, count = Math.min(Math.abs(notches), 100);
+        for (var i = 0; i < count; i++) {
+            obj.send(String.fromCharCode(0x00, obj.InputType.MOUSE, 0x00, 0x0C, 0x00, 0x00, (x >> 8) & 0xFF, x & 0xFF, (y >> 8) & 0xFF, y & 0xFF, (delta >> 8) & 0xFF, delta & 0xFF));
+        }
+        obj.remotePointerLast = { x: x, y: y };
+        return true;
+    }
+
+    // Release every button this viewer holds, whichever path pressed it, at the last remote pointer
+    // position (the screen centre if none is known). Used when a gesture engine tears down. When
+    // the session is down nothing can be sent and the bookkeeping is dropped (the agent releases on
+    // disconnect); when only input is blocked it is kept, so a later call can still release.
+    obj.ReleaseAllPointerButtons = function () {
+        var sendable = remoteInputAllowed();
+        if (!sendable && (obj.State == 3)) return false;
+        var x = 0, y = 0;
+        if (sendable) {
+            var last = obj.remotePointerLast;
+            x = remoteCoordinate(last ? last.x : (obj.width / 2), obj.width); y = remoteCoordinate(last ? last.y : (obj.height / 2), obj.height);
+        }
+        for (var i = 0; i < remotePointerButtons.length; i++) {
+            var b = remotePointerButtons[i];
+            if (obj.browserPressedButtons[b[1]]) {
+                var up = remoteReleaseByte(b);
+                delete obj.browserPressedButtons[b[1]];
+                if (sendable) { sendRemoteMouse(up, x, y); }
+            }
+        }
+        return sendable;
+    }
 
     obj.xxMsTouchEvent = function (evt) {
         if (evt.originalEvent.pointerType == 4) return; // If this is a mouse pointer, ignore this event. Touch & pen are ok.
