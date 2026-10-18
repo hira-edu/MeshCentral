@@ -59,7 +59,7 @@ var MeshTrackpadController = (function () {
         var lastScreen = null;                  // remote size and rotation the current gesture started on
         var zoomAnchor = null;                  // client point a pinch keeps fixed (from its first zoom step)
         var overlay = null, style = null, root = null;
-        var listeners = [], watchTimer = null, settleTimers = [];
+        var listeners = [], watchTimer = null, settleTimers = [], placeTimer = null, placeTries = 0;
 
         function call(fn, fallback) { try { return fn(); } catch (ex) { return fallback; } }
 
@@ -101,11 +101,15 @@ var MeshTrackpadController = (function () {
         // remote-pixel API, and upstream keeps handling those.
         function supported(m) { return !!(m && m.GetRemoteGeometry && m.SendRemotePointer && m.SendRemoteWheel && m.ReleaseAllPointerButtons); }
 
+        // Trackpad mode acts only on a connected module.
+        function connected(m) { return !!(m && m.State === 3); }
+
         // Release everything the engine holds on the module it was sending to, and anything else
         // that module still has pressed.
         function teardown() {
             zoomAnchor = null;
             lastScreen = null;
+            stopPlacing();
             if (engine.isActive()) engine.reset();
             if (sinkModule && sinkModule.ReleaseAllPointerButtons) call(function () { sinkModule.ReleaseAllPointerButtons(); });
         }
@@ -154,10 +158,24 @@ var MeshTrackpadController = (function () {
             return !!(c && c.width === ((r % 2) ? g.height : g.width) && c.height === ((r % 2) ? g.width : g.height));
         }
 
+        function stopPlacing() {
+            if (placeTimer !== null) { clock.clearTimeout(placeTimer); placeTimer = null; }
+            placeTries = 0;
+        }
+
         // Enabling trackpad mode puts the pointer at the centre of what is visible and sends it there.
+        // A module that does not know its screen yet (a WebRTC soft desktop before its first SCREEN)
+        // is retried for a few seconds instead.
         function placeInitialCursor() {
             var g = geometry(), rect = canvasRect();
-            if (!g || !rect || !(g.width > 0) || !(g.remotePerCss > 0)) return;
+            if (!g || !rect || !(g.width > 0) || !(g.remotePerCss > 0)) {
+                if (active && placeTimer === null && placeTries < 25) {
+                    placeTries++;
+                    placeTimer = clock.setTimeout(function () { placeTimer = null; if (active) placeInitialCursor(); }, WATCH_MS);
+                }
+                return;
+            }
+            stopPlacing();
             var p = { x: g.width / 2, y: g.height / 2 };
             if (canvasCurrent(g)) {
                 var view = adapter.scrollContainer();
@@ -192,7 +210,8 @@ var MeshTrackpadController = (function () {
         // input became blocked (Input off, a dialog) since the last touch.
         function evaluate() {
             if (!installed) return;
-            var now = !!(call(enabled, false) && call(adapter.isActive, false) && supported(call(adapter.module, null)));
+            var module = call(adapter.module, null);
+            var now = !!(call(enabled, false) && call(adapter.isActive, false) && supported(module) && connected(module));
             if (now !== active) {
                 if (now) {
                     active = true;
@@ -299,6 +318,7 @@ var MeshTrackpadController = (function () {
             if (!installed) return;
             if (active) { teardown(); active = false; doc.documentElement.classList.remove(ACTIVE_CLASS); }
             installed = false;
+            stopPlacing();
             if (watchTimer !== null) { clock.clearTimeout(watchTimer); watchTimer = null; }
             for (var t = 0; t < settleTimers.length; t++) clock.clearTimeout(settleTimers[t]);
             settleTimers = [];
@@ -309,14 +329,24 @@ var MeshTrackpadController = (function () {
             overlay = null; style = null; root = null;
         }
 
-        // The page's desktop connection changed state: drop everything when it goes down, and place
-        // the pointer again when it comes up with trackpad mode on.
+        // The page's desktop connection changed state. A different module coming up (the WebRTC soft
+        // desktop) first releases on the module that was being driven. Going down deactivates, since
+        // only a connected module counts. The page updates its own state after the module reports, so
+        // look again once its handlers have run.
         function onStateChanged(state) {
             if (!installed) return;
-            if (state !== 3) { if (active) teardown(); evaluate(); return; }
+            var m = call(adapter.module, null);
+            if (active && m !== sinkModule) { teardown(); sinkModule = m; }
             var wasActive = active;
             evaluate();
-            if (wasActive && active) { sinkModule = call(adapter.module, null); placeInitialCursor(); }
+            if (wasActive && active && state === 3) placeInitialCursor();
+            clock.setTimeout(evaluate, 0);
+        }
+
+        // A viewer module reported a state change (agent-desktop addStateListener): act on it when it
+        // is the module the engine sends to, or the one the page would use next.
+        function onModuleState(module, state) {
+            if (module && (module === sinkModule || module === call(adapter.module, null))) onStateChanged(state);
         }
 
         return {
@@ -324,6 +354,7 @@ var MeshTrackpadController = (function () {
             uninstall: uninstall,
             evaluate: evaluate,
             onStateChanged: onStateChanged,
+            onModuleState: onModuleState,
             isActive: function () { return active; },
             overlay: function () { return overlay; },
             engine: engine

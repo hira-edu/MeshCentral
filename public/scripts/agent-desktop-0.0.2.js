@@ -118,6 +118,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         obj.resetStreamState(reason);
         obj.browserPressedButtons = Object.create(null);
         obj.remotePointerLast = null;
+        obj.remoteScreenKnown = false;
         obj.FirstDraw = false;
     }
 
@@ -137,6 +138,12 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         obj.resetSessionState('stop');
     }
 
+    // Observers of this module's connection state (for example the trackpad controller). They run
+    // after the module has handled the change; the page's own handlers are left alone.
+    obj.stateListeners = [];
+    obj.addStateListener = function (fn) { if ((typeof fn == 'function') && (obj.stateListeners.indexOf(fn) < 0)) { obj.stateListeners.push(fn); } }
+    obj.removeStateListener = function (fn) { var i = obj.stateListeners.indexOf(fn); if (i >= 0) { obj.stateListeners.splice(i, 1); } }
+
     obj.xxStateChange = function (newstate) {
         if (obj.State == newstate) return;
         obj.State = newstate;
@@ -154,6 +161,8 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
                 break;
             }
         }
+        var listeners = obj.stateListeners.slice();
+        for (var i = 0; i < listeners.length; i++) { try { listeners[i](obj, newstate); } catch (ex) { } }
     }
 
     obj.send = function (x) {
@@ -249,6 +258,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         obj.ScreenHeight = obj.height = height;
         obj.resetStreamState('screen:' + width + 'x' + height + ':same=' + (sameSize ? 1 : 0));
         obj.FirstDraw = true;
+        obj.remoteScreenKnown = true;
         if (obj.parent != null && obj.parent.State < 3) { obj.parent.xxStateChange(3); }
         obj.SendCompressionLevel(obj.ImageType);
         obj.SendUnPause();
@@ -797,7 +807,10 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         return (((typeof pressed == 'number') ? pressed : remoteButtonByte(b[2])) * 2) & 0xFF;
     }
 
-    function remoteInputAllowed() { return (obj.State == 3) && (obj.stopInput != true) && (obj.width > 0) && (obj.height > 0); }
+    // A module learns the remote screen from its first SCREEN message; until then (for example a
+    // WebRTC soft desktop that has just started) its size is a placeholder and nothing is sent.
+    obj.remoteScreenKnown = false;
+    function remoteInputAllowed() { return (obj.State == 3) && (obj.stopInput != true) && obj.remoteScreenKnown && (obj.width > 0) && (obj.height > 0); }
 
     // The remote screen and how the canvas shows it. width/height are the remote (unrotated) size;
     // remotePerCssX/Y are remote pixels per CSS pixel along the remote X and Y axes (they differ
@@ -809,7 +822,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         var canvas = obj.Canvas.canvas, cssW = obj.CanvasId.clientWidth, cssH = obj.CanvasId.clientHeight;
         var sx = (cssW > 0) ? (canvas.width / cssW) : 0, sy = (cssH > 0) ? (canvas.height / cssH) : 0;
         return {
-            width: obj.width, height: obj.height, rotation: obj.rotation, remotePerCss: sx,
+            width: obj.remoteScreenKnown ? obj.width : 0, height: obj.remoteScreenKnown ? obj.height : 0, rotation: obj.rotation, remotePerCss: sx,
             remotePerCssX: (obj.rotation % 2) ? sy : sx, remotePerCssY: (obj.rotation % 2) ? sx : sy,
             cssToRemote: function (cx, cy) { var px = cx * sx, py = cy * sy; return { x: obj.crotX(px, py), y: obj.crotY(px, py) }; },
             remoteToCss: function (x, y) {
@@ -1143,6 +1156,13 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.Debug = function (msg) { console.log(msg); }
     obj.getIEVersion = function () { var r = -1; if (navigator.appName == 'Microsoft Internet Explorer') { var ua = navigator.userAgent; var re = new RegExp("MSIE ([0-9]{1,}[.0-9]{0,})"); if (re.exec(ua) != null) r = parseFloat(RegExp.$1); } return r; }
     obj.haltEvent = function (e) { if (e.preventDefault) e.preventDefault(); if (e.stopPropagation) e.stopPropagation(); return false; }
+
+    // Fork scripts observe new viewer modules here instead of wrapping this factory: each function
+    // in window.MeshDesktopModuleObservers is called with every module created.
+    if ((typeof window != 'undefined') && window.MeshDesktopModuleObservers && window.MeshDesktopModuleObservers.length) {
+        var observers = window.MeshDesktopModuleObservers.slice();
+        for (var oi = 0; oi < observers.length; oi++) { try { observers[oi](obj); } catch (ex) { } }
+    }
 
     return obj;
 }

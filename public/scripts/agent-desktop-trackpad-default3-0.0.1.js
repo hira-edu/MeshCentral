@@ -34,7 +34,7 @@ MeshTrackpadAdapters.default3 = (function () {
 
     return {
         id: 'default3',
-        detect: function () { return !!(el('deskarea3x') && el('DeskParent') && (typeof window._mobileZoomMode !== 'undefined')); },
+        detect: function () { return !!(el('deskarea3x') && el('DeskParent') && (typeof window._mobileZoomMode !== 'undefined') && (typeof window.trackpadMode !== 'undefined')); },
         isActive: function () { return document.body.classList.contains('is-mobile') && (window.trackpadMode === true) && !!window.desktop; },
         captureRoot: function () { return el('DeskParent'); },
         canvas: function () { return el('Desk'); },

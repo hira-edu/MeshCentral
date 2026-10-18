@@ -10,7 +10,8 @@ MeshTrackpadAdapters.defaultMobile = (function () {
 
     return {
         id: 'default-mobile',
-        detect: function () { return !!(el('p10desktop') && el('DeskParent') && (typeof window.fullscreenzoom !== 'undefined')); },
+        // The guest share page (sharing-mobile) has the same markers but no trackpad mode.
+        detect: function () { return !!(el('p10desktop') && el('DeskParent') && (typeof window.fullscreenzoom !== 'undefined') && (typeof window.trackpadMode !== 'undefined')); },
         isActive: function () { return (window.fullscreen === true) && (window.trackpadMode === true) && !!window.desktop; },
         captureRoot: function () { return el('DeskParent'); },
         canvas: function () { return el('Desk'); },

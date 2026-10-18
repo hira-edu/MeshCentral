@@ -645,6 +645,102 @@
 })();
 
 /*
+ * Trackpad ("mouse pointer") mode engine loader.
+ *
+ * On the Modern UI and classic mobile desktop pages, loads the fork's trackpad gesture engine,
+ * controller and the page's adapter when this browser has them enabled, and installs the
+ * controller. Each page kind has its own flag, off unless DEFAULT_ON says otherwise; opening a page
+ * with ?trackpadengine=on or =off sets the flag for this browser (=default forgets it). With the
+ * flag off nothing is loaded and nothing listens. It wraps nothing: viewer modules are observed
+ * through agent-desktop's MeshDesktopModuleObservers and addStateListener.
+ */
+(function () {
+  'use strict';
+  if (window.__meshTrackpadLoader) return;
+  window.__meshTrackpadLoader = true;
+
+  var DEFAULT_ON = { default3: false, defaultMobile: false };
+  var ADAPTER_FILES = { default3: 'agent-desktop-trackpad-default3-0.0.1.js', defaultMobile: 'agent-desktop-trackpad-mobile-0.0.1.js' };
+  var COMMON_FILES = ['agent-desktop-trackpad-0.0.1.js', 'agent-desktop-trackpad-controller-0.0.1.js'];
+  var base = 'scripts/';
+  try {
+    var selfSrc = (document.currentScript && document.currentScript.src) || '';
+    if (selfSrc) { base = selfSrc.substring(0, selfSrc.lastIndexOf('/') + 1); }
+  } catch (ex) { }
+
+  function storageKey(kind) { return 'meshTrackpadEngine.' + kind; }
+
+  function flag(kind) {
+    try {
+      var v = window.localStorage.getItem(storageKey(kind));
+      if (v === 'on') return true;
+      if (v === 'off') return false;
+    } catch (ex) { }
+    return DEFAULT_ON[kind] === true;
+  }
+
+  function applyUrlFlag(kind) {
+    var m = /[?&]trackpadengine=(on|off|default)(?:&|#|$)/.exec(window.location.search || '');
+    if (!m) return;
+    try {
+      if (m[1] === 'default') { window.localStorage.removeItem(storageKey(kind)); }
+      else { window.localStorage.setItem(storageKey(kind), m[1]); }
+    } catch (ex) { }
+  }
+
+  // Only pages with a trackpad mode: the guest share pages have the desktop markers but not that.
+  function pageKind() {
+    if (typeof window.trackpadMode === 'undefined') return null;
+    if (document.getElementById('deskarea3x') && document.getElementById('DeskParent') && (typeof window._mobileZoomMode !== 'undefined')) return 'default3';
+    if (document.getElementById('p10desktop') && document.getElementById('DeskParent') && (typeof window.fullscreenzoom !== 'undefined')) return 'defaultMobile';
+    return null;
+  }
+
+  // Load in order; stop quietly at the first failure, leaving trackpad mode to the page.
+  function load(files, done, failed) {
+    var i = 0;
+    (function next() {
+      if (i >= files.length) { done(); return; }
+      var s = document.createElement('script');
+      s.src = base + files[i++];
+      s.async = false;
+      s.onload = next;
+      s.onerror = function () { if (failed) failed(); };
+      document.head.appendChild(s);
+    })();
+  }
+
+  function start() {
+    var kind = pageKind();
+    if (!kind) return;
+    applyUrlFlag(kind);
+    if (!flag(kind)) return;
+    var controller = null;
+    function watch(module) {
+      if (module && module.addStateListener) { module.addStateListener(function (m, state) { if (controller) controller.onModuleState(m, state); }); }
+    }
+    // Register before the page connects, so every viewer module (including a WebRTC soft desktop)
+    // reports its state changes.
+    window.MeshDesktopModuleObservers = window.MeshDesktopModuleObservers || [];
+    window.MeshDesktopModuleObservers.push(watch);
+    if (window.desktop && window.desktop.m) watch(window.desktop.m);
+    function giveUp() {
+      // Stop observing new modules; a module created meanwhile keeps an inert listener.
+      var i = window.MeshDesktopModuleObservers.indexOf(watch);
+      if (i >= 0) window.MeshDesktopModuleObservers.splice(i, 1);
+    }
+    load(COMMON_FILES.concat([ADAPTER_FILES[kind]]), function () {
+      var adapter = window.MeshTrackpadAdapters && window.MeshTrackpadAdapters[kind];
+      if (!adapter || !window.MeshTrackpadController || !window.MeshTrackpadEngine || !adapter.detect()) { giveUp(); return; }
+      controller = window.MeshTrackpadController.create({ adapter: adapter, engine: window.MeshTrackpadEngine, enabled: function () { return true; } });
+      controller.install();
+      window.MeshTrackpad = { controller: controller, kind: kind };
+    }, giveUp);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+})();
+
+/*
  * Desktop audio speaker control (system-audio feature, tunnel protocol 20).
  *
  * Adds a speaker button and a volume slider to the top toolbar of both desktop viewer pages: the
