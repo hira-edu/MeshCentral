@@ -118,6 +118,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             // Setup the viewer
             if (obj.viewers.indexOf(peer) >= 0) return true;
             obj.viewers.push(peer);
+            if (obj.agent != null) { delete obj.agent.closeWhenDrained; } // A viewer joining keeps the agent connected
             peer.desktopPaused = true;
             peer.imageType = 1;
             peer.imageCompression = 30;
@@ -262,6 +263,39 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         return true;
     }
 
+    // Mouse buttons each viewer has pressed on the remote, so that a viewer that goes away while
+    // holding one (closed tab, network loss) does not leave it held for the others. Button bytes are
+    // the agent's: down 0x02/0x08/0x20, up 0x04/0x10/0x40; 0x88 is a double-click indication.
+    const MOUSE_BUTTONS = [[0x02, 0x04], [0x08, 0x10], [0x20, 0x40]];
+
+    function trackViewerMouse(viewer, data) {
+        if (data.length < 10) return;
+        const b = data[5];
+        if (b == 0x88) return;
+        viewer.mouseX = data.readUInt16BE(6);
+        viewer.mouseY = data.readUInt16BE(8);
+        if (viewer.heldButtons == null) { viewer.heldButtons = {}; }
+        for (const [down, up] of MOUSE_BUTTONS) {
+            if (b & down) { viewer.heldButtons[down] = true; }
+            if (b & up) { delete viewer.heldButtons[down]; }
+        }
+    }
+
+    // Release, at the viewer's last pointer position, each button the departing viewer held that no
+    // remaining viewer holds.
+    function releaseViewerButtons(viewer) {
+        const held = viewer.heldButtons;
+        viewer.heldButtons = null;
+        if ((held == null) || (obj.agent == null) || (obj.agentClosing === true)) return;
+        for (const [down, up] of MOUSE_BUTTONS) {
+            if (held[down] !== true) continue;
+            if (obj.viewers.some(function (v) { return (v !== viewer) && (v.heldButtons != null) && (v.heldButtons[down] === true); })) continue;
+            const x = viewer.mouseX || 0, y = viewer.mouseY || 0;
+            obj.sendToAgent(Buffer.from([0x00, 0x02, 0x00, 0x0A, 0x00, up, (x >> 8) & 0xFF, x & 0xFF, (y >> 8) & 0xFF, y & 0xFF]));
+            parent.parent.debug('relay', 'DesktopRelay: Released mouse button ' + up + ' held by a departing viewer, node=' + obj.nodeid);
+        }
+    }
+
     // Remove an agent or viewer
     // Return true if this multiplexor is no longer needed.
     obj.removePeer = function (peer) {
@@ -270,6 +304,8 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             //console.log('removePeer-agent', obj.nodeid);
             // Agent has disconnected, disconnect everyone.
             // close() synchronously removes the viewer from obj.viewers.
+            // The agent is gone, so nothing may be sent to it for the departing viewers.
+            obj.agentClosing = true;
             if (obj.viewers != null) { for (const viewer of obj.viewers.slice()) { viewer.close(); } }
 
             // Clean up the agent
@@ -284,6 +320,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 var i = obj.viewers.indexOf(peer);
                 if (i == -1) return false;
                 obj.viewers.splice(i, 1);
+                releaseViewerButtons(peer);
             }
 
             // Reevaluate both directions after membership changes. Removing the
@@ -355,8 +392,16 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             delete peer.sendQueue;
             delete peer.startTime;
 
-            // If this is the last viewer, disconnect the agent if present and dispose of this multiplexor
-            if ((obj.viewers != null) && (obj.viewers.length == 0)) { if (obj.agent != null) { obj.agent.close(); } dispose(); return true; }
+            // If this is the last viewer, disconnect the agent if present and dispose of this multiplexor.
+            // Input still queued for the agent (such as a button release for the viewer that just left)
+            // is delivered first; the agent is closed once its queue drains, and a viewer joining in the
+            // meantime keeps the session.
+            if ((obj.viewers != null) && (obj.viewers.length == 0)) {
+                if ((obj.agent != null) && (obj.agent.sending == true) && (obj.agent.sendQueue.length > 0)) { obj.agent.closeWhenDrained = true; return false; }
+                if (obj.agent != null) { obj.agent.close(); }
+                dispose();
+                return true;
+            }
 
             // A leaving viewer may have been holding the aggregate stream at a higher scale or frame rate.
             obj.recomputeViewerImageSettings();
@@ -585,6 +630,9 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             // Nothing to send
             obj.agent.sending = false;
 
+            // The last viewer left while input was still queued: now it is delivered, close the agent.
+            if (obj.agent.closeWhenDrained === true) { obj.agent.close(); return; }
+
             // Flow control, resume all viewers
             if (obj.agent.overflow == true) {
                 obj.agent.overflow = false;
@@ -783,7 +831,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 if (viewer.viewOnly == false) { obj.sendToAgent(data); }
                 break;
             case 2: // Mouse events, forward to agent
-                if (viewer.viewOnly == false) { obj.sendToAgent(data); }
+                if (viewer.viewOnly == false) { if (obj.agent != null) { trackViewerMouse(viewer, data); } obj.sendToAgent(data); }
                 break;
             case 5: // Compression
                 if (data.length < 10) return;
