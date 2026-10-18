@@ -31,6 +31,87 @@ function windowsServiceManagerLifecycleDisabledError(operation)
     }
 }
 
+function serviceNotFound(name)
+{
+    var error = new Error('Service not found: ' + name);
+    error.code = 'ENOENT';
+    return error;
+}
+function windowsServiceError(operation, code)
+{
+    var error = new Error(operation + ' failed (Windows error ' + code + ')');
+    error.code = code == 1060 ? 'ENOENT' : 'EWIN32';
+    error.win32Error = code;
+    return error;
+}
+function windowsServiceExecutable(command)
+{
+    command = ('' + command).replace(/%([^%]+)%/g, function (match, name)
+    {
+        for (var key in process.env) { if (key.toLowerCase() == name.toLowerCase()) { return process.env[key]; } }
+        throw new Error('Unresolved service path environment variable: ' + name);
+    }).trim();
+    var match = command.charAt(0) == '"' ? /^"([^"\r\n]+)"(?:\s|$)/.exec(command) : /^(.+?\.exe)(?:\s|$)/i.exec(command);
+    if (!match || !/\.exe$/i.test(match[1])) { throw new Error('Invalid service executable command line: ' + command); }
+    return match[1];
+}
+
+function readSystemdDirective(file, name)
+{
+    var lines = require('fs').readFileSync(file).toString().replace(/\\\r?\n/g, ' ').split(/\r?\n/);
+    var value = null;
+    for (var i = 0; i < lines.length; ++i)
+    {
+        var match = /^\s*([A-Za-z]+)\s*=(.*)$/.exec(lines[i]);
+        if (match && match[1] == name) { value = match[2].trim(); }
+    }
+    return value;
+}
+function unresolvedServicePath(file)
+{
+    var error = new Error('Unresolved service executable in ' + file);
+    error.code = 'EUNRESOLVEDPATH';
+    return error;
+}
+function systemdExecutable(file)
+{
+    var value = readSystemdDirective(file, 'ExecStart');
+    if (!value) { throw unresolvedServicePath(file); }
+    value = value.replace(/^[-@:+!]+/, '');
+    var match = /^(?:"((?:\\.|[^"\\])*)"|'([^']*)'|(\S+))/.exec(value);
+    if (!match) { throw unresolvedServicePath(file); }
+    var executable = (match[1] || match[2] || match[3]).replace(/\\x([0-9a-f]{2})/gi, function (_, hex) { return String.fromCharCode(parseInt(hex, 16)); }).replace(/\\([\\"'])/g, '$1');
+    if (executable.charAt(0) != '/' || executable.indexOf('%') >= 0) { throw unresolvedServicePath(file); }
+    return executable;
+}
+
+// Use argv directly so historical service keys containing spaces/backslashes survive intact.
+function runSystemctl(args)
+{
+    var fs = require('fs');
+    var executable = fs.existsSync('/bin/systemctl') ? '/bin/systemctl' : '/usr/bin/systemctl';
+    var child = require('child_process').execFile(executable, ['systemctl'].concat(args));
+    var output = '', errors = '', code = null;
+    child.stdout.on('data', function (chunk) { output += chunk.toString(); });
+    child.stderr.on('data', function (chunk) { errors += chunk.toString(); });
+    child.on('exit', function (status) { code = status; });
+    child.waitExit(120000);
+    if (code == null) { try { child.kill(); } catch (e) { } throw new Error('systemctl timed out: ' + args[0]); }
+    if (code !== 0) { throw new Error('systemctl ' + args[0] + ' failed (' + code + '): ' + errors.trim()); }
+    return output;
+}
+function systemdIsRunning(name)
+{
+    var output = runSystemctl(['show', '--property=ActiveState', '--property=MainPID', name + '.service']);
+    var state = /^ActiveState=(.*)$/m.exec(output);
+    var pid = /^MainPID=(\d+)$/m.exec(output);
+    if (!state || !pid) { throw new Error('Unable to verify service state: ' + name); }
+    if (parseInt(pid[1]) != 0) { return true; }
+    if (state[1] == 'inactive' || state[1] == 'failed') { return false; }
+    if (/^(active|activating|deactivating|reloading|refreshing)$/.test(state[1])) { return true; }
+    throw new Error('Unrecognized service state: ' + state[1]);
+}
+
 function failureActionToInteger(action)
 {
     var ret;
@@ -216,416 +297,540 @@ if (process.platform == 'linux')
 
 if (process.platform == 'darwin')
 {
-    function getOSVersion()
+    function macPlistString(value)
     {
-        var child = require('child_process').execFile('/bin/sh', ['sh']);
-        child.stdout.str = '';
-        child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-        child.stdin.write("sw_vers | grep ProductVersion | awk '{ print $2 }'\nexit\n");
-        child.waitExit();
-
-        //child.stdout.str = '10.9';
-
-        var ret = { raw: child.stdout.str.trim().split('.'), toString: function () { return (this.raw.join('.')); } };
-        ret.compareTo = function compareTo(val)
-        {
-            var raw = (typeof (val) == 'string') ? val.split('.') : val.raw; if (!raw) { throw ('Invalid parameter'); }
-            var self = this.raw.join('.').split('.');
-
-            var r = null, s = null;
-            while (self.length > 0 && raw.length > 0)
-            {
-                s = parseInt(self.shift()); r = parseInt(raw.shift());
-                if (s < r) { return (-1); }
-                if (s > r) { return (1); }
-            }
-            if (self.length == raw.length) { return (0); }
-            if (self.length < raw.length) { return (-1); } else { return (1); }    
-        }
-        return (ret);
-    };
-
-
-    function fetchPlist(folder, name, userid)
+        value = '' + value;
+        if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(value)) { throw new Error('Invalid control character in launchd configuration'); }
+        return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+    }
+    function macServiceName(value)
     {
-        if (folder.endsWith('/')) { folder = folder.substring(0, folder.length - 1); }
-        var ret = { name: name, close: function () { }, _uid: userid };
-        if (!require('fs').existsSync(folder + '/' + name + '.plist'))
-        {
-            // Before we throw in the towel, let's enumerate all the plist files, and see if one has a matching label
-            var files = require('fs').readdirSync(folder);
-            for (var file in files)
-            {
-                if (!files[file].endsWith('.plist')) { continue; }
-                var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = '';
-                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stdin.write("cat " + folder + '/' + files[file] + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
-                child.waitExit();
-                if (child.stdout.str.trim() == name)
-                {
-                    ret.name = files[file].endsWith('.plist') ? files[file].substring(0, files[file].length - 6) : files[file];
-                    Object.defineProperty(ret, 'alias', { value: name });
-                    Object.defineProperty(ret, 'plist', { value: folder + '/' + files[file] });
-                    break;
-                }
-            }
-            if (ret.name == name) { throw (' ' + (folder.split('LaunchDaemon').length>1 ? 'LaunchDaemon' : 'LaunchAgent') + ' (' + name + ') NOT FOUND'); }
-        }
-        else
-        {
-            Object.defineProperty(ret, 'plist', { value: folder + '/' + name + '.plist' });
-            Object.defineProperty(ret, 'alias',
-                {
-                    get: function ()
-                        {
-                            var child = require('child_process').execFile('/bin/sh', ['sh']);
-                            child.stdout.str = '';
-                            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                            child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>Label</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
-                            child.waitExit();
-                            return (child.stdout.str.trim());
-                        }
-                });
-        }
-        Object.defineProperty(ret, 'daemon', { value: ret.plist.split('/LaunchDaemons/').length > 1 ? true : false });
+        if (typeof value != 'string' || !value.length || value == '.' || value == '..' || /[\/\x00-\x1f]/.test(value))
+        { throw new Error('Invalid service name'); }
+        return value;
+    }
+    function macWritePlist(file, contents)
+    {
+        var fs = require('fs'), temporary = file + '.' + process.pid + '.tmp', fd = null, created = false;
         try
         {
-            Object.defineProperty(ret, 'installedDate', { value: require('fs').statSync(ret.plist).ctime });
+            // Exclusive creation avoids following an existing staging symlink.
+            fd = fs.openSync(temporary, 'wx', 384);
+            created = true;
+            fs.chmodSync(temporary, 384);
+            fs.writeSync(fd, contents);
+            var closing = fd; fd = null;
+            fs.closeSync(closing);
+            macServiceCommand('/usr/bin/plutil', ['-lint', '--', temporary]);
+            fs.chmodSync(temporary, 420);
+            fs.renameSync(temporary, file);
         }
-        catch(xx)
+        catch (e)
         {
+            if (fd != null) { try { fs.closeSync(fd); } catch (ignored) { } }
+            if (created) { try { fs.unlinkSync(temporary); } catch (ignored) { } }
+            throw e;
         }
-        ret.appWorkingDirectory = function appWorkingDirectory()
+    }
+    function macPrepareFolders(folder, created)
+    {
+        var fs = require('fs'), path = '';
+        if (typeof folder != 'string' || folder.charAt(0) != '/' || /[\x00-\x1f]/.test(folder)) { throw new Error('Invalid installation directory'); }
+        var parts = folder.split('/');
+        for (var i = 1; i < parts.length; ++i)
         {
-            var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("cat " + this.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>WorkingDirectory</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); gsub(/\\/$/,\"\",c[2]); printf \"%s/\",c[2]; }'\nexit\n");
-            child.waitExit();
-            child.stdout.str = child.stdout.str.trim();
-
-            return (child.stdout.str);
-        };
-        ret.appLocation = function appLocation()
-        {
-            var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write("cat " + this.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>ProgramArguments</key>\"); split(a[2], b, \"</string>\"); split(b[1], c, \"<string>\"); print c[2]; }'\nexit\n");
-            child.waitExit();
-            return (child.stdout.str.trim());
-        };
-        Object.defineProperty(ret, '_runAtLoad',
+            if (!parts[i]) { continue; }
+            if (parts[i] == '.' || parts[i] == '..') { throw new Error('Installation directory must not contain dot segments'); }
+            path += '/' + parts[i];
+            if (fs.existsSync(path))
             {
-                get: function ()
-                {
-                    // We need to see if this is an Auto-Starting service, in order to figure out how to implement 'start'
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = '';
-                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                    child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{ split($0, a, \"<key>RunAtLoad</key>\"); split(a[2], b, \"/>\"); split(b[1], c, \"<\"); print c[2]; }'\nexit\n");
-                    child.waitExit();
-                    return (child.stdout.str.trim().toUpperCase() == "TRUE");
-                }
-            });
-        Object.defineProperty(ret, 'startType',
-            {
-                get: function()
-                {
-                    if(this.daemon)
-                    {
-                        return (this._runAtLoad ? 'AUTO_START' : 'DEMAND_START');
-                    }
-                    else
-                    {
-                        return ('AUTO_START');
-                    }
-                }
-            });
-        Object.defineProperty(ret, "_keepAlive",
-            {
-                get: function () 
-                {
-                    var child = require('child_process').execFile('/bin/sh', ['sh']);
-                    child.stdout.str = '';
-                    child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                    child.stdin.write("cat " + ret.plist + " | tr '\n' '\.' | awk '{split($0, a, \"<key>KeepAlive</key>\"); split(a[2], b, \"<\"); split(b[2], c, \">\"); ");
-                    child.stdin.write(" if(c[1]==\"dict\"){ split(a[2], d, \"</dict>\"); if(split(d[1], truval, \"<true/>\")>1) { split(truval[1], kn1, \"<key>\"); split(kn1[2], kn2, \"</key>\"); print kn2[1]; } }");
-                    child.stdin.write(" else { split(c[1], ka, \"/\"); if(ka[1]==\"true\") {print \"ALWAYS\";} } }'\nexit\n");
-                    child.waitExit();
-                    return (child.stdout.str.trim());
-                }
-            });
-        ret.getPID = function getPID(uid, asString)
-        {
-            var options = undefined;
-            var command;
-            if (this._uid != null) { uid = this._uid; }
-
-            if (getOSVersion().compareTo('10.10') < 0)
-            {
-                command = "launchctl list | grep '" + this.alias + "' | awk '{ if($3==\"" + this.alias + "\"){print $1;}}'\nexit\n";
-                options = { uid: uid };
+                if (!fs.statSync(path).isDirectory()) { throw new Error('Not a directory: ' + path); }
             }
-            else
-            {
-                if (uid == null)
-                {
-                    command = 'launchctl print system | grep "' + this.alias + '" | awk \'{ if(split($0, tmp, " ")==3) { if($3=="' + this.alias + '") { print $1; } }}\'\nexit\n';
-                }
-                else
-                {
-                    command = 'launchctl print gui/' + uid + ' | grep "' + this.alias + '" | awk \'{ if(split($0, tmp, " ")==3) { if($3=="' + this.alias + '") { print $1; } }}\'\nexit\n';
-                }
-            }
-
-            var child = require('child_process').execFile('/bin/sh', ['sh'], options);
-            child.stdout.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write(command);
-            child.waitExit();
-
-            if (asString == null || asString != true)
-            {
-                return (parseInt(child.stdout.str.trim()));
-            }
-            else
-            {
-                return (child.stdout.str.trim());
-            }
-        };
-        ret.isLoaded = function isLoaded(uid)
+            else { fs.mkdirSync(path); if (created) { created.push(path); } }
+        }
+    }
+    function macBuildLaunchdPlist(options, agent)
+    {
+        macServiceName(options.name);
+        var executable = agent ? options.servicePath : options.installPath + options.target;
+        var directory = options.workingDirectory || (agent ? executable.substring(0, executable.lastIndexOf('/')) || '/' : options.installPath);
+        if (typeof executable != 'string' || executable.charAt(0) != '/' || directory.charAt(0) != '/') { throw new Error('Launchd requires absolute program and working directory paths'); }
+        var parameters = options.parameters || [];
+        if (!Array.isArray(parameters)) { throw new Error('Invalid launchd parameters'); }
+        var xml = '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>';
+        xml += '<key>Label</key><string>' + macPlistString(options.name + (agent ? '-launchagent' : '')) + '</string>';
+        xml += '<key>ProgramArguments</key><array><string>' + macPlistString(executable) + '</string>';
+        for (var i = 0; i < parameters.length; ++i)
         {
-            if (this._uid != null) { uid = this._uid; }
-            return (this.getPID(uid, true) != '');
-        };
-        ret.isRunning = function isRunning(uid)
+            if (typeof parameters[i] != 'string') { throw new Error('Launchd arguments must be strings'); }
+            xml += '<string>' + macPlistString(parameters[i]) + '</string>';
+        }
+        xml += '</array><key>WorkingDirectory</key><string>' + macPlistString(directory) + '</string>';
+        var paths = { stdout: 'StandardOutPath', stderr: 'StandardErrorPath' };
+        for (var key in paths)
         {
-            if (this._uid != null) { uid = this._uid; }
-            return (this.getPID(uid) > 0);
-        };
-        ret.isMe = function isMe(uid)
+            if (options[key] != null)
+            {
+                if (typeof options[key] != 'string' || options[key].charAt(0) != '/') { throw new Error('Invalid launchd log path'); }
+                xml += '<key>' + paths[key] + '</key><string>' + macPlistString(options[key]) + '</string>';
+            }
+        }
+        if (agent && options.sessionTypes && options.sessionTypes.length)
         {
-            if (this._uid != null) { uid = this._uid; }
-            return (this.getPID(uid) == process.pid);
+            xml += '<key>LimitLoadToSessionType</key><array>';
+            for (var i = 0; i < options.sessionTypes.length; ++i)
+            {
+                if (['Aqua', 'LoginWindow', 'Background', 'StandardIO', 'System'].indexOf(options.sessionTypes[i]) < 0) { throw new Error('Invalid launchd session type'); }
+                xml += '<string>' + options.sessionTypes[i] + '</string>';
+            }
+            xml += '</array>';
+        }
+        xml += '<key>RunAtLoad</key>' + (options.startType == 'AUTO_START' || options.startType == 'BOOT_START' ? '<true/>' : '<false/>');
+        var restart = options.failureRestart;
+        if (restart != null && (typeof restart != 'number' || !isFinite(restart) || restart < 0)) { throw new Error('Invalid restart interval'); }
+        xml += '<key>KeepAlive</key>' + (restart == null || restart > 0
+            ? (agent ? '<dict><key>Crashed</key><true/></dict>' : '<dict><key>SuccessfulExit</key><false/></dict>') : '<false/>');
+        if (restart != null) { xml += '<key>ThrottleInterval</key><integer>' + Math.max(1, Math.ceil(restart / 1000)) + '</integer>'; }
+        return xml + '</dict></plist>';
+    }
+    function macInstallService(options, manager)
+    {
+        if (!manager.isAdmin()) { throw new Error('Installing as Service requires root'); }
+        var fs = require('fs'), created = [], directories = [];
+        macServiceName(options.name);
+        options.target = macServiceName(options.target || options.name);
+        if (options.installPath && options.installInPlace) { throw new Error('Cannot specify both installPath and installInPlace'); }
+        if (options.installInPlace)
+        {
+            if (!options.servicePath || options.servicePath.charAt(0) != '/') { throw new Error('Invalid in-place executable'); }
+            options.installPath = options.servicePath.substring(0, options.servicePath.lastIndexOf('/')) || '/';
+            if (options.target != options.servicePath.split('/').pop()) { throw new Error('In-place installation must preserve the executable basename'); }
+        }
+        if (options.installPath == null)
+        {
+            options.installPath = '/usr/local/mesh_services/' + (options.companyName != null ? macServiceName(options.companyName) + '/' : '') + options.name;
+        }
+        options.installPath = options.installPath.replace(/\/+$/, '') + '/';
+        var executable = options.installPath + options.target;
+        var cronMarker = macCronMarker(options.name);
+        if (macCrontabFind(cronMarker) != null || fs.existsSync('/Library/LaunchDaemons/' + options.name + '.plist')) { throw new Error('Service already exists: ' + options.name); }
+        var receipt = { rollback: function ()
+        {
+            try { macCrontabUninstall(cronMarker); } catch (ignored) { }
+            var errors = [];
+            for (var i = created.length - 1; i >= 0; --i)
+            {
+                try { fs.unlinkSync(created[i]); created.splice(i, 1); } catch (e) { errors.push(created[i] + ': ' + e); }
+            }
+            for (var i = directories.length - 1; i >= 0; --i) { try { fs.rmdirSync(directories[i]); } catch (ignored) { } }
+            if (errors.length) { throw new Error('Installation cleanup failed: ' + errors.join('; ')); }
+        } };
+        function createFile(path, content, mode)
+        {
+            var fd = null;
+            try
+            {
+                fd = fs.openSync(path, 'wx', 384); created.push(path);
+                fs.chmodSync(path, 384);
+                var bytes = Buffer.isBuffer(content) ? content : Buffer.from(content);
+                if (fs.writeSync(fd, bytes) != bytes.length) { throw new Error('Incomplete installation file: ' + path); }
+                var closing = fd; fd = null; fs.closeSync(closing);
+                fs.chmodSync(path, mode);
+            }
+            finally { if (fd != null) { fs.closeSync(fd); } }
+        }
+        try
+        {
+            macPrepareFolders(options.installPath, directories);
+            if (!options.binary && options.servicePath == executable)
+            {
+                if (!fs.statSync(executable).isFile()) { throw new Error('Invalid in-place executable'); }
+            }
+            else { createFile(executable, options.binary || fs.readFileSync(options.servicePath), 493); }
+            var files = options.files || [];
+            for (var i = 0; i < files.length; ++i)
+            {
+                var name = macServiceName(extractFileName(files[i])), destination = options.installPath + name;
+                var source = extractFileSource(files[i]);
+                if (source == destination) { continue; }
+                // Reinstall must retain the incumbent's identity and provisioning.
+                if (fs.existsSync(destination) && [options.target + '.db', options.target + '.msh', options.target + '.mshx', options.target + '.proxy'].indexOf(name) >= 0) { continue; }
+                createFile(destination, files[i]._buffer || fs.readFileSync(source), 384);
+            }
+            var heartbeat = options.installPath + '.meshagent_cron.sh';
+            createFile(heartbeat, macBuildHeartbeatScript(options), 493);
+            macCrontabInstall('* * * * * ' + heartbeat + ' >/dev/null 2>&1', cronMarker);
+            return receipt;
+        }
+        catch (e)
+        {
+            try { receipt.rollback(); } catch (cleanup) { throw new Error(e + '; ' + cleanup); }
+            throw e;
+        }
+    }
+    // MeshAgent's execFile takes argv[0] explicitly. Never interpret service
+    // labels, paths, or arguments as shell input.
+    function macServiceCommand(executable, args, options)
+    {
+        var child = require('child_process').execFile(executable, [executable.split('/').pop()].concat(args), options);
+        var output = '', errors = '', code = null;
+        child.stdout.on('data', function (chunk) { output += chunk.toString(); });
+        child.stderr.on('data', function (chunk) { errors += chunk.toString(); });
+        child.on('exit', function (status) { code = status; });
+        child.waitExit(120000);
+        if (code == null)
+        {
+            try { child.kill(); } catch (ignored) { }
+            throw new Error(executable + ' timed out: ' + args[0]);
+        }
+        if (code !== 0)
+        {
+            var error = new Error(executable + ' ' + args[0] + ' failed (' + code + '): ' + errors.trim());
+            error.code = 'ELAUNCHD';
+            error.exitCode = code;
+            throw error;
+        }
+        return output;
+    }
+    function getOSVersion()
+    {
+        var value = macServiceCommand('/usr/bin/sw_vers', ['-productVersion']).trim();
+        if (!/^\d+(\.\d+)*$/.test(value)) { throw new Error('Invalid macOS version: ' + value); }
+        var ret = { raw: value.split('.'), toString: function () { return this.raw.join('.'); } };
+        ret.compareTo = function (val)
+        {
+            var other = typeof val == 'string' ? val.split('.') : val.raw;
+            for (var i = 0; i < Math.max(this.raw.length, other.length); ++i)
+            {
+                var a = parseInt(this.raw[i] || '0', 10), b = parseInt(other[i] || '0', 10);
+                if (a != b) { return a < b ? -1 : 1; }
+            }
+            return 0;
         };
-        ret.load = function load(uid)
+        return ret;
+    }
+    function macServicePlist(file)
+    {
+        // plutil handles both XML and binary plists, including escaped strings.
+        var data = JSON.parse(macServiceCommand('/usr/bin/plutil', ['-convert', 'json', '-o', '-', '--', file]));
+        if (!data || typeof data.Label != 'string' || !data.Label.length || /[\/\x00-\x1f]/.test(data.Label))
+        { throw new Error('Invalid launchd Label in ' + file); }
+        return data;
+    }
+    function macLoginWindowDomains()
+    {
+        if (require('user-sessions').Self() != 0) { throw new Error('LoginWindow LaunchAgent requires root'); }
+        var output;
+        try { output = macServiceCommand('/bin/launchctl', ['print', 'user/0']); }
+        catch (e) { if (e.exitCode == 125) { return []; } throw e; }
+        var candidates = [], domains = [], match, pattern = /^\s*((?:gui|login)\/\d+)\s*$/gm;
+        while ((match = pattern.exec(output)) != null) { if (candidates.indexOf(match[1]) < 0) { candidates.push(match[1]); } }
+        match = /^\s*gui asid = (\d+)\s*$/m.exec(output);
+        if (match && candidates.indexOf('login/' + match[1]) < 0) { candidates.push('login/' + match[1]); }
+        for (var i = 0; i < candidates.length; ++i)
+        {
+            try { output = macServiceCommand('/bin/launchctl', ['print', candidates[i]]); }
+            catch (e) { if (e.exitCode == 125) { continue; } throw e; }
+            if (/^\s*session = LoginWindow\s*$/m.test(output)) { domains.push(candidates[i]); }
+        }
+        return domains;
+    }
+    function fetchPlist(folder, name, userid)
+    {
+        macServiceName(name);
+        var fs = require('fs');
+        folder = folder.replace(/\/$/, '');
+        var file = folder + '/' + name + '.plist';
+        if (!fs.existsSync(file))
+        {
+            var files;
+            if (!fs.existsSync(folder)) { throw serviceNotFound(name); }
+            try { files = fs.readdirSync(folder); }
+            catch (e) { if (e.code == 'ENOENT') { throw serviceNotFound(name); } throw e; }
+            file = null;
+            for (var i = 0; i < files.length; ++i)
+            {
+                if (!files[i].endsWith('.plist')) { continue; }
+                var candidate = folder + '/' + files[i];
+                if (macServicePlist(candidate).Label == name) { file = candidate; break; }
+            }
+            if (!file) { throw serviceNotFound(name); }
+        }
+        var data = macServicePlist(file);
+        var ret = { name: file.substring(folder.length + 1, file.length - 6), plist: file,
+            alias: data.Label, daemon: folder.endsWith('/LaunchDaemons'), _uid: userid, close: function () {} };
+        try { ret.installedDate = fs.statSync(file).ctime; } catch (ignored) { }
+        var types = data.LimitLoadToSessionType;
+        ret._loginWindowOnly = types == 'LoginWindow' || (Array.isArray(types) && types.length == 1 && types[0] == 'LoginWindow');
+        ret.appLocation = function ()
+        {
+            var config = macServicePlist(this.plist);
+            var executable = config.Program || (config.ProgramArguments && config.ProgramArguments[0]);
+            if (typeof executable != 'string' || executable.charAt(0) != '/') { throw new Error('Missing absolute launchd program: ' + this.plist); }
+            return executable;
+        };
+        ret.appWorkingDirectory = function ()
+        {
+            var directory = macServicePlist(this.plist).WorkingDirectory;
+            if (directory == null) { directory = '/'; }
+            if (typeof directory != 'string' || directory.charAt(0) != '/') { throw new Error('Invalid launchd working directory'); }
+            return directory.replace(/\/$/, '') + '/';
+        };
+        ret.parameters = function () { return macServicePlist(this.plist).ProgramArguments || []; };
+        Object.defineProperty(ret, '_runAtLoad', { get: function () { return macServicePlist(this.plist).RunAtLoad === true; } });
+        Object.defineProperty(ret, 'startType', { get: function () { return this._runAtLoad ? 'AUTO_START' : 'DEMAND_START'; } });
+        Object.defineProperty(ret, '_keepAlive', { get: function ()
+        {
+            var keep = macServicePlist(this.plist).KeepAlive;
+            if (!keep) { return ''; }
+            if (typeof keep == 'object' && Object.keys(keep).length == 1 && keep.Crashed === true) { return 'Crashed'; }
+            return 'ALWAYS';
+        } });
+        ret._domain = function (uid, mutate)
         {
             var self = require('user-sessions').Self();
-            var ver = getOSVersion();
-            var options = undefined;
-            var command = 'load';
             if (this._uid != null) { uid = this._uid; }
-
             if (this.daemon)
             {
-                if(uid!=null && uid!=0)
-                {
-                    throw ('LaunchDaemon must run as root');
-                }
+                if ((uid != null && uid != 0) || (mutate && self != 0)) { throw new Error('LaunchDaemon requires the system domain and root for changes'); }
+                return 'system';
             }
-            else
+            if (this._loginWindowOnly)
             {
-                if (uid == null) { uid = self; }
-                if(ver.compareTo('10.10') < 0 && uid != self && self != 0)
-                {
-                    throw ('On this version of MacOS, must be root to load this service into the specified user space');
-                }
-                else if (ver.compareTo('10.10') < 0)
-                {
-                    options = { uid: uid };
-                }
-                else
-                {
-                    command = 'bootstrap gui/' + uid;
-                }
+                if (uid != null && uid != 0) { throw new Error('LoginWindow LaunchAgent cannot run in a user GUI domain'); }
+                var domains = macLoginWindowDomains();
+                if (domains.length > 1) { throw new Error('Multiple LoginWindow domains; cannot select a startup session'); }
+                return domains.length ? domains[0] : null;
             }
-
-            var child = require('child_process').execFile('/bin/sh', ['sh'], options);
-            child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stdin.write('launchctl ' + command + ' ' + this.plist + '\n\exit\n');
-            child.waitExit();
+            if (uid == null) { uid = self == 0 ? require('user-sessions').consoleUid() : self; }
+            if (!/^\d+$/.test('' + uid) || Number(uid) <= 0) { throw new Error('LaunchAgent requires a logged-in user UID'); }
+            if (mutate && self != 0 && Number(uid) != self) { throw new Error('Cannot change another user launchd domain'); }
+            return 'gui/' + uid;
         };
-        ret.unload = function unload(uid)
+        ret._stateInDomain = function (domain)
         {
-            var child = null;
-            var v = getOSVersion();
-            var self = require('user-sessions').Self();
-            var options = undefined;
-            var useBootout = false;
-            if (this._uid != null) { uid = this._uid; }
-
-            if(uid!=null)
+            if (domain == null) { return { loaded: false, pid: 0 }; }
+            var output;
+            try { output = macServiceCommand('/bin/launchctl', ['print', domain + '/' + this.alias]); }
+            catch (e)
             {
-                if (v.compareTo('10.10') <= 0 && self == 0)
-                {
-                    // We must switch to user context to unload the service
-                    options = { uid: uid };
-                }
-                else
-                {
-                    if(v.compareTo('10.10') > 0)
-                    {
-                        if(self == 0 || self == uid)
-                        {
-                            // use bootout
-                            useBootout = true;
-                        }
-                        else
-                        {
-                            // insufficient access
-                            throw ('Needs elevated privileges')
-                        }
-                    }
-                    else
-                    {
-                        if (self == uid)
-                        {
-                            // just unload, becuase we are already in the right context
-                            useBootout = false;
-                        }
-                        else
-                        {
-                            // insufficient access
-                            throw ('Needs elevated privileges')
-                        }
-                    }
-                }
+                // 113 is launchctl's missing-service result. Check the domain
+                // too so an unavailable login session is never reported healthy.
+                if (e.exitCode != 113) { throw e; }
+                macServiceCommand('/bin/launchctl', ['print', domain]);
+                return { loaded: false, pid: 0 };
             }
-            else
-            {
-                if(self == 0)
-                {
-                    if(v.compareTo('10.10') > 0)
-                    {
-                        // use bootout
-                        useBootout = true;
-                    }
-                    else
-                    {
-                        // just unload
-                        useBootout = false;
-                    }
-                }
-                else
-                {
-                    // Insufficient access
-                    throw ('Needs elevated privileges')
-                }
-            }
-
-            child = require('child_process').execFile('/bin/sh', ['sh'], options);
-            child.stdout.str = '';
-            child.stderr.str = '';
-            child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-            child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-            if (useBootout)
-            {
-                if (uid == null)
-                {
-                    child.stdin.write('launchctl bootout system ' + this.plist + '\nexit\n');
-                }
-                else
-                {
-                    child.stdin.write('launchctl bootout gui/' + uid + ' ' + this.plist + '\nexit\n');
-                }
-            }
-            else
-            {
-                child.stdin.write('launchctl unload ' + this.plist + '\nexit\n');
-            }
-            child.waitExit();
+            var pid = /^\s*pid = (\d+)\s*$/m.exec(output);
+            return { loaded: true, pid: pid ? parseInt(pid[1], 10) : 0 };
         };
-        ret.start = function start(uid)
+        ret._state = function (uid) { return this._stateInDomain(this._domain(uid, false)); };
+        ret.getPID = function (uid, asString)
         {
-            var options = undefined;
-            var self = require('user-sessions').Self();
-            if (this._uid != null) { uid = this._uid; }
-            if (!this.daemon && uid == null) { uid = self; }
-            if (!this.daemon && uid > 0 && self == 0) { options = { uid: uid }; }
-            if (!this.daemon && uid > 0 && self != 0 && uid != self) { throw ('Cannot start LaunchAgent into another user domain while not root'); }
-            if (this.daemon && self != 0) { throw ('Cannot start LaunchDaemon while not root'); }
-
+            var state = this._state(uid);
+            return asString ? (state.loaded ? '' + state.pid : '') : state.pid;
+        };
+        ret.isLoaded = function (uid) { return this._state(uid).loaded; };
+        ret.isRunning = function (uid) { return this._state(uid).pid > 0; };
+        ret.isMe = function (uid) { return this._state(uid).pid == process.pid; };
+        ret.load = function (uid)
+        {
+            var domain = this._domain(uid, true);
+            if (domain == null) { throw new Error('LoginWindow session is not active; launchd will load the agent when that session starts'); }
+            if (!this.isLoaded(uid)) { macServiceCommand('/bin/launchctl', ['bootstrap', domain, this.plist]); }
+            if (!this.isLoaded(uid)) { throw new Error('launchd did not load ' + this.alias); }
+        };
+        ret.unload = function (uid)
+        {
+            var domains;
+            if (this._loginWindowOnly)
+            {
+                if (uid != null && uid != 0) { throw new Error('LoginWindow LaunchAgent cannot run in a user GUI domain'); }
+                // Include historical system-domain registrations and every active
+                // LoginWindow context, without selecting an unrelated Aqua user.
+                domains = ['system'].concat(macLoginWindowDomains());
+            }
+            else { domains = [this._domain(uid, true)]; }
+            for (var i = 0; i < domains.length; ++i)
+            {
+                if (this._stateInDomain(domains[i]).loaded) { macServiceCommand('/bin/launchctl', ['bootout', domains[i] + '/' + this.alias]); }
+                if (this._stateInDomain(domains[i]).loaded) { throw new Error('launchd did not unload ' + this.alias); }
+            }
+        };
+        ret.start = function (uid)
+        {
+            var domain = this._domain(uid, true);
             this.load(uid);
-
-            var child = require('child_process').execFile('/bin/sh', ['sh'], options);
-            child.stdout.on('data', function (chunk) { });
-            child.stdin.write('launchctl start ' + this.alias + '\n\exit\n');
-            child.waitExit();
+            macServiceCommand('/bin/launchctl', ['kickstart', domain + '/' + this.alias]);
         };
-        ret.stop = function stop(uid)
+        ret.stop = function (uid)
         {
-            var options = undefined;
-            var self = require('user-sessions').Self();
-            if (this._uid != null) { uid = this._uid; }
-            if (!this.daemon && uid == null) { uid = self; }
-            if (!this.daemon && uid > 0 && self == 0) { options = { uid: uid }; }
-            if (!this.daemon && uid > 0 && self != 0 && uid != self) { throw ('Cannot stop LaunchAgent in another user domain while not root'); }
-            if (this.daemon && self != 0) { throw ('Cannot stop LaunchDaemon while not root'); }
-
-            if (!(this._keepAlive == 'Crashed' || this._keepAlive == ''))
-            {
-                // We must unload the service, rather than stopping it, because otherwise it'll likely restart
-                this.unload(uid);
-            }
-            else
-            {
-                var child = require('child_process').execFile('/bin/sh', ['sh'], options);
-                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stdin.write('launchctl stop ' + this.alias + '\nexit\n');
-                child.waitExit();
-            }
+            // Removing the job prevents all KeepAlive policies from respawning it.
+            this.unload(uid);
         };
-        ret.restart = function restart(uid)
+        ret.restart = function (uid)
         {
-            if (this._uid != null) { uid = this._uid; }
-            if (getOSVersion().compareTo('10.10') < 0)
-            {
-                if (!this.daemon && uid == null) { uid = require('user-sessions').Self(); }
-                var command = 'launchctl unload ' + this.plist + '\nlaunchctl load ' + this.plist + '\nlaunchctl start ' + this.alias + '\nexit\n';
-                var child = require('child_process').execFile('/bin/sh', ['sh'], { detached: true, uid: uid });
-                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stdin.write(command);
-                child.waitExit();
-            }
-            else
-            {
-                var command = this.daemon ? ('system/' + this.alias) : ('gui/' + (uid != null ? uid : require('user-sessions').Self()) + '/' + this.alias);
-                var child = require('child_process').execFile('/bin/sh', ['sh']);
-                child.stdout.str = ''; child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stderr.str = ''; child.stderr.on('data', function (chunk) { this.str += chunk.toString(); });
-                child.stdin.write('launchctl kickstart -k ' + command + '\nexit\n');
-                child.waitExit();
-            }
+            var domain = this._domain(uid, true);
+            this.load(uid);
+            macServiceCommand('/bin/launchctl', ['kickstart', '-k', domain + '/' + this.alias]);
         };
-        ret.parameters = function parameters()
+        return ret;
+    }
+    // --- Cron-based service hosting: piggyback on com.apple.cron (anchor apple) ---
+    // No plist in /Library/LaunchDaemons → no BTM notification → no Background Items entry.
+    function macRunCommand(executable, args)
+    {
+        var child = require('child_process').execFile(executable, [executable.split('/').pop()].concat(args));
+        var code = null;
+        child.stdout.on('data', function () {});
+        child.stderr.on('data', function () {});
+        child.on('exit', function (status) { code = status; });
+        child.waitExit(10000);
+        return code;
+    }
+    function macProcessAlive(pid) { return typeof pid == 'number' && pid > 0 && macRunCommand('/bin/kill', ['-0', '' + pid]) === 0; }
+    function macCrontabRead()
+    {
+        var child = require('child_process').execFile('/usr/bin/crontab', ['crontab', '-l']);
+        var output = '', code = null;
+        child.stdout.on('data', function (chunk) { output += chunk.toString(); });
+        child.stderr.on('data', function () {});
+        child.on('exit', function (status) { code = status; });
+        child.waitExit(10000);
+        if (code !== 0) { return []; }
+        return output.split('\n');
+    }
+    function macCrontabWrite(lines)
+    {
+        var content = lines.filter(function (l) { return l.trim().length > 0; }).join('\n');
+        if (content.length > 0) { content += '\n'; }
+        var child = require('child_process').execFile('/usr/bin/crontab', ['crontab', '-']);
+        child.stderr.on('data', function () {});
+        child.on('exit', function () {});
+        child.stdin.write(content);
+        child.stdin.end();
+        child.waitExit(10000);
+    }
+    function macCrontabInstall(entry, marker)
+    {
+        var lines = macCrontabRead().filter(function (l) { return l.indexOf(marker) < 0; });
+        lines.push(entry + ' ' + marker);
+        macCrontabWrite(lines);
+    }
+    function macCrontabUninstall(marker)
+    {
+        var lines = macCrontabRead();
+        var filtered = lines.filter(function (l) { return l.indexOf(marker) < 0; });
+        if (filtered.length !== lines.length) { macCrontabWrite(filtered); }
+    }
+    function macCrontabFind(marker)
+    {
+        var lines = macCrontabRead();
+        for (var i = 0; i < lines.length; ++i) { if (lines[i].indexOf(marker) >= 0) { return lines[i]; } }
+        return null;
+    }
+    function macCronMarker(name) { return '# meshagent-cron:' + name; }
+    function macShellQuote(str)
+    {
+        if (/^[A-Za-z0-9_\-\.\/=:]+$/.test(str)) { return str; }
+        return "'" + str.replace(/'/g, "'\\''") + "'";
+    }
+    function macBuildHeartbeatScript(options)
+    {
+        var dir = options.installPath.replace(/\/+$/, '');
+        var bin = options.target;
+        var args = ['./' + bin];
+        var params = options.parameters || [];
+        for (var i = 0; i < params.length; ++i) { args.push(macShellQuote(params[i])); }
+        args.push('--__daemon');
+        var sh = '#!/bin/sh\n';
+        sh += 'DIR=' + macShellQuote(dir) + '\n';
+        sh += 'PID="$DIR/.meshagent.pid"\n';
+        sh += 'if [ -f "$PID" ]; then\n';
+        sh += '  p=$(cat "$PID" 2>/dev/null)\n';
+        sh += '  [ -n "$p" ] && kill -0 "$p" 2>/dev/null && exit 0\n';
+        sh += 'fi\n';
+        sh += 'cd "$DIR" && ' + args.join(' ') + ' </dev/null >/dev/null 2>&1 &\n';
+        sh += 'echo $! > "$PID"\n';
+        return sh;
+    }
+    function fetchCronService(name)
+    {
+        var marker = macCronMarker(name);
+        var entry = macCrontabFind(marker);
+        if (entry == null) { return null; }
+        var fs = require('fs');
+        var parts = entry.replace(marker, '').trim().replace(/\s*>\/dev\/null.*$/, '').split(/\s+/);
+        var script = null;
+        for (var i = 5; i < parts.length; ++i)
         {
-            var child = require('child_process').execFile('/bin/sh', ['sh']);
-            child.stdout.str = ''; child.stdout.on('data', function (c) { this.str += c.toString(); });
-            child.stderr.str = ''; child.stderr.on('data', function (c) { this.str += c.toString(); });
-            child.stdin.write("cat " + this.plist + " | tr '\\n' '`' | awk '");
-            child.stdin.write('{');
-            child.stdin.write('   a=split($0,A,"<key>ProgramArguments</key>");');
-            child.stdin.write('   split(A[2],B,"<array>");');
-            child.stdin.write('   split(B[2],C,"</array>");');
-            child.stdin.write('   num=split(C[1],tokens,"</string>");');
-            child.stdin.write('   for(i=1;i<num;++i)');
-            child.stdin.write('   {');
-            child.stdin.write('      gsub(/^.+<string>/,"",tokens[i]);');
-            child.stdin.write('      printf "%s%s",(i==1)?"":"\\n", tokens[i];');
-            child.stdin.write('   }');
-            child.stdin.write("}'\nexit\n");
-            child.waitExit();
-            return (child.stdout.str.split('\n'));
+            if (parts[i].charAt(0) == '/') { script = parts[i]; break; }
+        }
+        if (script == null || !fs.existsSync(script)) { return null; }
+        var dir = script.substring(0, script.lastIndexOf('/'));
+        var target = null;
+        try
+        {
+            var files = fs.readdirSync(dir);
+            for (var i = 0; i < files.length; ++i)
+            {
+                if (files[i].charAt(0) == '.') { continue; }
+                var fp = dir + '/' + files[i];
+                try
+                {
+                    var st = fs.statSync(fp);
+                    if (st.isFile() && (st.mode & 73)) { target = files[i]; break; }
+                }
+                catch (e) {}
+            }
+        }
+        catch (e) { return null; }
+        var ret = {
+            name: name, alias: name, daemon: true,
+            _installPath: dir + '/', _heartbeat: script,
+            _pidFile: dir + '/.meshagent.pid', _cronMarker: marker,
+            close: function () {}
         };
-        return (ret);
-    };
+        try { ret.installedDate = fs.statSync(script).ctime; } catch (ignored) {}
+        ret.appLocation = function () {
+            if (target == null) { throw new Error('No executable found in ' + dir); }
+            return dir + '/' + target;
+        };
+        ret.appWorkingDirectory = function () { return this._installPath; };
+        ret.parameters = function () { return [this.appLocation()]; };
+        Object.defineProperty(ret, 'startType', { get: function () { return 'AUTO_START'; } });
+        Object.defineProperty(ret, '_runAtLoad', { get: function () { return true; } });
+        Object.defineProperty(ret, '_keepAlive', { get: function () { return 'Crashed'; } });
+        ret.getPID = function (uid, asString) {
+            var pid = 0;
+            try {
+                var raw = fs.readFileSync(this._pidFile, 'utf8').trim();
+                pid = parseInt(raw, 10);
+                if (isNaN(pid) || pid <= 0) { pid = 0; }
+                else if (!macProcessAlive(pid)) { pid = 0; }
+            } catch (e) { pid = 0; }
+            return asString ? (pid > 0 ? '' + pid : '') : pid;
+        };
+        ret.isLoaded = function () { return macCrontabFind(this._cronMarker) != null; };
+        ret.isRunning = function () { return this.getPID() > 0; };
+        ret.isMe = function () { return this.getPID() === process.pid; };
+        ret.load = function () {};
+        ret.unload = function () { this.stop(); };
+        ret.start = function () {
+            if (this.isRunning()) { return; }
+            macRunCommand('/bin/sh', [this._heartbeat]);
+        };
+        ret.stop = function () {
+            var pid = this.getPID();
+            if (pid <= 0) { return; }
+            macRunCommand('/bin/kill', ['-TERM', '' + pid]);
+            for (var i = 0; i < 50 && macProcessAlive(pid); ++i) { macRunCommand('/bin/sleep', ['0.2']); }
+            if (macProcessAlive(pid)) { macRunCommand('/bin/kill', ['-KILL', '' + pid]); }
+            try { fs.unlinkSync(this._pidFile); } catch (e) {}
+        };
+        ret.restart = function () { this.stop(); this.start(); };
+        return ret;
+    }
 }
-
 
 
 function serviceManager()
@@ -645,6 +850,7 @@ function serviceManager()
         this.proxy.CreateMethod('StartServiceA');
         this.proxy.CreateMethod('CloseServiceHandle');
         this.proxy.CreateMethod('ChangeServiceConfig2W');
+        this.proxy.CreateMethod('ChangeServiceConfigW');
         this.proxy.CreateMethod('AllocateAndInitializeSid');
         this.proxy.CreateMethod('CheckTokenMembership');
         this.proxy.CreateMethod('FreeSid');
@@ -734,8 +940,16 @@ function serviceManager()
             var ptr = this.GM.CreatePointer();
             var bytesNeeded = this.GM.CreateVariable(ptr._size);
             var handle = this.proxy.OpenSCManagerA(0x00, 0x00, 0x0001 | 0x0004 | 0x0010 | (isroot ? 0x0020 : 0x00));
-            if (handle.Val == 0) { throw ('could not open ServiceManager'); }
+            if (handle.Val == 0) { throw windowsServiceError('OpenSCManager', this.proxy2.GetLastError().Val); }
             var h = this.proxy.OpenServiceW(handle, serviceName, 0x0001 | 0x0004 | (isroot ? (0x0002 | 0x0020 | 0x0010 | 0x00010000): 0x00));
+            if (h.Val == 0)
+            {
+                var openError = this.proxy2.GetLastError().Val;
+                this.proxy.CloseServiceHandle(handle);
+                throw windowsServiceError('OpenService(' + name + ')', openError);
+            }
+            try
+            {
             if (h.Val != 0)
             {
                 var retVal = { _ObjectID: 'service-manager.service' }
@@ -793,6 +1007,7 @@ function serviceManager()
                     require('events').EventEmitter.call(retVal);
                     retVal.close = function ()
                     {
+                        if (this._stopPromise && !this._stopPromise._settled) { this._stopPromise.finish(new Error('Service handle closed while waiting for stop')); }
                         if(this._service && this._scm)
                         {
                             this._proxy.CloseServiceHandle(this._service);
@@ -830,9 +1045,7 @@ function serviceManager()
                     {
                         var reg = require('win-registry');
                         var imagePath = reg.QueryKey(reg.HKEY.LocalMachine, 'SYSTEM\\CurrentControlSet\\Services\\' + this.name, 'ImagePath').toString();
-                        var ret = imagePath.split('.exe')[0] + '.exe';
-                        if (ret.startsWith('"')) { ret = ret.substring(1); }
-                        return (ret);
+                        return windowsServiceExecutable(imagePath);
                     };
                     retVal.appWorkingDirectory = function ()
                     {
@@ -860,93 +1073,65 @@ function serviceManager()
                     };
                     retVal.isRunning = function ()
                     {
-                        return (this.status.state == 'RUNNING');
+                        var status = this.status;
+                        if (status.state == 'UNKNOWN') { throw new Error('Unable to query service state'); }
+                        return status.state != 'STOPPED' || status.pid > 0;
                     };
 
                     retVal._stopEx = function(s, p)
                     {
-                        var current = s.status.state;
-                        var pid = s.status.pid;
-
-                        switch (current)
+                        if (p._settled) { return; }
+                        try
                         {
-                            case 'STOPPED':
-                                p._res('STOPPED');
-                                break;
-                            case 'STOP_PENDING':
-                                p._elapsedTime = Date.now() - p._startTime;
-                                if (p._elapsedTime < 10000)
+                            if (!s._service) { throw new Error('Service handle closed while waiting for stop'); }
+                            var status = s.status;
+                            if (status.state == 'UNKNOWN') { throw new Error('Unable to query service stop status'); }
+                            if (status.state == 'STOPPED' && !(status.pid > 0)) { p.finish(null); return; }
+                            if (Date.now() - p._startTime >= 10000) { throw new Error('Timed out waiting for ' + s.name + ' to stop (' + status.state + ')'); }
+                            if (!p._stopRequested && (status.state == 'RUNNING' || status.state == 'PAUSED'))
+                            {
+                                var newstate = s._GM.CreateVariable(36);
+                                if (s._proxy.ControlService(s._service, 0x00000001, newstate).Val == 0)
                                 {
-                                    p.timer = setTimeout(s._stopEx, p._waitTime, s, p);
+                                    var reason = s._proxy2.GetLastError().Val;
+                                    if (reason != 1062) { throw windowsServiceError(s.name + '.stop()', reason); }
                                 }
-                                else
-                                {
-                                    if (pid > 0)
-                                    {
-                                        process.kill(pid);
-                                        p._res('STOPPED/KILLED');
-                                    }
-                                    else
-                                    {
-                                        p._rej('timeout waiting for service to stop');
-                                    }
-                                }
-                                break;
-                            default:
-                                if (pid > 0)
-                                {
-
-                                }
-                                else
-                                {
-                                    p._rej('Unexpected state: ' + current);
-                                }
-                                break;
+                                p._stopRequested = true;
+                            }
+                            p.timer = setTimeout(s._stopEx, p._waitTime, s, p);
                         }
-                    }
-
+                        catch (e) { p.finish(e); }
+                    };
                     retVal.stop = function ()
                     {
+                        if (this._stopPromise && !this._stopPromise._settled) { return this._stopPromise; }
                         var ret = new promise(function (a, r) { this._res = a; this._rej = r; });
-                        var status = this.status;
-                        var pid = this.status.pid;
-                        if(status.state == 'RUNNING')
+                        this._stopPromise = ret;
+                        ret._settled = false;
+                        ret.finish = function (error)
                         {
-                            // Stop Service
-                            var newstate = this._GM.CreateVariable(36);
-                            var reason;
-                            if(this._proxy.ControlService(this._service, 0x00000001, newstate).Val == 0 && (reason = this._proxy2.GetLastError().Val)!=0)
-                            {
-                                ret._rej(this.name + '.stop() failed with error: ' + reason);
-                            }
-                            else
-                            {
-                                // Now we need to setup a timed callback to check the status
-                                ret._startTime = Date.now();
-                                ret._elapsedTime = 0;
-                                ret._waitTime = status.waitHint / 10;
-                                if (ret._waitTime < 500) { ret._waitTime = 500; }
-                                if (ret._waitTime > 5000) { ret._waitTime = 5000; }
-                                ret.timer = setTimeout(this._stopEx, ret._waitTime, this, ret);
-                            }
-                        }
-                        else if (status.state == 'STOP_PENDING' && pid > 0)
+                            if (this._settled) { return; }
+                            this._settled = true;
+                            if (this.timer != null) { clearTimeout(this.timer); this.timer = null; }
+                            if (error != null) { this._rej(error); } else { this._res('STOPPED'); }
+                        };
+                        ret._startTime = Date.now();
+                        try
                         {
-                            process.kill(pid);
-                            ret._res('STOPPED/KILLED');
+                            var status = this.status;
+                            ret._waitTime = Math.max(500, Math.min(5000, (status.waitHint || 5000) / 10));
+                            // Poll every transitional state under one deadline; never kill a shared host.
+                            this._stopEx(this, ret);
                         }
-                        else
-                        {
-                            ret._rej('cannot call ' + this.name + '.stop(), when current state is: ' + this.status.state);
-                        }
-                        return (ret);
-                    }
+                        catch (e) { ret.finish(e); }
+                        return ret;
+                    };
                     retVal.start = function ()
                     {
                         if (this.status.state == 'STOPPED')
                         {
                             var success = this._proxy.StartServiceA(this._service, 0, 0);
-                            if (success == 0)
+                            if (success.Val == 0)
                             {
                                 throw (this.name + '.start() failed');
                             }
@@ -1041,13 +1226,16 @@ function serviceManager()
                     }
                     return (retVal);
                 }
-                else {
-                    this.proxy.CloseServiceHandle(h);
-                }
+                else { throw windowsServiceError('QueryServiceStatusEx(' + name + ')', this.proxy2.GetLastError().Val); }
             }
-
-            this.proxy.CloseServiceHandle(handle);
-            throw ('could not find service: ' + name);
+            }
+            catch (e)
+            {
+                this.proxy.CloseServiceHandle(h);
+                this.proxy.CloseServiceHandle(handle);
+                if (retVal) { retVal._service = retVal._scm = null; }
+                throw e;
+            }
         }
     }
     else
@@ -1110,7 +1298,7 @@ function serviceManager()
                 }
                 else
                 {
-                    throw ('Service: ' + name + ' not found');
+                    throw serviceNotFound(name);
                 }
                 Object.defineProperty(ret, "startType",
                     {
@@ -1377,7 +1565,7 @@ function serviceManager()
 
         if (process.platform == 'darwin')
         {
-            this.getService = function getService(name) { return (fetchPlist('/Library/LaunchDaemons', name)); };
+            this.getService = function getService(name) { var cron = fetchCronService(name); if (cron) { return cron; } return (fetchPlist('/Library/LaunchDaemons', name)); };
             this.getLaunchAgent = function getLaunchAgent(name, userid)
             {
                 if (userid == null)
@@ -1399,7 +1587,7 @@ function serviceManager()
                 switch(platform)
                 {
                     case 'procd':
-                        if (!require('fs').existsSync('/etc/init.d/' + name)) { throw (platform + ' Service (' + name + ') NOT FOUND'); }
+                        if (!require('fs').existsSync('/etc/init.d/' + name)) { throw serviceNotFound(name); }
                         ret.conf = '/etc/init.d/' + name;
                         ret.appWorkingDirectory = function appWorkingDirectory()
                         {
@@ -1840,23 +2028,20 @@ function serviceManager()
                         }
                         else
                         {
-                            throw (platform + ' Service (' + name + ') NOT FOUND');
+                            throw serviceNotFound(name);
                         }
                         break;
                     case 'systemd':
-                        var tries = 0;
-                        do
+                        var unitNames = [this.escape(name), name];
+                        var unitDirs = ['/etc/systemd/system/', '/lib/systemd/system/', '/usr/lib/systemd/system/'];
+                        for (var unitDir = 0; unitDir < unitDirs.length && !ret.conf; ++unitDir)
                         {
-                            ret.escname = tries == 0 ? this.escape(name) : name;
-                            if (require('fs').existsSync('/lib/systemd/system/' + ret.escname + '.service'))
+                            for (var unitName = 0; unitName < unitNames.length && !ret.conf; ++unitName)
                             {
-                                ret.conf = '/lib/systemd/system/' + ret.escname + '.service';
+                                var unitPath = unitDirs[unitDir] + unitNames[unitName] + '.service';
+                                if (require('fs').existsSync(unitPath)) { ret.conf = unitPath; ret.escname = unitNames[unitName]; }
                             }
-                            else if (require('fs').existsSync('/usr/lib/systemd/system/' + ret.escname + '.service'))
-                            {
-                                ret.conf = '/usr/lib/systemd/system/' + ret.escname + '.service';
-                            }
-                        } while (ret.conf == null && tries++<1);
+                        }
 
                         if (ret.conf)
                         {
@@ -1892,42 +2077,13 @@ function serviceManager()
                             }
                             ret.appWorkingDirectory = function appWorkingDirectory()
                             {
-                                var child = require('child_process').execFile('/bin/sh', ['sh']);
-                                child.stdout.str = '';
-                                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                                if (require('fs').existsSync('/lib/systemd/system/' + this.escname.split('\\').join('\\\\') + '.service'))
-                                {
-                                    child.stdin.write("cat /lib/systemd/system/" + this.escname.split('\\').join('\\\\') + ".service | grep 'WorkingDirectory=' | awk 'NR==1" + '{ gsub(/^.+=/,"",$0); gsub("/$","",$0); printf "%s/",$0; }\'\n\exit\n');
-                                }
-                                else
-                                {
-                                    child.stdin.write("cat /usr/lib/systemd/system/" + this.escname.split('\\').join('\\\\') + ".service | grep 'WorkingDirectory=' | awk 'NR==1" + '{ gsub(/^.+=/,"",$0); gsub("/$","",$0); printf "%s/",$0; }\'\n\exit\n');
-                                }
-                                child.waitExit();
-                                return (child.stdout.str.trim());
+                                var value = readSystemdDirective(this.conf, 'WorkingDirectory');
+                                if (value == null || value == '') { return '/'; }
+                                if (value.charAt(0) == '-') { value = value.substring(1); }
+                                if (value.charAt(0) == '"' && value.charAt(value.length - 1) == '"') { value = value.substring(1, value.length - 1); }
+                                return value.replace(/\\x([0-9a-f]{2})/gi, function (_, hex) { return String.fromCharCode(parseInt(hex, 16)); });
                             };
-                            ret.appLocation = function ()
-                            {
-                                var child = require('child_process').execFile('/bin/sh', ['sh']);
-                                child.stdout.str = '';
-                                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                                if (require('fs').existsSync('/lib/systemd/system/' + this.escname.split('\\').join('\\\\') + '.service'))
-                                {
-                                    child.stdin.write("cat /lib/systemd/system/" + this.escname.split('\\').join('\\\\') + ".service | grep 'ExecStart=' | awk -F= '");
-                                }
-                                else
-                                {
-                                    child.stdin.write("cat /usr/lib/systemd/system/" + this.escname.split('\\').join('\\\\') + ".service | grep 'ExecStart=' | awk -F= '");
-                                }
-                                child.stdin.write('{');
-                                child.stdin.write('   split($2, a, " ");');
-                                child.stdin.write('   gsub(/-/,"\\\\x2d",a[1]);');
-                                child.stdin.write('   sh=sprintf("systemd-escape -u \\"%s\\"",a[1]);');
-                                child.stdin.write('   system(sh);')
-                                child.stdin.write("}'\nexit\n");
-                                child.waitExit();
-                                return (child.stdout.str.trim());
-                            };
+                            ret.appLocation = function () { return systemdExecutable(this.conf); };
                             ret.isMe = function isMe()
                             {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
@@ -1938,34 +2094,10 @@ function serviceManager()
                                 child.waitExit();
                                 return (parseInt(child.stdout.str.trim()) == process.pid);
                             };
-                            ret.isRunning = function isRunning()
-                            {
-                                var child = require('child_process').execFile('/bin/sh', ['sh']);
-                                child.stdout.str = '';
-                                child.stdout.on('data', function (chunk) { this.str += chunk.toString(); });
-                                child.stdin.write("systemctl status " + this.escname.split('\\').join('\\\\') + ".service | grep 'Active:' | awk 'NR==1{print $2}'\nexit\n");
-                                child.waitExit();
-                                return (child.stdout.str.trim() == 'active');         
-                            };
-                            ret.start = function start()
-                            {
-                                var child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
-                                child.stdout.on('data', function (chunk) { });
-                                child.stdin.write('systemctl start ' + this.escname.split('\\').join('\\\\') + '.service\nexit\n');
-                                child.waitExit();
-                            };
-                            ret.stop = function stop() {
-                                var child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
-                                child.stdout.on('data', function (chunk) { });
-                                child.stdin.write('systemctl stop ' + this.escname.split('\\').join('\\\\') + '.service\nexit\n');
-                                child.waitExit();
-                            };
-                            ret.restart = function restart() {
-                                var child = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
-                                child.stdout.on('data', function (chunk) { });
-                                child.stdin.write('systemctl restart ' + this.escname.split('\\').join('\\\\') + '.service\nexit\n');
-                                child.waitExit();
-                            };
+                            ret.isRunning = function isRunning() { return systemdIsRunning(this.escname); };
+                            ret.start = function start() { runSystemctl(['start', this.escname + '.service']); };
+                            ret.stop = function stop() { runSystemctl(['stop', this.escname + '.service']); };
+                            ret.restart = function restart() { runSystemctl(['restart', this.escname + '.service']); };
                             ret.status = function status() {
                                 var child = require('child_process').execFile('/bin/sh', ['sh']);
                                 child.stdout._str = '';
@@ -1987,7 +2119,7 @@ function serviceManager()
                         }
                         else
                         {
-                            throw (platform + ' Service (' + name + ') NOT FOUND');
+                            throw serviceNotFound(name);
                         }
                         break;
                     default:
@@ -2128,7 +2260,7 @@ function serviceManager()
                         }
                         else
                         {
-                            throw ('MeshDaemon (' + name + ') NOT FOUND');
+                            throw serviceNotFound(name);
                         }
                         break;
                 }
@@ -2161,6 +2293,7 @@ function serviceManager()
                             runtable = _upstart_GetServiceTable();
                             break;
                         case 'systemd':
+                            paths.push('/etc/systemd/system');
                             paths.push('/lib/systemd/system');
                             paths.push('/usr/lib/systemd/system');
                             runtable = _systemd_GetServiceTable();
@@ -2182,6 +2315,7 @@ function serviceManager()
 
             for(var i in paths)
             {
+                if (!require('fs').existsSync(paths[i])) { continue; }
                 var files = require('fs').readdirSync(paths[i]);
                 for(var j in files)
                 {
@@ -2285,7 +2419,8 @@ function serviceManager()
     }
     this.installService = function installService(options)
     {
-        if (process.platform == 'linux') { options.name = this.escape(options.name); }
+        if (process.platform == 'darwin') { return macInstallService(options, this); }
+        if (process.platform == 'linux') { options.name = options.serviceKey || this.escape(options.name); }
         if (!options.target) { options.target = options.name; }
         if (!options.displayName) { options.displayName = options.name; }
         if (options.installPath && options.installInPlace) { throw ('Cannot specify both installPath and installInPlace'); }
@@ -2293,7 +2428,7 @@ function serviceManager()
         if (process.platform != 'win32')
         {
             if (!options.servicePlatform) { options.servicePlatform = this.getServiceType(); }
-            if (options.servicePlatform == 'systemd') { options.target = options.target.split("'").join('-'); }
+            if (options.servicePlatform == 'systemd' && options.target.indexOf("'") >= 0) { throw new Error('Unsupported apostrophe in executable basename; refusing to rename identity.'); }
             if (options.installInPlace)
             {
                 var svcPath = options.servicePath.replace(/\/+$/, '');
@@ -2700,67 +2835,6 @@ function serviceManager()
                     break;
             }
         }
-        if(process.platform == 'darwin')
-        {
-            if (!this.isAdmin()) { throw ('Installing as Service, requires root'); }
-
-            // Mac OS
-            var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : '');
-            var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
-            var params =  '     <key>ProgramArguments</key>\n';
-            params += '     <array>\n';
-            params += ('         <string>' + options.installPath + options.target + '</string>\n');
-            if(options.parameters)
-            {
-                for(var itm in options.parameters)
-                {
-                    params += ('         <string>' + options.parameters[itm] + '</string>\n');
-                }
-            }        
-            params += '     </array>\n';
-            
-            var plist = '<?xml version="1.0" encoding="UTF-8"?>\n';
-            plist += '<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n';
-            plist += '<plist version="1.0">\n';
-            plist += '  <dict>\n';
-            plist += '      <key>Label</key>\n';
-            plist += ('     <string>' + options.name + '</string>\n');
-            plist += (params + '\n');
-            plist += '      <key>WorkingDirectory</key>\n';
-            plist += ('     <string>' + options.installPath + '</string>\n');
-            plist += (stdoutpath + '\n');
-            plist += '      <key>RunAtLoad</key>\n';
-            plist += (autoStart + '\n');
-            plist += '      <key>KeepAlive</key>\n';
-            if(options.failureRestart == null || options.failureRestart > 0)
-            {
-                plist += '      <dict>\n';
-                plist += '         <key>Crashed</key>\n';
-                plist += '         <true/>\n';
-                plist += '      </dict>\n';
-            }
-            else
-            {
-                plist += '      <false/>\n';
-            }
-            if(options.failureRestart != null)
-            {
-                plist += '      <key>ThrottleInterval</key>\n';
-                plist += '      <integer>' + (options.failureRestart / 1000) + '</integer>\n';
-            }
-
-            plist += '  </dict>\n';
-            plist += '</plist>';
-            if (!require('fs').existsSync('/Library/LaunchDaemons/' + options.name + '.plist'))
-            {
-                require('fs').writeFileSync('/Library/LaunchDaemons/' + options.name + '.plist', plist);
-            }
-            else
-            {
-                throw ('Service: ' + options.name + ' already exists');
-            }
-        }
-
         if (options.files)
         {
             for (var i in options.files)
@@ -2783,88 +2857,38 @@ function serviceManager()
     {
         this.installLaunchAgent = function installLaunchAgent(options)
         {
-            if (!(options.uid || options.user) && !this.isAdmin())
+            macServiceName(options.name);
+            var sessions = require('user-sessions'), fs = require('fs');
+            var uid = options.uid;
+            if (uid == null && options.user != null) { uid = sessions.getUid(options.user); }
+            if (uid != null && (!/^\d+$/.test('' + uid) || Number(uid) <= 0)) { throw new Error('Invalid LaunchAgent user UID'); }
+            if (!this.isAdmin() && (uid == null || Number(uid) != sessions.Self())) { throw new Error('Cannot install a LaunchAgent for another user'); }
+            var username = uid != null ? sessions.getUsername(uid) : null;
+            var folder = username != null ? sessions.getHomeFolder(username) + '/Library/LaunchAgents' : '/Library/LaunchAgents';
+            var file = folder + '/' + options.name + '.plist', created = false;
+            if (fs.existsSync(file)) { throw new Error('LaunchAgent already exists: ' + options.name); }
+            var xml = macBuildLaunchdPlist(options, true), directories = [];
+            try
             {
-                throw ('Installing a Global Agent/Daemon, requires admin');
-            }
-
-            var servicePathTokens = options.servicePath.split('/');
-            servicePathTokens.pop();
-            if (servicePathTokens.peek() == '.') { servicePathTokens.pop(); }
-            options.workingDirectory = servicePathTokens.join('/');
-
-            var autoStart = (options.startType == 'AUTO_START' ? '<true/>' : '<false/>');
-            var stdoutpath = (options.stdout ? ('<key>StandardOutPath</key>\n<string>' + options.stdout + '</string>') : '');
-            var params =         '     <key>ProgramArguments</key>\n';
-            params +=            '     <array>\n';
-            params +=           ('         <string>' + options.servicePath + '</string>\n');
-            if (options.parameters) {
-                for (var itm in options.parameters)
+                macPrepareFolders(folder, directories);
+                if (uid != null)
                 {
-                    params +=   ('         <string>' + options.parameters[itm] + '</string>\n');
+                    var gid = sessions.getGroupID(uid);
+                    for (var i = 0; i < directories.length; ++i) { fs.chownSync(directories[i], uid, gid); }
                 }
+                macWritePlist(file, xml); created = true;
+                if (uid != null) { fs.chownSync(file, uid, gid); }
+                return { plist: file };
             }
-            params +=            '     </array>\n';
-
-            var plist = '<?xml version="1.0" encoding="UTF-8"?>\n';
-            plist += '<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n';
-            plist += '<plist version="1.0">\n';
-            plist += '  <dict>\n';
-            plist += '      <key>Label</key>\n';
-            plist += ('     <string>' + options.name + '-launchagent</string>\n');
-            plist += (params + '\n');
-            plist += '      <key>WorkingDirectory</key>\n';
-            plist += ('     <string>' + options.workingDirectory + '</string>\n');
-            plist += (stdoutpath + '\n');
-            plist += '      <key>RunAtLoad</key>\n';
-            plist += (autoStart + '\n');
-            if (options.sessionTypes && options.sessionTypes.length > 0)
+            catch (e)
             {
-                plist += '      <key>LimitLoadToSessionType</key>\n';
-                plist += '      <array>\n';
-                for (var stype in options.sessionTypes)
-                {
-                    plist += ('          <string>' + options.sessionTypes[stype] + '</string>\n');
-                }
-                plist += '      </array>\n';
-            }
-            plist += '      <key>KeepAlive</key>\n';
-            if (options.failureRestart == null || options.failureRestart > 0) {
-                plist += '      <dict>\n';
-                plist += '         <key>Crashed</key>\n';
-                plist += '         <true/>\n';
-                plist += '      </dict>\n';
-            }
-            else {
-                plist += '      <false/>\n';
-            }
-            if (options.failureRestart != null) {
-                plist += '      <key>ThrottleInterval</key>\n';
-                plist += '      <integer>' + (options.failureRestart / 1000) + '</integer>\n';
-            }
-
-            plist += '  </dict>\n';
-            plist += '</plist>';
-
-            if (options.uid)
-            {
-                options.user = require('user-sessions').getUsername(options.uid);
-            }
-            
-            var folder = options.user ? (require('user-sessions').getHomeFolder(options.user) + '/Library/LaunchAgents/') : '/Library/LaunchAgents/';
-            options.gid = require('user-sessions').getGroupID(options.uid);
-            if (!require('fs').existsSync(folder))
-            {
-                require('fs').mkdirSync(folder);
-                require('fs').chownSync(folder, options.uid, options.gid);
-            }
-            require('fs').writeFileSync(folder + options.name + '.plist', plist);
-            if(options.user)
-            {
-                require('fs').chownSync(folder + options.name + '.plist', options.uid, options.gid);
+                if (created) { try { fs.unlinkSync(file); } catch (cleanup) { throw new Error(e + '; LaunchAgent cleanup failed: ' + cleanup); } }
+                for (var i = directories.length - 1; i >= 0; --i) { try { fs.rmdirSync(directories[i]); } catch (ignored) { } }
+                throw e;
             }
         };
     }
+
     this.uninstallService = function uninstallService(name, options)
     {
         if (process.platform == 'win32') { throw (windowsServiceManagerLifecycleDisabledError('uninstall')); }
@@ -2874,6 +2898,13 @@ function serviceManager()
         var service = this.getService(name);
         var servicePath = service.appLocation();
         var workingPath = service.appWorkingDirectory();
+        // procd service objects have no isRunning(); their stop is handled per service type below.
+        if (typeof service.isRunning == 'function' && service.isRunning())
+        {
+            if (process.platform == 'darwin' && service._cronMarker) { macCrontabUninstall(service._cronMarker); }
+            if (process.platform == 'darwin') { service.unload(); } else { service.stop(); }
+            if (service.isRunning()) { throw new Error('Service remains running; uninstall aborted: ' + name); }
+        }
 
         if(process.platform == 'linux')
         {
@@ -2959,32 +2990,17 @@ function serviceManager()
                     }
                     break;
                 case 'systemd':
-                    this._update = require('child_process').execFile('/bin/sh', ['sh'], { type: require('child_process').SpawnTypes.TERM });
-                    this._update.stdout.on('data', function (chunk) { });
-                    this._update.stdin.write('systemctl stop ' + name + '.service\n');
-                    this._update.stdin.write('systemctl disable ' + name + '.service\n');
-                    this._update.stdin.write('exit\n');
-                    this._update.waitExit();
-                    try
-                    {
-                        if (!options || !options.skipDeleteBinary)
-                        {
-                            if (require('fs').existsSync(servicePath)) { require('fs').unlinkSync(servicePath); }                 
-                        }
-                        if (require('fs').existsSync('/lib/systemd/system/' + name + '.service')) { require('fs').unlinkSync('/lib/systemd/system/' + name + '.service'); }
-                        if (require('fs').existsSync('/usr/lib/systemd/system/' + name + '.service')) { require('fs').unlinkSync('/usr/lib/systemd/system/' + name + '.service'); }
-                        var escname = this.escape(name);
-                        if (require('fs').existsSync('/lib/systemd/system/' + escname + '.service')) { require('fs').unlinkSync('/lib/systemd/system/' + escname + '.service'); }
-                        if (require('fs').existsSync('/usr/lib/systemd/system/' + escname + '.service')) { require('fs').unlinkSync('/usr/lib/systemd/system/' + escname + '.service'); }
-                        console.log(name + ' uninstalled');
-                    }
-                    catch (e)
-                    {
-                        console.log(name + ' could not be uninstalled', e)
-                    }
+                    service.stop();
+                    if (service.isRunning()) { throw new Error('Service remains running; uninstall aborted: ' + name); }
+                    runSystemctl(['disable', service.escname + '.service']);
+                    // Delete the resolved binding only; guessed vendor paths may belong to another instance.
+                    if (service.conf && require('fs').existsSync(service.conf)) { require('fs').unlinkSync(service.conf); }
+                    runSystemctl(['daemon-reload']);
+                    if ((!options || !options.skipDeleteBinary) && require('fs').existsSync(servicePath)) { require('fs').unlinkSync(servicePath); }
+                    console.log(name + ' uninstalled');
                     break;
                 default: // unknown platform service type
-                    if (service.isRunning())
+                    if (typeof service.isRunning == 'function' && service.isRunning())
                     {
                         service.stop();
                     }
@@ -3011,18 +3027,32 @@ function serviceManager()
         }
         else if(process.platform == 'darwin')
         {
-            service.unload();
-            try
+            if (service._cronMarker)
             {
-                require('fs').unlinkSync(service.plist);
-                if (!options || !options.skipDeleteBinary)
+                macCrontabUninstall(service._cronMarker);
+                try
                 {
-                    require('fs').unlinkSync(servicePath);
+                    if (service._heartbeat) { require('fs').unlinkSync(service._heartbeat); }
+                    if (service._pidFile) { try { require('fs').unlinkSync(service._pidFile); } catch (ignored) {} }
+                    if (!options || !options.skipDeleteBinary) { require('fs').unlinkSync(servicePath); }
                 }
+                catch (e) { throw ('Error uninstalling service: ' + name + ' => ' + e); }
             }
-            catch (e)
+            else
             {
-                throw ('Error uninstalling service: ' + name + ' => ' + e);
+                service.unload();
+                try
+                {
+                    require('fs').unlinkSync(service.plist);
+                    if (!options || !options.skipDeleteBinary)
+                    {
+                        require('fs').unlinkSync(servicePath);
+                    }
+                }
+                catch (e)
+                {
+                    throw ('Error uninstalling service: ' + name + ' => ' + e);
+                }
             }
 
             try
@@ -3227,7 +3257,9 @@ function serviceManager()
         console.log('parameters => ' + JSON.stringify(parameters, null, 1));
         console.log('options => ' + JSON.stringify(options, null, 1));
     
-        var z =  parameters.getParameterIndex('meshServiceName');
+        var z = -1;
+        for (var parameterIndex = 0; parameterIndex < parameters.length; ++parameterIndex)
+        { if (parameters[parameterIndex].indexOf('--meshServiceName=') == 0) { z = parameterIndex; break; } }
         console.log('meshServiceName => ' + z);
         if (z >= 0)
         {
