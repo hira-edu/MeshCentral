@@ -8,6 +8,14 @@ MeshTrackpadAdapters.defaultMobile = (function () {
 
     function el(id) { return document.getElementById(id); }
 
+    // The page closes its top menu (dialog mode 999) on a document click, which the controller
+    // suppresses while trackpad mode is on. Close it on the next tick instead: the touch that does
+    // it still sees the menu open, so like the page's own tap it closes the menu and sends nothing.
+    function closeTopMenu() {
+        if (window.xxdialogMode !== 999 || typeof window.QV !== 'function') return;
+        setTimeout(function () { if (window.xxdialogMode === 999) { window.QV('topMenu', false); window.xxdialogMode = 0; } }, 0);
+    }
+
     return {
         id: 'default-mobile',
         // The guest share page (sharing-mobile) has the same markers but no trackpad mode.
@@ -23,7 +31,7 @@ MeshTrackpadAdapters.defaultMobile = (function () {
         dialogOpen: function () { return !!window.xxdialogMode; },
         onUserActivity: function () { if (typeof window.setSessionActivity === 'function') window.setSessionActivity(); },
         // The page's trackpad edge-scroll interval only runs in its own trackpad mode; stop it in case.
-        prepare: function () { if (typeof window.trackpadStopEdgeScroll === 'function') window.trackpadStopEdgeScroll(); },
+        prepare: function () { if (typeof window.trackpadStopEdgeScroll === 'function') window.trackpadStopEdgeScroll(); closeTopMenu(); },
         scrollContainer: function () { return el('p10desktop'); },
         zoom: function () { return { pinchSupported: function () { return false; }, apply: function () { } }; }
     };

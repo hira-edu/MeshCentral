@@ -647,20 +647,21 @@
 /*
  * Trackpad ("mouse pointer") mode engine loader.
  *
- * On the Modern UI and classic mobile desktop pages, loads the fork's trackpad gesture engine,
- * controller and the page's adapter when this browser has them enabled, and installs the
- * controller. Each page kind has its own flag, off unless DEFAULT_ON says otherwise; opening a page
- * with ?trackpadengine=on or =off sets the flag for this browser (=default forgets it). With the
- * flag off nothing is loaded and nothing listens. It wraps nothing: viewer modules are observed
- * through agent-desktop's MeshDesktopModuleObservers and addStateListener.
+ * On the Modern UI and classic mobile desktop pages, and both guest share pages, loads the fork's
+ * trackpad gesture engine, controller and the page's adapter when this browser has them enabled,
+ * and installs the controller. Each page kind has its own flag, off unless DEFAULT_ON says
+ * otherwise; opening a page with ?trackpadengine=on or =off sets the flag for this browser
+ * (=default forgets it). With the flag off nothing is loaded and nothing listens. It wraps
+ * nothing: viewer modules are observed through agent-desktop's MeshDesktopModuleObservers and
+ * addStateListener.
  */
 (function () {
   'use strict';
   if (window.__meshTrackpadLoader) return;
   window.__meshTrackpadLoader = true;
 
-  var DEFAULT_ON = { default3: false, defaultMobile: false };
-  var ADAPTER_FILES = { default3: 'agent-desktop-trackpad-default3-0.0.1.js', defaultMobile: 'agent-desktop-trackpad-mobile-0.0.1.js' };
+  var DEFAULT_ON = { default3: false, defaultMobile: false, sharingMobile: false, sharing: false };
+  var ADAPTER_FILES = { default3: 'agent-desktop-trackpad-default3-0.0.1.js', defaultMobile: 'agent-desktop-trackpad-mobile-0.0.1.js', sharingMobile: 'agent-desktop-trackpad-sharing-mobile-0.0.1.js', sharing: 'agent-desktop-trackpad-sharing-0.0.1.js' };
   var COMMON_FILES = ['agent-desktop-trackpad-0.0.1.js', 'agent-desktop-trackpad-controller-0.0.1.js'];
   var base = 'scripts/';
   try {
@@ -688,9 +689,16 @@
     } catch (ex) { }
   }
 
-  // Only pages with a trackpad mode: the guest share pages have the desktop markers but not that.
+  // The guest share pages have no trackpad mode: their adapters supply it. The one for phones is
+  // the classic mobile page's layout, the one for desktop browsers (and iPadOS) the main desktop
+  // UI's, each with the share link's viewOnly, which the main UI pages lack.
   function pageKind() {
-    if (typeof window.trackpadMode === 'undefined') return null;
+    if (typeof window.trackpadMode === 'undefined') {
+      if (typeof window.viewOnly === 'undefined') return null;
+      if (document.getElementById('p10desktop') && document.getElementById('DeskParent') && (typeof window.fullscreenzoom !== 'undefined')) return 'sharingMobile';
+      if (document.getElementById('deskarea3x') && document.getElementById('DeskParent') && document.getElementById('DeskControlSpan')) return 'sharing';
+      return null;
+    }
     if (document.getElementById('deskarea3x') && document.getElementById('DeskParent') && (typeof window._mobileZoomMode !== 'undefined')) return 'default3';
     if (document.getElementById('p10desktop') && document.getElementById('DeskParent') && (typeof window.fullscreenzoom !== 'undefined')) return 'defaultMobile';
     return null;

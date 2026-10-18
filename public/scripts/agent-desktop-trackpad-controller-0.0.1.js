@@ -1,5 +1,6 @@
 // Connects the trackpad gesture engine (agent-desktop-trackpad-0.0.1.js) to a remote desktop page
-// through a view adapter (agent-desktop-trackpad-default3-0.0.1.js, -mobile-0.0.1.js).
+// through a view adapter (agent-desktop-trackpad-default3-0.0.1.js, -mobile-0.0.1.js,
+// -sharing-mobile-0.0.1.js, -sharing-0.0.1.js).
 //
 // While the adapter says trackpad mode is on, one capture-phase listener on the canvas's parent
 // owns every touch that targets the canvas: it cancels the browser default (so no compatibility
@@ -16,8 +17,11 @@ var MeshTrackpadController = (function () {
     var FOLLOW_MARGIN_CSS_PX = 48;
     var WATCH_MS = 200;                 // while a button is held, how often to re-check mode, Input and dialogs
     var SETTLE_MS = [0, 120, 350, 800]; // re-place the overlay after layout changes the page makes on timers
+    // The overlay arrow is drawn at the size a 100%-scaled Windows arrow has in the remote picture,
+    // kept between these on-screen heights so it stays visible in fit mode and small when zoomed.
+    var ARROW_REMOTE_PX = 20, ARROW_MIN_PX = 16, ARROW_MAX_PX = 24, ARROW_ASPECT = 0.6;
     // Arrow shape adapted from the page's own trackpad cursor (upstream MeshCentral, Apache-2.0).
-    var ARROW_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 20" width="18" height="30" style="display:block;overflow:visible">' +
+    var ARROW_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 20" width="12" height="20" style="display:block;overflow:visible">' +
         '<path d="M0.5,0.5 L0.5,15.5 L4.2,12 L6.6,17.6 L8.6,16.8 L6.2,11.2 L11,11.2 Z" fill="#fff" stroke="#000" stroke-width="1.1" stroke-linejoin="round"/></svg>';
 
     // Touch coordinates are turned into a frame whose axes run along the remote screen's axes, so
@@ -58,7 +62,8 @@ var MeshTrackpadController = (function () {
         var sinkModule = null;                  // the viewer module the engine's output goes to
         var lastScreen = null;                  // remote size and rotation the current gesture started on
         var zoomAnchor = null;                  // client point a pinch keeps fixed (from its first zoom step)
-        var overlay = null, style = null, root = null;
+        var sentButtons = 0;                    // buttons held in the last pointer sent to sinkModule
+        var overlay = null, style = null, root = null, probe = null, arrowHeight = 0;
         var listeners = [], watchTimer = null, settleTimers = [], placeTimer = null, placeTries = 0;
 
         function call(fn, fallback) { try { return fn(); } catch (ex) { return fallback; } }
@@ -73,8 +78,14 @@ var MeshTrackpadController = (function () {
             geometry: geometry,
             output: {
                 pointer: function (x, y, buttons) {
-                    if (sinkModule && sinkModule.SendRemotePointer) sinkModule.SendRemotePointer(x, y, buttons);
-                    follow(x, y);
+                    // With Input off or a dialog open, send nothing new (not even the pointer move
+                    // that enabling the mode makes), but never leave a press behind.
+                    if (inputBlocked(sinkModule)) {
+                        if (sentButtons !== 0) { sentButtons = 0; releaseSink(); }
+                        return;
+                    }
+                    if (sinkModule && sinkModule.SendRemotePointer) { sinkModule.SendRemotePointer(x, y, buttons); sentButtons = buttons; }
+                    follow();
                     placeOverlay();
                 },
                 wheel: function (x, y, notches) { if (sinkModule && sinkModule.SendRemoteWheel) sinkModule.SendRemoteWheel(x, y, notches); },
@@ -111,6 +122,11 @@ var MeshTrackpadController = (function () {
             lastScreen = null;
             stopPlacing();
             if (engine.isActive()) engine.reset();
+            releaseSink();
+        }
+
+        function releaseSink() {
+            sentButtons = 0;
             if (sinkModule && sinkModule.ReleaseAllPointerButtons) call(function () { sinkModule.ReleaseAllPointerButtons(); });
         }
 
@@ -119,15 +135,17 @@ var MeshTrackpadController = (function () {
             return c ? c.getBoundingClientRect() : null;
         }
 
+        // Null while the canvas is not laid out (a page panel other than the desktop is shown).
         function cursorClientPoint() {
             var g = geometry(), rect = canvasRect();
-            if (!g || !rect || !(g.width > 0)) return null;
+            if (!g || !rect || !(g.width > 0) || !(rect.width > 0 && rect.height > 0)) return null;
             var c = engine.getCursor(), css = g.remoteToCss(c.x, c.y);
             return { x: rect.left + css.x, y: rect.top + css.y, rotation: g.rotation || 0 };
         }
 
         function placeOverlay() {
             if (!overlay) return;
+            if (active) sizeArrow();
             var p = (active && !inputBlocked(sinkModule)) ? cursorClientPoint() : null;
             var view = adapter.scrollContainer(), vr = view ? view.getBoundingClientRect() : null;
             if (!p || (vr && (p.x < vr.left || p.x > vr.right || p.y < vr.top || p.y > vr.bottom))) { overlay.style.display = 'none'; return; }
@@ -137,18 +155,64 @@ var MeshTrackpadController = (function () {
             overlay.style.display = 'block';
         }
 
-        // Keep the remote pointer in view: scroll the page's container the least that brings the
-        // pointer inside it, with a margin. The remote pointer itself does not move.
-        function follow() {
-            var view = adapter.scrollContainer(), p = cursorClientPoint();
-            if (!view || !p) return;
-            var r = view.getBoundingClientRect();
-            var mx = Math.min(FOLLOW_MARGIN_CSS_PX, r.width / 4), my = Math.min(FOLLOW_MARGIN_CSS_PX, r.height / 4);
+        // How far the browser itself is pinch-zoomed (1 when it is not, or cannot tell).
+        function pageScale() {
+            var vv = win.visualViewport, s = vv ? vv.scale : 1;
+            return (s > 0 && isFinite(s)) ? s : 1;
+        }
+
+        // Size the arrow like the remote picture's own pointer would be at the current zoom, within
+        // on-screen bounds, so it neither covers the picture in native zoom nor vanishes in fit mode.
+        function sizeArrow() {
+            var g = geometry(), svg = overlay.firstChild, s = pageScale();
+            if (!g || !(g.remotePerCss > 0) || !svg) return;
+            var h = Math.max(ARROW_MIN_PX, Math.min(ARROW_MAX_PX, ARROW_REMOTE_PX * s / g.remotePerCss)) / s;
+            h = Math.round(h * 2) / 2;
+            if (h === arrowHeight) return;
+            arrowHeight = h;
+            svg.setAttribute('height', String(h));
+            svg.setAttribute('width', String(Math.round(h * ARROW_ASPECT * 2) / 2));
+        }
+
+        // Scroll one container the least that brings the pointer inside it, with a margin. Returns
+        // whether it scrolled.
+        function reveal(el, r, p) {
+            var mx = Math.min(FOLLOW_MARGIN_CSS_PX, (r.right - r.left) / 4), my = Math.min(FOLLOW_MARGIN_CSS_PX, (r.bottom - r.top) / 4);
             var dx = 0, dy = 0;
             if (p.x < r.left + mx) dx = p.x - (r.left + mx); else if (p.x > r.right - mx) dx = p.x - (r.right - mx);
             if (p.y < r.top + my) dy = p.y - (r.top + my); else if (p.y > r.bottom - my) dy = p.y - (r.bottom - my);
-            if (dx) view.scrollLeft += dx;
-            if (dy) view.scrollTop += dy;
+            var x = el.scrollLeft, y = el.scrollTop;
+            if (dx) el.scrollLeft = x + dx;
+            if (dy) el.scrollTop = y + dy;
+            return el.scrollLeft !== x || el.scrollTop !== y;
+        }
+
+        // Keep the remote pointer in view, as an RDP client does when zoomed in: first the page's
+        // scroll container, then the browser's own pinch zoom. The remote pointer itself does not move.
+        function follow() {
+            var view = adapter.scrollContainer(), p = cursorClientPoint();
+            if (!view || !p) return;
+            var vr = view.getBoundingClientRect();
+            if (reveal(view, vr, p)) p = cursorClientPoint();
+            if (p) followZoom(p, vr);
+        }
+
+        // A pinch-zoomed page shows only part of the layout viewport. Bring the pointer, with a margin
+        // in screen pixels, into what is shown by revealing a fixed-position probe there: browsers pan
+        // only the zoomed view for that, never the page's scroll containers.
+        function followZoom(p, viewRect) {
+            var vv = win.visualViewport, s = pageScale();
+            if (!vv || s <= 1.01 || !probe || typeof probe.scrollIntoView !== 'function') return;
+            var m = FOLLOW_MARGIN_CSS_PX / s;
+            var left = Math.max(p.x - m, viewRect.left), top = Math.max(p.y - m, viewRect.top);
+            var right = Math.min(p.x + m, viewRect.right), bottom = Math.min(p.y + m, viewRect.bottom);
+            if (!(right > left && bottom > top)) return;
+            if (left >= vv.offsetLeft && top >= vv.offsetTop && right <= vv.offsetLeft + vv.width && bottom <= vv.offsetTop + vv.height) return;
+            probe.style.left = left + 'px';
+            probe.style.top = top + 'px';
+            probe.style.width = (right - left) + 'px';
+            probe.style.height = (bottom - top) + 'px';
+            call(function () { probe.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
         }
 
         // The canvas is sized to the remote screen by the first frame after a SCREEN message; until
@@ -298,6 +362,8 @@ var MeshTrackpadController = (function () {
             listen(doc, 'scroll', placeOverlay, true);
             listen(win, 'resize', function () { if (active) settle(); }, false);
             listen(win, 'orientationchange', function () { if (active) settle(); }, false);
+            // The arrow's on-screen size depends on the browser's own pinch zoom.
+            listen(win.visualViewport, 'resize', placeOverlay, false);
             if (!style) {
                 style = doc.createElement('style');
                 style.textContent = 'html.' + ACTIVE_CLASS + ' #trackpadCursor{display:none!important}';
@@ -308,8 +374,17 @@ var MeshTrackpadController = (function () {
                 overlay.setAttribute('aria-hidden', 'true');
                 overlay.style.cssText = 'display:none;position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;z-index:2147483000;transform-origin:0 0;filter:drop-shadow(1px 1px 2px rgba(0,0,0,0.8))';
                 overlay.innerHTML = ARROW_SVG;
+                arrowHeight = 0;
                 doc.body.appendChild(overlay);
             }
+            if (!probe) {
+                probe = doc.createElement('div');
+                probe.setAttribute('aria-hidden', 'true');
+                probe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none';
+                doc.body.appendChild(probe);
+            }
+            // Page controls the adapter adds (a guest page has no trackpad toggle of its own).
+            call(adapter.attach);
             evaluate();
             return true;
         }
@@ -325,8 +400,10 @@ var MeshTrackpadController = (function () {
             for (var i = 0; i < listeners.length; i++) { var l = listeners[i]; l[0].removeEventListener(l[1], l[2], l[3]); }
             listeners = [];
             if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            if (probe && probe.parentNode) probe.parentNode.removeChild(probe);
             if (style && style.parentNode) style.parentNode.removeChild(style);
-            overlay = null; style = null; root = null;
+            call(adapter.detach);
+            overlay = null; style = null; root = null; probe = null;
         }
 
         // The page's desktop connection changed state. A different module coming up (the WebRTC soft
