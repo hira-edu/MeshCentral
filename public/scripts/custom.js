@@ -649,9 +649,10 @@
  *
  * On the Modern UI and classic mobile desktop pages, and both guest share pages, loads the fork's
  * trackpad gesture engine, controller and the page's adapter when this browser has them enabled,
- * and installs the controller. Each page kind has its own flag, off unless DEFAULT_ON says
- * otherwise; opening a page with ?trackpadengine=on or =off sets the flag for this browser
- * (=default forgets it). With the flag off nothing is loaded and nothing listens. It wraps
+ * and installs the controller. Each page kind has its own flag, defaulting to DEFAULT_ON; opening
+ * a page with ?trackpadengine=on or =off sets the flag for this browser (=default forgets it), and
+ * DEFAULT_ON[kind] = false rolls a page kind back. With the flag off nothing is loaded and nothing
+ * listens. The trackpad mode itself stays off until the user turns it on in the page. It wraps
  * nothing: viewer modules are observed through agent-desktop's MeshDesktopModuleObservers and
  * addStateListener.
  */
@@ -660,7 +661,7 @@
   if (window.__meshTrackpadLoader) return;
   window.__meshTrackpadLoader = true;
 
-  var DEFAULT_ON = { default3: false, defaultMobile: false, sharingMobile: false, sharing: false };
+  var DEFAULT_ON = { default3: true, defaultMobile: true, sharingMobile: true, sharing: true };
   var ADAPTER_FILES = { default3: 'agent-desktop-trackpad-default3-0.0.1.js', defaultMobile: 'agent-desktop-trackpad-mobile-0.0.1.js', sharingMobile: 'agent-desktop-trackpad-sharing-mobile-0.0.1.js', sharing: 'agent-desktop-trackpad-sharing-0.0.1.js' };
   var COMMON_FILES = ['agent-desktop-trackpad-0.0.1.js', 'agent-desktop-trackpad-controller-0.0.1.js'];
   var base = 'scripts/';
