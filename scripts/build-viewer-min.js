@@ -24,7 +24,7 @@ for (const name of ['agent-desktop-0.0.2.js']) {
     if (result.error) throw result.error;
     const minName = name.replace(/\.js$/, '-min.js');
     const output = result.code + '\n';
-    const existing = fs.readFileSync(path.join(scripts, minName), 'utf8');
+    const existing = fs.readFileSync(path.join(scripts, minName), 'utf8').replace(/\r\n/g, '\n');
     if (process.argv.includes('--check')) {
         if (existing !== output) failures.push(minName);
     } else if (existing !== output) {
