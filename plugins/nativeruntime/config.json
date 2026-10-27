@@ -1,0 +1,8 @@
+{
+  "name": "Native Runtime Status",
+  "shortName": "nativeruntime",
+  "version": "0.1.0",
+  "description": "Elevated process lifecycle management and runtime controls for desktop viewers.",
+  "hasAdminPanel": false,
+  "meshCentralCompat": "1.2.1"
+}
