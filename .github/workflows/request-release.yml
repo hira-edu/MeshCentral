@@ -1,0 +1,38 @@
+name: Request coordinated production release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: request-coordinated-release
+  cancel-in-progress: false
+jobs:
+  dispatch:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event.repository.default_branch == 'main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Create a short-lived dispatch token
+        id: app
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: hook
+          permission-contents: write
+      - name: Request release from this exact source commit
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          COORDINATOR: ${{ github.repository_owner }}/hook
+        run: |
+          python - <<'PY' > request.json
+          import json, os
+          print(json.dumps({'event_type': 'sibling-source-updated', 'client_payload': {
+              'repository': os.environ['GITHUB_REPOSITORY'], 'sha': os.environ['GITHUB_SHA']}}))
+          PY
+          gh api --method POST "repos/$COORDINATOR/dispatches" --input request.json
