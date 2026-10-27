@@ -474,7 +474,6 @@ Authoritative local evidence used for this document:
 - `infra/nginx/meshcentral.conf`
 - `scripts/remote/bootstrap.sh`
 - `scripts/remote/diagnose.sh`
-- `scripts/remote/sync-back.sh`
 - `package.json`
 - `readme.md`
 - `server-backups/meshcentral-live-20260413-153810/etc/caddy/Caddyfile`

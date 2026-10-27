@@ -22,10 +22,7 @@
     "relayAliasPort": 4446,
     "plugins": {
       "enabled": true,
-      "list": ["stfdeploy", "nativeruntime"],
-      "stfdeploy": {
-        "enabled": true
-      }
+      "list": ["nativeruntime"]
     }
   },
   "domains": {

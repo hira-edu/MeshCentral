@@ -662,9 +662,9 @@ test('deployment wiring loads both local plugins from the pinned MeshCentral dat
     assert.equal(lock.packages['node_modules/meshcentral'].version, '1.2.1');
     assert.equal(pkg.engines.node, '>=20.0.0');
     assert.equal(config.settings.plugins.enabled, true);
-    assert.deepEqual(config.settings.plugins.list, ['stfdeploy', 'nativeruntime']);
+    assert.deepEqual(config.settings.plugins.list, ['nativeruntime']);
     assert.equal(Object.hasOwn(config.settings.plugins, 'nativeruntime'), false);
-    assert.equal(config.settings.plugins.stfdeploy.enabled, true);
+    assert.equal(Object.hasOwn(config.settings.plugins, 'stfdeploy'), false, 'stfdeploy is retired (D16)');
     assert.equal(config.domains[''].WebPublicPath, './meshcentral-data/public');
 
     const custom = fs.readFileSync(path.join(root, 'public', 'scripts', 'custom.js'), 'utf8');
@@ -683,10 +683,10 @@ test('deployment wiring loads both local plugins from the pinned MeshCentral dat
     assert.match(compose, /\.\/public:\/opt\/meshcentral\/meshcentral-data\/public:ro/);
 
     const shell = fs.readFileSync(path.join(root, 'scripts', 'setup-local.sh'), 'utf8');
-    assert.match(shell, /for plugin in stfdeploy nativeruntime/);
+    assert.match(shell, /for plugin in nativeruntime; do/);
     assert.match(shell, /cp -R "public\/\." "meshcentral-data\/public\/"/);
     const powershell = fs.readFileSync(path.join(root, 'scripts', 'setup-local.ps1'), 'utf8');
-    assert.match(powershell, /@\('stfdeploy', 'nativeruntime'\)/);
+    assert.match(powershell, /@\('nativeruntime'\)/);
     assert.match(powershell, /'meshcentral-data\/public'/);
 });
 

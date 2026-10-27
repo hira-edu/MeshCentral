@@ -10,7 +10,7 @@ if [ ! -f meshcentral-data/config.json ]; then
 fi
 
 echo "Staging local plugins..."
-for plugin in stfdeploy nativeruntime; do
+for plugin in nativeruntime; do
   mkdir -p "meshcentral-data/plugins/$plugin"
   cp -R "plugins/$plugin/." "meshcentral-data/plugins/$plugin/"
 done

@@ -11,7 +11,7 @@ try {
   }
 
   Write-Host 'Staging local plugins...'
-  foreach ($plugin in @('stfdeploy', 'nativeruntime')) {
+  foreach ($plugin in @('nativeruntime')) {
     $source = Join-Path 'plugins' $plugin
     $destination = Join-Path 'meshcentral-data/plugins' $plugin
     New-Item -ItemType Directory -Force -Path $destination | Out-Null
