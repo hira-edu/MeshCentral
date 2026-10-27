@@ -4,16 +4,8 @@
 [Ii]mages-spare/
 [Dd]aemon/
 [Aa]gent/
-[Aa]gents/modules_meshcmd_min/
-[Aa]gents/modules_meshcore_min/
-[Aa]gents/meshcmd.min.js
-[Aa]gents/meshcore.min.js
-[Pp]ublic/scripts/*-min.js
-[Pp]ublic/translations/
-[Vv]iews/translations/
-[Ee]mails/translations/
-[Pp]ublic/*-min.htm
-[Vv]iews/*-min.handlebars
+# Fork: the published generated set (translations, -min views and scripts, minified cores
+# and modules) is committed (decision D3), so it is not ignored here. *.pdb stays ignored.
 meshcentral.db
 meshcentral.db.json
 mesherrors.txt
