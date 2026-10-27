@@ -4,9 +4,10 @@
 // and avoiding loading unrelated custom desktop features on mobile.
 const fs = require('node:fs');
 const path = require('node:path');
-const scripts = path.join(__dirname, '../public/scripts');
+const scripts = path.join(__dirname, '../../public/scripts');
+const webScripts = path.join(__dirname, '../meshcentral-web/public/scripts');
 const marker = '// BEGIN GENERATED DESKTOP AUDIO CONTROL';
-const custom = fs.readFileSync(path.join(scripts, 'custom.js'), 'utf8');
+const custom = fs.readFileSync(path.join(webScripts, 'custom.js'), 'utf8');
 const guard = custom.indexOf('  if (window.__meshDesktopAudioControl)');
 if (guard < 0) throw new Error('Audio control marker missing');
 const start = custom.lastIndexOf('(function () {', guard);

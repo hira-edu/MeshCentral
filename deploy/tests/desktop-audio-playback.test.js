@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const source = fs.readFileSync(path.join(__dirname, '../public/scripts/agent-desktop-audio-0.0.1.js'), 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '../../public/scripts/agent-desktop-audio-0.0.1.js'), 'utf8');
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 function deferred() { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; }
 function packet(type, flags = 0) {

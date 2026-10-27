@@ -14,9 +14,9 @@ const { EventEmitter } = require('node:events');
 const args = process.argv.slice(2);
 assert(args.length === 0 || (args.length === 2 && args[0] === '--source'),
     'Usage: node desktop-audio-core.test.js [--source <core.js>]');
-const sourcePath = args.length === 2 ? path.resolve(args[1]) : path.join(__dirname, '../agents/meshcore.js');
+const sourcePath = args.length === 2 ? path.resolve(args[1]) : path.join(__dirname, '../../agents/meshcore.js');
 const source = fs.readFileSync(sourcePath, 'utf8').replace(/\r\n?/g, '\n');
-const minSource = fs.readFileSync(path.join(__dirname, '../agents/meshcore.min.js'), 'utf8').replace(/\r\n?/g, '\n');
+const minSource = fs.readFileSync(path.join(__dirname, '../../agents/meshcore.min.js'), 'utf8').replace(/\r\n?/g, '\n');
 
 const MESHRIGHT_REMOTECONTROL = 8, MESHRIGHT_REMOTEVIEW = 256, MESHRIGHT_NODESKTOP = 65536;
 const AUDIO_STARTED = 2001, AUDIO_STOPPED = 2002, AUDIO_FAILED = 2003;

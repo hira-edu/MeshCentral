@@ -16,7 +16,7 @@ const UPSTREAM_SHA256 = 'a74ad89fb88cc1f5ddf82bb2780555512d5f63d36dcd00c11da7d61
 const STOCK_LINE = 'if (cookie.p & 2) { usages.push(2); } // Desktop';
 const PATCHED_LINE = 'if (cookie.p & 2) { usages.push(2); usages.push(20); } // Desktop, and desktop audio (relay protocol 20) which inherits the desktop share';
 
-const relayPath = path.join(__dirname, '../meshrelay.js');
+const relayPath = path.join(__dirname, '../../meshrelay.js');
 const relay = fs.readFileSync(relayPath);
 
 test('the override is the pinned upstream release plus the single desktop-audio line', () => {
@@ -29,9 +29,10 @@ test('the override is the pinned upstream release plus the single desktop-audio 
 });
 
 test('the override matches the meshcentral version this deployment installs', () => {
-    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
-    assert.equal(pkg.dependencies.meshcentral, UPSTREAM_VERSION,
-        'package.json and the meshrelay.js override must name the same meshcentral release');
+    // The fork package at the repo root is what this deployment installs (deploy/package.json depends on its tarball).
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../../package.json'), 'utf8'));
+    assert.equal(pkg.version, UPSTREAM_VERSION,
+        'the packaged meshcentral release and the meshrelay.js override must be the same release');
 });
 
 test('only shares that grant desktop admit protocol 20', () => {

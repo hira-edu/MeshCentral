@@ -13,8 +13,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const scriptsDir = path.join(__dirname, '../public/scripts');
-const custom = fs.readFileSync(path.join(scriptsDir, 'custom.js'), 'utf8');
+const scriptsDir = path.join(__dirname, '../../public/scripts');
+const custom = fs.readFileSync(path.join(__dirname, '../meshcentral-web/public/scripts/custom.js'), 'utf8');
 const player = fs.readFileSync(path.join(scriptsDir, 'agent-desktop-audio-0.0.1.js'), 'utf8');
 
 // Isolate the audio control block so these checks do not match unrelated code.

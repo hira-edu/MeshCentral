@@ -10,7 +10,7 @@ const { EventEmitter } = require('node:events');
 const args = process.argv.slice(2);
 assert(args.length === 0 || (args.length === 2 && args[0] === '--source'),
     'Usage: node runcommands-terminal-output.test.js [--source <core.js>]');
-const sourcePath = args.length === 2 ? path.resolve(args[1]) : path.join(__dirname, '../agents/meshcore.js');
+const sourcePath = args.length === 2 ? path.resolve(args[1]) : path.join(__dirname, '../../agents/meshcore.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
 const start = source.indexOf("case 'runcommands': {");
 const end = source.indexOf("case 'uninstallagent':", start);

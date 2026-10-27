@@ -12,7 +12,7 @@ try {
 
   Write-Host 'Staging local plugins...'
   foreach ($plugin in @('nativeruntime')) {
-    $source = Join-Path 'plugins' $plugin
+    $source = Join-Path '../plugins' $plugin
     $destination = Join-Path 'meshcentral-data/plugins' $plugin
     New-Item -ItemType Directory -Force -Path $destination | Out-Null
     Copy-Item (Join-Path $source '*') $destination -Recurse -Force
@@ -20,7 +20,7 @@ try {
 
   Write-Host 'Staging web overrides...'
   New-Item -ItemType Directory -Force -Path 'meshcentral-data/public' | Out-Null
-  Copy-Item (Join-Path 'public' '*') 'meshcentral-data/public' -Recurse -Force
+  Copy-Item (Join-Path 'meshcentral-web/public' '*') 'meshcentral-data/public' -Recurse -Force
 
   $node = Get-Command node -ErrorAction SilentlyContinue
   if (-not $node) {
@@ -31,12 +31,13 @@ try {
     throw 'Node.js 20+ is required. Please install Node.js and re-run.'
   }
 
+  Write-Host 'Packing the fork package...'
+  node scripts/pack.js
+  if ($LASTEXITCODE -ne 0) { throw 'Packing the fork package failed.' }
+
   Write-Host 'Installing dependencies...'
-  if (Test-Path 'package-lock.json') {
-    npm ci
-  } else {
-    npm install
-  }
+  npm ci
+  if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
 
   Write-Host 'Starting MeshCentral...'
   npm start

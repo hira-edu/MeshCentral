@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const UGLIFY_VERSION = '3.19.3';
-const scripts = path.join(__dirname, '../public/scripts');
+const scripts = path.join(__dirname, '../../public/scripts');
 const uglifyRoot = path.dirname(require.resolve('uglify-js/package.json', { paths: [path.join(__dirname, '..')] }));
 const installed = JSON.parse(fs.readFileSync(path.join(uglifyRoot, 'package.json'), 'utf8')).version;
 if (installed !== UGLIFY_VERSION) {

@@ -45,7 +45,7 @@ $repoFiles = @(
     'scripts\remote\diagnose.sh',
     'scripts\ops\New-MeshCentralLocalBackup.ps1',
     'scripts\ops\Collect-MeshCentralRemoteSnapshot.sh',
-    'public\scripts\custom.js',
+    'meshcentral-web\public\scripts\custom.js',
     'docs\operations\README.md',
     'docs\operations\Cloudflare-Change-Ledger.md',
     'docs\operations\Server-Operations-Plan.md',

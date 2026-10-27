@@ -2,8 +2,10 @@
   "name": "meshcentral-deploy",
   "version": "0.1.0",
   "private": true,
-  "description": "Local + CI/CD deployment wrapper for MeshCentral",
+  "description": "Deployment wrapper: installs the fork package built from the repository root (npm run pack) with the production dependency pins",
   "scripts": {
+    "pack": "node scripts/pack.js",
+    "test": "node --test",
     "start": "node node_modules/meshcentral/meshcentral.js",
     "start:dev": "NODE_ENV=development node node_modules/meshcentral/meshcentral.js",
     "postinstall": "node -e \"try{require('fs').mkdirSync('meshcentral-data',{recursive:true})}catch(e){}\""
@@ -14,7 +16,7 @@
     "body-parser": "1.20.6",
     "express": "4.22.2",
     "image-size": "2.0.2",
-    "meshcentral": "1.2.5",
+    "meshcentral": "file:dist/meshcentral-1.2.5.tgz",
     "mongodb": "4.17.2"
   },
   "engines": {

@@ -8,7 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const audio = require(path.join(__dirname, '../public/scripts/agent-desktop-audio-0.0.1.js'));
+const audio = require(path.join(__dirname, '../../public/scripts/agent-desktop-audio-0.0.1.js'));
 const { PACKET_TYPE, FLAG_DISCONTINUITY, HEADER_LENGTH, parsePacket, createAudioScheduler, createAudioStateMachine, mapAgentStatus, defaultReasonFor, AUDIO_STATES } = audio;
 
 // ---- packet builders ----------------------------------------------------

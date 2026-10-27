@@ -4,8 +4,8 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { createController, decodeRuntimeCookie, validShareWindow, nativeruntime } = require('../plugins/nativeruntime/nativeruntime');
-const { createModel, install } = require('../plugins/nativeruntime/client');
+const { createController, decodeRuntimeCookie, validShareWindow, nativeruntime } = require('../../plugins/nativeruntime/nativeruntime');
+const { createModel, install } = require('../../plugins/nativeruntime/client');
 
 const NODE = 'node//A234';
 const USER = 'user//operator';
@@ -652,14 +652,27 @@ test('view-only viewer with unavailable status allows retry', async () => {
     assert.equal(model.nextOperation(), 'getStatus');
 });
 
-test('deployment wiring loads both local plugins from the pinned MeshCentral data path', () => {
-    const root = path.join(__dirname, '..');
+// The deployment (deploy/) installs the fork package built from the repository root.
+const deployRoot = path.join(__dirname, '..');
+const repoRoot = path.join(__dirname, '../..');
+
+test('the deployment installs the MeshCentral release the plugin view anchors were verified against', () => {
+    const fork = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+    const lock = JSON.parse(fs.readFileSync(path.join(deployRoot, 'package-lock.json'), 'utf8'));
+    assert.equal(fork.version, '1.2.1');
+    assert.equal(lock.packages['node_modules/meshcentral'].version, '1.2.1');
+});
+
+test('deployment wiring loads the local plugin from the pinned MeshCentral data path', () => {
+    const root = deployRoot;
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
     const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
     const config = JSON.parse(fs.readFileSync(path.join(root, 'meshcentral-data', 'config.json.template'), 'utf8'));
-    assert.equal(pkg.dependencies.meshcentral, '1.2.1');
-    assert.equal(lock.packages[''].dependencies.meshcentral, '1.2.1');
-    assert.equal(lock.packages['node_modules/meshcentral'].version, '1.2.1');
+    const fork = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+    const tarball = 'file:dist/meshcentral-' + fork.version + '.tgz';
+    assert.equal(pkg.dependencies.meshcentral, tarball);
+    assert.equal(lock.packages[''].dependencies.meshcentral, tarball);
+    assert.equal(lock.packages['node_modules/meshcentral'].version, fork.version);
     assert.equal(pkg.engines.node, '>=20.0.0');
     assert.equal(config.settings.plugins.enabled, true);
     assert.deepEqual(config.settings.plugins.list, ['nativeruntime']);
@@ -667,27 +680,29 @@ test('deployment wiring loads both local plugins from the pinned MeshCentral dat
     assert.equal(Object.hasOwn(config.settings.plugins, 'stfdeploy'), false, 'stfdeploy is retired (D16)');
     assert.equal(config.domains[''].WebPublicPath, './meshcentral-data/public');
 
-    const custom = fs.readFileSync(path.join(root, 'public', 'scripts', 'custom.js'), 'utf8');
+    const custom = fs.readFileSync(path.join(root, 'meshcentral-web', 'public', 'scripts', 'custom.js'), 'utf8');
     assert.match(custom, /plugin\/nativeruntime\/client\.js\?v=binary-lifecycle-v1/);
-    const runtimeServer = fs.readFileSync(path.join(root, 'plugins', 'nativeruntime', 'nativeruntime.js'), 'utf8');
+    const runtimeServer = fs.readFileSync(path.join(repoRoot, 'plugins', 'nativeruntime', 'nativeruntime.js'), 'utf8');
     assert.match(runtimeServer, /Cache-Control', 'no-store, max-age=0'/);
 
-    const agentServer = fs.readFileSync(path.join(root, 'meshagent.js'), 'utf8');
+    const agentServer = fs.readFileSync(path.join(repoRoot, 'meshagent.js'), 'utf8');
     assert.match(agentServer, /case 'nativeRuntimeResult':/);
     assert.match(agentServer, /callHook\('hook_processAgentData', command, obj, parent\)/);
 
     const compose = fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
     assert.match(compose, /image:\s*ghcr\.io\/ylianst\/meshcentral:1\.2\.1/);
     assert.doesNotMatch(compose, /:latest(?:\s|$)/);
-    assert.match(compose, /\.\/plugins:\/opt\/meshcentral\/meshcentral-data\/plugins:ro/);
-    assert.match(compose, /\.\/public:\/opt\/meshcentral\/meshcentral-data\/public:ro/);
+    assert.match(compose, / \.\.\/plugins:\/opt\/meshcentral\/meshcentral-data\/plugins:ro/);
+    assert.match(compose, / \.\/meshcentral-web\/public:\/opt\/meshcentral\/meshcentral-data\/public:ro/);
 
     const shell = fs.readFileSync(path.join(root, 'scripts', 'setup-local.sh'), 'utf8');
     assert.match(shell, /for plugin in nativeruntime; do/);
-    assert.match(shell, /cp -R "public\/\." "meshcentral-data\/public\/"/);
+    assert.match(shell, /cp -R "\.\.\/plugins\/\$plugin\/\." "meshcentral-data\/plugins\/\$plugin\/"/);
+    assert.match(shell, /cp -R "meshcentral-web\/public\/\." "meshcentral-data\/public\/"/);
     const powershell = fs.readFileSync(path.join(root, 'scripts', 'setup-local.ps1'), 'utf8');
     assert.match(powershell, /@\('nativeruntime'\)/);
-    assert.match(powershell, /'meshcentral-data\/public'/);
+    assert.match(powershell, /Join-Path '\.\.\/plugins' \$plugin/);
+    assert.match(powershell, /Join-Path 'meshcentral-web\/public' '\*'\) 'meshcentral-data\/public'/);
 });
 
 test('optional pinned-template contract: all five source anchors and shared scripts', { skip: !process.env.MESHCENTRAL_SOURCE }, () => {

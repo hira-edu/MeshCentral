@@ -4,8 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const playerSource = fs.readFileSync(path.join(__dirname, '../public/scripts/agent-desktop-audio-0.0.1.js'), 'utf8');
-const custom = fs.readFileSync(path.join(__dirname, '../public/scripts/custom.js'), 'utf8');
+const playerSource = fs.readFileSync(path.join(__dirname, '../../public/scripts/agent-desktop-audio-0.0.1.js'), 'utf8');
+const custom = fs.readFileSync(path.join(__dirname, '../meshcentral-web/public/scripts/custom.js'), 'utf8');
 const block = custom.slice(custom.lastIndexOf('(function () {', custom.indexOf('if (window.__meshDesktopAudioControl)')));
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 function fixture(options = {}) {
