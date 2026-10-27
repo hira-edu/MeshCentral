@@ -1,3 +1,29 @@
+// Windows Files actions execute inside the native agent; never a command shell.
+function nativeFileAction(socket, cmd) {
+    var request = socket.httprequest || {}, rights = request.rights;
+    var result = { ok: false, error: 'Access denied.' };
+    var deleting = cmd.action == 'delete';
+    if (typeof rights == 'number' && (rights == 0xFFFFFFFF ||
+        ((rights & 8) != 0 && (rights & 1024) == 0 && (deleting || (rights & 131072) != 0)))) {
+        if (process.platform != 'win32') { result.error = 'Native Windows file actions are unavailable.'; }
+        else if (typeof cmd.path != 'string' || cmd.path.length == 0 ||
+            (cmd.action == 'execute' && typeof cmd.privileged != 'boolean')) { result.error = 'Invalid file action.'; }
+        else {
+            try {
+                var agent = require('MeshAgent');
+                if (typeof agent.fileAction != 'function') { result.error = 'Update the agent to enable native file actions.'; }
+                else { result = agent.fileAction(cmd.action, cmd.path, deleting ? cmd.rec === true : cmd.action == 'execute' && cmd.privileged === true); }
+            } catch (ex) { result = { ok: false, error: String(ex) }; }
+        }
+    }
+    result.action = 'fileaction'; result.operation = cmd.action; result.reqid = cmd.reqid;
+    try { socket.write(Buffer.from(JSON.stringify(result))); } catch (ex) { }
+    var message = 'Native file ' + cmd.action + ': ' + cmd.path + ' ' + JSON.stringify(result);
+    try { sendConsoleText(message, request.sessionid); } catch (ex) { }
+    if (typeof MeshServerLogEx == 'function') { MeshServerLogEx(20, [cmd.path], message, request); }
+    return result;
+}
+
 /*
 Copyright 2018-2022 Intel Corporation
 
@@ -14,8 +40,29 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+function formatUncaughtException(ex) {
+    try {
+        if (ex != null && ex.stack != null) { return ('' + ex.stack); }
+        return ('' + ex);
+    } catch (formatEx) {
+        return 'unprintable uncaught exception';
+    }
+}
+function sendMeshCoreConsole(text, sessionid) {
+    try {
+        var agent = require('MeshAgent');
+        if (agent != null && typeof(agent.SendCommand) == 'function') {
+            var msg = { action: 'msg', type: 'console', value: text };
+            if (sessionid != null) { msg.sessionid = sessionid; }
+            agent.SendCommand(msg);
+            return true;
+        }
+    } catch (sendEx) { }
+    try { console.error(text); } catch (consoleEx) { }
+    return false;
+}
 process.on('uncaughtException', function (ex) {
-    require('MeshAgent').SendCommand({ action: 'msg', type: 'console', value: "uncaughtException1: " + ex });
+    sendMeshCoreConsole('uncaughtException1: ' + formatUncaughtException(ex));
 });
 if (process.platform == 'win32' && require('user-sessions').getDomain == null) {
     require('user-sessions').getDomain = function getDomain(uid) {
@@ -44,9 +91,14 @@ var MESHRIGHT_LIMITEVENTS = 8192;
 var MESHRIGHT_CHATNOTIFY = 16384;
 var MESHRIGHT_UNINSTALL = 32768;
 var MESHRIGHT_NODESKTOP = 65536;
-var MESHRIGHT_ADMIN = 0xFFFFFFFF;
 
-var pendingSetClip = false; // This is a temporary hack to prevent multiple setclips at the same time to stop the agent from crashing.
+// Desktop audio rides on a consented remote desktop session as tunnel protocol 20. The constant is the
+// operator-level kill switch for this served core: false means the agent never advertises audio on a
+// desktop tunnel and refuses protocol 20 with state "unavailable". Per-device, the agent datastore key
+// 'desktopAudio' set to '0' disables it (checked by the desktop-audio module).
+var DESKTOP_AUDIO_ENABLED = true;
+var DESKTOP_AUDIO_PROTOCOL = 20;
+
 
 //
 // This is a helper function used by the 32 bit Windows Agent, when running on 64 bit windows. It will check if the agent is already patched for this
@@ -89,7 +141,7 @@ function getDomainInfo() {
     switch (process.platform) {
         case 'win32':
             try {
-                ret = require('win-wmi-fixed').query('ROOT\\CIMV2', 'SELECT * FROM Win32_ComputerSystem', ['Name', 'Domain', 'PartOfDomain'])[0];
+                ret = require('win-wmi').query('ROOT\\CIMV2', 'SELECT * FROM Win32_ComputerSystem', ['Name', 'Domain', 'PartOfDomain'])[0];
             }
             catch (x) {
             }
@@ -310,12 +362,13 @@ function getCoreTranslation() {
     setDefaultCoreTranslation(ret, 'terminalConsent', '{0} requesting remote terminal access. Grant access?');
     setDefaultCoreTranslation(ret, 'desktopConsent', '{0} requesting remote desktop access. Grant access?');
     setDefaultCoreTranslation(ret, 'fileConsent', '{0} requesting remote file Access. Grant access?');
-    setDefaultCoreTranslation(ret, 'registryConsent', '{0} requesting remote registry access. Grant access?');
     setDefaultCoreTranslation(ret, 'terminalNotify', '{0} started a remote terminal session.');
     setDefaultCoreTranslation(ret, 'desktopNotify', '{0} started a remote desktop session.');
     setDefaultCoreTranslation(ret, 'fileNotify', '{0} started a remote file session.');
-    setDefaultCoreTranslation(ret, 'registryNotify', '{0} started a remote registry session.');
     setDefaultCoreTranslation(ret, 'privacyBar', 'Sharing desktop with: {0}');
+    setDefaultCoreTranslation(ret, 'desktopAudioNotify', '{0} started listening to this computer\'s audio.');
+    setDefaultCoreTranslation(ret, 'desktopAudioNotifyEnd', '{0} stopped listening to this computer\'s audio.');
+    setDefaultCoreTranslation(ret, 'privacyBarAudio', 'audio on');
 
     return (ret);
 }
@@ -538,18 +591,6 @@ function addAmtEvent(msg) {
     if (obj.showamtevent) { require('MeshAgent').SendCommand({ action: 'msg', type: 'console', value: e }); }
 }
 function zeroPad(num, size) { var s = '000000000' + num; return s.substr(s.length - size); }
-function trimResults(val) {
-    var i, x;
-    for (i = 0; i < val.length; ++i) {
-        for (x in val[i]) {
-            if (x.startsWith('_')) {
-                delete val[i][x];
-            } else {
-                if (val[i][x] == null || val[i][x] == 0) { delete val[i][x]; }
-            }
-        }
-    }
-}
 
 
 // Create Secure IPC for Diagnostic Agent Communications
@@ -824,7 +865,7 @@ function onUserSessionChanged(user, locked) {
                 if(userobj && userobj.length > 0){
                     for (var j = 0; j < userobj.length; j++) {
                         if (userobj[j] && userobj[j].SAM && userobj[j].SAM[0].trim() === a[i].Username) {
-                            if (meshCoreObj.upnusers.indexOf(userobj[j].UPN) === -1) { meshCoreObj.upnusers.push(userobj[j].UPN); }
+                            meshCoreObj.upnusers.push(userobj[j].UPN);
                             break;
                         }
                     }
@@ -841,7 +882,7 @@ function onUserSessionChanged(user, locked) {
                     if(userobj && userobj.length > 0){
                         for (var j = 0; j < userobj.length; j++) {
                             if (userobj[j] && userobj[j].SAM && userobj[j].SAM.length == 0 && userobj[j].UPN && userobj[j].UPN != '') {
-                                if (meshCoreObj.upnusers.indexOf(userobj[j].UPN) === -1) { meshCoreObj.upnusers.push(userobj[j].UPN); }
+                                meshCoreObj.upnusers.push(userobj[j].UPN);
                                 break;
                             }
                         }
@@ -879,8 +920,7 @@ var wifiScanner = null;
 var networkMonitor = null;
 var nextTunnelIndex = 1;
 var apftunnel = null;
-var tunnelUserCount = { terminal: {}, files: {}, registry: {}, tcp: {}, udp: {}, msg: {} }; // List of userid->count sessions for terminal, files, registry and TCP/UDP routing
-
+var tunnelUserCount = { terminal: {}, files: {}, tcp: {}, udp: {}, msg: {} }; // List of userid->count sessions for terminal, files and TCP/UDP routing
 
 // Add to the server event log
 function MeshServerLog(msg, state) {
@@ -1284,7 +1324,7 @@ function tunnel_checkServerIdentity(certs)
     if ((tunnel_checkServerIdentity.servertlshash != null) && (tunnel_checkServerIdentity.servertlshash.toLowerCase() != certs[0].digest.split(':').join('').toLowerCase())) { throw new Error('BadCert') }
 }
 
-function tunnel_onError()
+function tunnel_onError(e)
 {
     sendConsoleText("ERROR: Unable to connect relay tunnel to: " + this.url + ", " + JSON.stringify(e));
 }
@@ -1358,7 +1398,6 @@ function handleServerCommand(data) {
                                 tunnel.consentAutoAcceptIfTerminalLocked = (tunnel.soptions && (tunnel.soptions.consentAutoAcceptIfTerminalLocked === true));
                                 tunnel.consentAutoAcceptIfFileLocked = (tunnel.soptions && (tunnel.soptions.consentAutoAcceptIfFileLocked === true));
                                 tunnel.oldStyle = (tunnel.soptions && tunnel.soptions.oldStyle) ? tunnel.soptions.oldStyle : false;
-                                tunnel.terminalUserVariable = (tunnel.soptions && tunnel.soptions.terminalUserVariable) ? tunnel.soptions.terminalUserVariable : false;
                                 tunnel.tcpaddr = data.tcpaddr;
                                 tunnel.tcpport = data.tcpport;
                                 tunnel.udpaddr = data.udpaddr;
@@ -1392,7 +1431,7 @@ function handleServerCommand(data) {
 
                                     // Log tunnel disconnection
                                     var xusername = data.xuserid.split('/')[2];
-                                    if (data.guestname != null) { xusername += '/' + guestname; }
+                                    if (data.guestname != null) { xusername += '/' + data.guestname; }
                                     MeshServerLogEx(msgid, [xusername], "Forcibly disconnected session of user: " + xusername, data);
                                 }
                             }
@@ -1440,9 +1479,11 @@ function handleServerCommand(data) {
                     case 'ps': {
                         // Return the list of running processes
                         if (data.sessionid) {
-                            processManager.getProcesses(function (plist) {
+                            try { processManager.getProcesses(function (plist) {
                                 mesh.SendCommand({ action: 'msg', type: 'ps', value: JSON.stringify(plist), sessionid: data.sessionid });
-                            });
+                            }); } catch (error) {
+                                mesh.SendCommand({ action: 'msg', type: 'ps', value: '{}', error: error.toString(), sessionid: data.sessionid });
+                            }
                         }
                         break;
                     }
@@ -1493,8 +1534,9 @@ function handleServerCommand(data) {
                     }
                     case 'service': {
                         // return information about the service
+                        var service = null;
                         try {
-                            var service = require('service-manager').manager.getService(data.serviceName);
+                            service = require('service-manager').manager.getService(data.serviceName);
                             if (service != null) {
                                 var reply = {
                                     name: (service.name ? service.name : ''),
@@ -1505,31 +1547,24 @@ function handleServerCommand(data) {
                                     installedBy: (service.installedBy ? service.installedBy : '') ,
                                     user: (service.user ? service.user : '')
                                 };
-                                if(reply.installedBy.indexOf('S-1-5') != -1) {
-                                    var cmd = "(Get-WmiObject -Class win32_userAccount -Filter \"SID='"+service.installedBy+"'\").Caption";
-                                    var replydata = "";
-                                    var pws = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], {});
-                                    pws.descriptorMetadata = 'UserSIDPowerShell';
-                                    pws.stdout.on('data', function (c) { replydata += c.toString(); });
-                                    pws.stderr.on('data', function (c) { replydata += c.toString(); });
-                                    pws.stdin.write(cmd + '\r\nexit\r\n');
-                                    pws.on('exit', function () { 
-                                        if (replydata != "") reply.installedBy = replydata;
-                                        mesh.SendCommand({ action: 'msg', type: 'service', value: JSON.stringify(reply), sessionid: data.sessionid });
-                                        delete pws;
-                                    });
-                                } else {
-                                    mesh.SendCommand({ action: 'msg', type: 'service', value: JSON.stringify(reply), sessionid: data.sessionid });
+                                if (reply.installedBy.indexOf('S-1-') == 0) {
+                                    try { reply.installedBy = require('user-sessions').getAccountName(reply.installedBy); } catch (lookupError) { } // Keep the authoritative SID if the account was removed.
                                 }
+                                mesh.SendCommand({ action: 'msg', type: 'service', value: JSON.stringify(reply), sessionid: data.sessionid });
                             }
                         } catch (ex) { 
-                            mesh.SendCommand({ action: 'msg', type: 'service', error: ex, sessionid: data.sessionid })
+                            mesh.SendCommand({ action: 'msg', type: 'service', error: ex.toString(), sessionid: data.sessionid });
+                        } finally {
+                            if (service != null && typeof service.close == 'function') { service.close(); }
                         }
+                        break;
                     }
                     case 'services': {
                         // Return the list of installed services
                         var services = null;
-                        try { services = require('service-manager').manager.enumerateService(); } catch (ex) { }
+                        try { services = require('service-manager').manager.enumerateService(); } catch (ex) {
+                            mesh.SendCommand({ action: 'msg', type: 'services', value: '[]', error: ex.toString(), sessionid: data.sessionid });
+                        }
                         if (services != null) { mesh.SendCommand({ action: 'msg', type: 'services', value: JSON.stringify(services), sessionid: data.sessionid }); }
                         break;
                     }
@@ -1602,66 +1637,35 @@ function handleServerCommand(data) {
                         break;
                     }
                     case 'getclip': {
-                        // Send the load clipboard back to the user
-                        //sendConsoleText('getClip: ' + JSON.stringify(data));
-                        if (require('MeshAgent').isService) {
-                            require('clipboard').dispatchRead().then(function (str) {
-                                if (str) {
-                                    if (data.tag != 3) { MeshServerLogEx(21, [str.length], "Getting clipboard content, " + str.length + " byte(s)", data); }
-                                    mesh.SendCommand({ action: 'msg', type: 'getclip', sessionid: data.sessionid, data: str, tag: data.tag });
-                                }
-                            });
-                        } else {
-                            require('clipboard').read().then(function (str) {
-                                if (str) {
-                                    if (data.tag != 3) { MeshServerLogEx(21, [str.length], "Getting clipboard content, " + str.length + " byte(s)", data); }
-                                    mesh.SendCommand({ action: 'msg', type: 'getclip', sessionid: data.sessionid, data: str, tag: data.tag });
-                                }
-                            });
-                        }
+                        // Viewers have no getclip failure reply: one without data shows or copies
+                        // "undefined". Failures stay silent, as upstream. Clipboard pulls (tag 2) and
+                        // auto-sync (tag 3) skip empty text, which non-text remote content also yields,
+                        // so they never wipe the operator's clipboard; the dialog (tag 1) shows it.
+                        var clipboardReadDeliver = function (str) {
+                            if ((typeof str != 'string') || ((str.length == 0) && ((data.tag == 2) || (data.tag == 3)))) { return; }
+                            if (data.tag != 3) { MeshServerLogEx(21, [str.length], "Getting clipboard content, " + str.length + " byte(s)", data); }
+                            mesh.SendCommand({ action: 'msg', type: 'getclip', sessionid: data.sessionid, data: str, tag: data.tag });
+                        };
+                        try {
+                            var clipboardRead = require('MeshAgent').isService ? require('clipboard').dispatchRead() : require('clipboard').read();
+                            clipboardRead.then(clipboardReadDeliver, function () { });
+                        } catch (error) { }
                         break;
                     }
                     case 'setclip': {
-                        if (pendingSetClip) return;
-                        // Set the load clipboard to a user value
-                        if (typeof data.data == 'string') {
+                        if (typeof data.data != 'string') { break; }
+                        var clipboardWriteSuccess = function () {
+                            mesh.SendCommand({ action: 'msg', type: 'setclip', sessionid: data.sessionid, tag: data.tag, success: true });
+                        };
+                        var clipboardWriteFailure = function (error) {
+                            mesh.SendCommand({ action: 'msg', type: 'setclip', sessionid: data.sessionid, tag: data.tag, success: false, error: '' + error });
+                        };
+                        try {
                             MeshServerLogEx(22, [data.data.length], "Setting clipboard content, " + data.data.length + " byte(s)", data);
-                            if (require('MeshAgent').isService) {
-                                if (process.platform != 'win32') {
-                                    require('clipboard').dispatchWrite(data.data);
-                                    mesh.SendCommand({ action: 'msg', type: 'setclip', sessionid: data.sessionid, success: true });
-                                }
-                                else {
-                                    var clipargs = data.data;
-                                    var uid = require('user-sessions').consoleUid();
-                                    var user = require('user-sessions').getUsername(uid);
-                                    var domain = require('user-sessions').getDomain(uid);
-                                    user = (domain + '\\' + user);
-
-                                    if (this._dispatcher) { this._dispatcher.close(); }
-                                    this._dispatcher = require('win-dispatcher').dispatch({ user: user, modules: [{ name: 'clip-dispatch', script: "module.exports = { dispatch: function dispatch(val) { require('clipboard')(val); process.exit(); } };" }], launch: { module: 'clip-dispatch', method: 'dispatch', args: [clipargs] } });
-                                    this._dispatcher.parent = this;
-                                    //require('events').setFinalizerMetadata.call(this._dispatcher, 'clip-dispatch');
-                                    pendingSetClip = true;
-                                    this._dispatcher.on('connection', function (c) {
-                                        this._c = c;
-                                        this._c.root = this.parent;
-                                        this._c.on('end', function ()
-                                        {
-                                            pendingSetClip = false;
-                                            try { this.root._dispatcher.close(); } catch (ex) { }
-                                            this.root._dispatcher = null;
-                                            this.root = null;
-                                            mesh.SendCommand({ action: 'msg', type: 'setclip', sessionid: data.sessionid, success: true });
-                                        });
-                                    });
-                                }
-                            }
-                            else {
-                                require('clipboard')(data.data);
-                                mesh.SendCommand({ action: 'msg', type: 'setclip', sessionid: data.sessionid, success: true });
-                            } // Set the clipboard
-                        }
+                            var clipboardWrite = require('MeshAgent').isService ? require('clipboard').dispatchWrite(data.data) : require('clipboard')(data.data);
+                            if (clipboardWrite && typeof clipboardWrite.then == 'function') { clipboardWrite.then(clipboardWriteSuccess, clipboardWriteFailure); }
+                            else { clipboardWriteSuccess(); }
+                        } catch (error) { clipboardWriteFailure(error); }
                         break;
                     }
                     case 'userSessions': {
@@ -1712,192 +1716,6 @@ function handleServerCommand(data) {
                 }
                 break;
             }
-            case 'software': {
-                var sendSoftwareResponse = function(responseData) {
-                    mesh.SendCommand({ 
-                        action: 'software', 
-                        value: (typeof responseData === 'string') ? responseData : JSON.stringify(responseData), 
-                        sessionid: data.sessionid 
-                    });
-                };
-                if (data.type == 'installedapps') {
-                    if (process.platform == 'win32') {
-                        try {
-                            if (require('win-info').installedApps) {
-                                require('win-info').installedApps().then(sendSoftwareResponse).catch(function(e) { sendSoftwareResponse({ error: e.toString() }); });
-                            } else { sendSoftwareResponse({ error: "Not supported" }); }
-                        } catch (e) { sendSoftwareResponse({ error: e.toString() }); }
-                    } else if (process.platform == 'linux') {
-                        try {
-                            if (require('linux-info').packages) {
-                                require('linux-info').packages().then(sendSoftwareResponse).catch(function(e) { sendSoftwareResponse({ error: e.toString() }); });
-                            } else { sendSoftwareResponse({ error: "Not supported" }); }
-                        } catch (e) { sendSoftwareResponse({ error: e.toString() }); }
-                    } else if (process.platform == 'darwin') {
-                        try {
-                            if (require('mac-info').apps) {
-                                require('mac-info').apps().then(sendSoftwareResponse).catch(function(e) { sendSoftwareResponse({ error: e.toString() }); });
-                            } else { sendSoftwareResponse({ error: "Not supported" }); }
-                        } catch (e) { sendSoftwareResponse({ error: e.toString() }); }
-                    } else {
-                        sendSoftwareResponse({ success: false, error: "Not supported" });
-                    }
-                } else if (data.type == 'installedstoreapps') {
-                    if (process.platform != 'win32') {
-                        sendSoftwareResponse({ success: false, error: "Installed Store Apps is only supported on Windows devices" });
-                        return;
-                    }
-                    try {
-                        if (require('win-info').installedStoreApps) {
-                            require('win-info').installedStoreApps().then(sendSoftwareResponse).catch(function(e) { sendSoftwareResponse({ error: e.toString() }); });
-                        }
-                    } catch (e) { sendSoftwareResponse({ error: e.toString() }); }
-                } else if (data.type == 'uninstallapp' && (typeof data.value == 'string' && data.value != '')) {
-                    if (process.platform != 'win32') {
-                        sendSoftwareResponse({ success: false, error: "Uninstall is only supported on Windows devices" });
-                        return;
-                    }
-                    var base64Cmd = data.value.trim();
-                    var uninstallCmd = '';
-                    try {
-                        var b = Buffer.from(base64Cmd, 'base64');
-                        var decoded = b.toString();
-                        var lc = decoded ? decoded.toLowerCase() : '';
-                        if (decoded && decoded.length > 0 && (lc.indexOf('msiexec') >= 0 || lc.indexOf('.exe') >= 0)) { uninstallCmd = decoded; } else { uninstallCmd = base64Cmd; }
-                    } catch (e) { uninstallCmd = base64Cmd; }
-                    if (!uninstallCmd || uninstallCmd.trim() === '' || uninstallCmd.trim() === '\\') {
-                        sendSoftwareResponse({ success: false, error: 'No valid uninstall command available' });
-                    } else {
-                        var logDir = (process.env['ProgramData'] || 'C:\\ProgramData') + '\\MeshAgent';
-                        try { if (!require('fs').existsSync(logDir)) { require('fs').mkdirSync(logDir); } } catch (e) { }
-                        var logFile = logDir + '\\MeshAgent_Uninstall.log';
-                        var child_process = require('child_process');
-                        var cmdPath = process.env['windir'] + '\\system32\\cmd.exe';
-                        var writeLog = function(message, callback) {
-                            try {
-                                var timestamp = new Date().toISOString();
-                                var logLine = timestamp + ' | ' + message;
-                                logLine = logLine.replace(/"/g, '""').replace(/&/g, '^&').replace(/</g, '^<').replace(/>/g, '^>').replace(/\|/g, '^|');
-                                var logChild = child_process.execFile(cmdPath, ['cmd', '/c', 'echo ' + logLine + ' >> "' + logFile + '"'], { timeout: 5000 });
-                                logChild.on('exit', function() { if (callback) callback(); });
-                            } catch (e) { if (callback) callback(); }
-                        };
-                        try {
-                            writeLog('UNINSTALL START - Command: ' + uninstallCmd.replace(/\\/g, '/'));
-                            var originalCmd = uninstallCmd;
-                            if (uninstallCmd.toLowerCase().indexOf('msiexec') >= 0) {
-                                uninstallCmd = uninstallCmd.replace(/\/I\s*(\{[^}]+\})/gi, '/X $1'); // change /I to /X  for uninstall, fixes 7zip example
-                                uninstallCmd = uninstallCmd.replace(/\/q[nbrf]?/gi, '');
-                                if (uninstallCmd.indexOf('/QN') < 0) { uninstallCmd = uninstallCmd + ' /QN /norestart'; }
-                            } else {
-                                if (uninstallCmd.toLowerCase().indexOf('/s') < 0) { uninstallCmd = uninstallCmd + ' /S /silent /SILENT /VERYSILENT /quiet /norestart'; }
-                            }
-                            uninstallCmd = uninstallCmd.replace(/\s+/g, ' ').trim();
-                            var child = child_process.execFile(cmdPath, ['cmd', '/c', uninstallCmd], { timeout: 300000 });
-                            child.stdout.str = ''; child.stderr.str = '';
-                            child._cmd = uninstallCmd;
-                            child.stdout.on('data', function(c) { this.str += c.toString(); });
-                            child.stderr.on('data', function(c) { this.str += c.toString(); });
-                            child.on('exit', function(code) {
-                                var success = (code === 0 || code === null || code === 3010);
-                                var status = success ? 'SUCCESS' : 'FAILED';
-                                writeLog('UNINSTALL ' + status + ' - ExitCode: ' + code);
-                                var result = { success: success, exitCode: code, command: child._cmd };
-                                if (child.stdout.str) result.stdout = child.stdout.str.trim().substring(0, 500);
-                                if (child.stderr.str) result.stderr = child.stderr.str.trim().substring(0, 500);
-                                sendSoftwareResponse(result);
-                            });
-                            sendSoftwareResponse({ status: 'Silent uninstall started', command: uninstallCmd });
-                        } catch (ex) {
-                            writeLog('UNINSTALL ERROR - ' + ex.toString());
-                            sendSoftwareResponse({ error: ex.toString() });
-                        }
-                    }
-                } else if (data.type == 'uninstallstoreapp' && (typeof data.value === 'string' && data.value != '')) {
-                    if (process.platform != 'win32') {
-                        sendSoftwareResponse({ success: false, error: "Uninstall is only supported on Windows devices" });
-                        return;
-                    }
-                    var rawName = data.value.trim();
-                    var packageName = rawName.replace(/"/g, "").replace(/'/g, ""); 
-                    var logDir = (process.env['ProgramData'] || 'C:\\ProgramData') + '\\MeshAgent';
-                    try { if (!require('fs').existsSync(logDir)) { require('fs').mkdirSync(logDir); } } catch (e) { }
-                    var logFile = logDir + '\\MeshAgent_StoreUninstall.log';
-                    try {
-                        var psPath = (process.env['SystemRoot'] || 'C:\\Windows') + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
-                        var child_process = require('child_process');
-                        var completionMarker = '###DONE###' + Date.now();
-                        var child = child_process.execFile(psPath, ['powershell', '-NoProfile', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-Command', '-'], {});
-                        child.stdout.str = ''; child.stderr.str = '';
-                        child._completed = false;
-                        child.stdout.on('data', function(c) { 
-                            this.str += c.toString();
-                            if (!child._completed && this.str.indexOf(completionMarker) >= 0) {
-                                child._completed = true;
-                                var output = this.str.split(completionMarker)[0].trim();
-                                sendSoftwareResponse({ status: 'Finished', output: output });
-                            }
-                        });
-                        child.stderr.on('data', function(c) { this.str += c.toString(); });
-                        var script = [
-                            "$LogFile = '" + logFile + "'",
-                            "$TargetName = '" + packageName + "'",
-                            "function Write-Log { param([string]$Msg); $Line = \"$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $Msg\"; Add-Content -Path $LogFile -Value $Line -ErrorAction SilentlyContinue; Write-Output $Msg }",
-                            "",
-                            "Write-Log \"STORE UNINSTALL START: $TargetName\"",
-                            "Write-Log \"Running as: $([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)\"",
-                            "",
-                            "$foundCount = 0",
-                            "$pkgs = Get-AppxPackage -AllUsers -Name \"*$TargetName*\"",
-                            "if ($pkgs) {",
-                            "    if ($pkgs -isnot [array]) { $pkgs = @($pkgs) }",
-                            "    Write-Log \"Found (AllUsers): $($pkgs.Count) packages\"",
-                            "    foreach ($p in $pkgs) {",
-                            "        Write-Log \"Removing: $($p.PackageFullName)\"",
-                            "        try {",
-                            "            Remove-AppxPackage -Package $p.PackageFullName -AllUsers -ErrorAction Stop",
-                            "            Write-Log \"SUCCESS: Removed with -AllUsers\"",
-                            "            $foundCount++",
-                            "        } catch {",
-                            "            Write-Log \"WARN: AllUsers failed, trying current user only. Error: $($_.Exception.Message)\"",
-                            "            try {",
-                            "                Remove-AppxPackage -Package $p.PackageFullName -ErrorAction Stop",
-                            "                Write-Log \"SUCCESS: Removed from CurrentUser\"",
-                            "                $foundCount++",
-                            "            } catch {",
-                            "                Write-Log \"ERROR: Failed to remove $($p.PackageFullName). Error: $($_.Exception.Message)\"",
-                            "            }",
-                            "        }",
-                            "    }",
-                            "} else { Write-Log \"Found (AllUsers): 0 packages\" }",
-                            "",
-                            "$prov = Get-AppxProvisionedPackage -Online | Where-Object { $_.PackageName -like \"*$TargetName*\" }",
-                            "if ($prov) {",
-                            "    if ($prov -isnot [array]) { $prov = @($prov) }",
-                            "    Write-Log \"Found provisioned: $($prov.Count) packages\"",
-                            "    foreach ($pr in $prov) {",
-                            "        Write-Log \"Deprovisioning: $($pr.DisplayName)\"",
-                            "        try {",
-                            "            Remove-AppxProvisionedPackage -Online -PackageName $pr.PackageName -ErrorAction Stop | Out-Null",
-                            "            Write-Log \"SUCCESS: Deprovisioned\"",
-                            "        } catch {",
-                            "            Write-Log \"ERROR: Failed to deprovision. Error: $($_.Exception.Message)\"",
-                            "        }",
-                            "    }",
-                            "} else { Write-Log \"Found provisioned: 0 packages\" }",
-                            "",
-                            "'" + completionMarker + "'",
-                            "exit"
-                        ].join("\r\n");
-                        child.stdin.write(script + "\r\n");
-                        setTimeout(function() { if (!child._completed) { child.kill(); sendSoftwareResponse({ error: 'Timeout' }); } }, 60000);
-                        sendSoftwareResponse({ status: 'Store app removal started', package: packageName });
-                    } catch (ex) {
-                        sendSoftwareResponse({ error: ex.toString() });
-                    }
-                }
-                break;
-            }
             case 'acmactivate': {
                 if (amt != null) {
                     MeshServerLogEx(23, null, "Attempting Intel AMT ACM mode activation", data);
@@ -1914,51 +1732,154 @@ function handleServerCommand(data) {
                 break;
             }
             case 'runcommands': {
-                if (mesh.cmdchild != null) { sendConsoleText("Run commands can't execute, already busy."); break; }
-                if (!data.reply) sendConsoleText("Run commands (" + data.runAsUser + "): " + data.cmds);
+                function terminal_is_closed(term) {
+                    if (term == null) { return true; }
+                    if (term._meshTerminalClosed === true) { return true; }
+                    try { if (term.isBridgeClosed && term.isBridgeClosed()) { return true; } } catch (ex) { }
+                    return false;
+                }
+                function terminal_close_stream(term) {
+                    if (term == null) { return; }
+                    try { if (term.closeBridge) { term.closeBridge(); return; } } catch (ex) { }
+                    try { if (term.end) { term.end(); return; } } catch (ex2) { }
+                    try { if (term.kill) { term.kill(); } } catch (ex3) { }
+                }
+                function sendRunCommandResult(text) {
+                    if (data.reply) {
+                        mesh.SendCommand({ action: 'msg', type: 'runcommands', result: text, sessionid: data.sessionid, responseid: data.responseid });
+                    } else {
+                        if (text != null && text.length > 0) { sendConsoleText(text); }
+                    }
+                }
+                if (mesh.cmdchild != null) {
+                    if (terminal_is_closed(mesh.cmdchild)) {
+                        terminal_close_stream(mesh.cmdchild);
+                        delete mesh.cmdchild;
+                    } else {
+                        var busyReply = "Run commands can't execute, already busy.";
+                        if (data.reply) { sendRunCommandResult(busyReply); } else { sendConsoleText(busyReply); }
+                        break;
+                    }
+                }
+                var commandText = Array.isArray(data.cmds) ? data.cmds.join('\r\n') : ((data.cmds == null) ? '' : ('' + data.cmds));
+                if (!data.reply) sendConsoleText("Run commands (" + data.runAsUser + "): " + commandText);
 
                 // data.runAsUser: 0=Agent,1=UserOrAgent,2=UserOnly
                 var options = {};
+                var targetSessionId = null;
                 if (data.runAsUser > 0) {
-                    try { options.uid = require('user-sessions').consoleUid(); } catch (ex) { }
+                    try { targetSessionId = require('user-sessions').consoleUid(); } catch (ex) { }
+                    if ((typeof targetSessionId != 'number') || (targetSessionId < 0)) { targetSessionId = null; } else { options.uid = targetSessionId; }
                     options.type = require('child_process').SpawnTypes.TERM;
                 }
                 if (data.runAsUser == 2) {
-                    if (options.uid == null) break;
+                    if (targetSessionId == null) { sendRunCommandResult('Run commands user session is unavailable.'); break; }
                     if (((require('user-sessions').minUid != null) && (options.uid < require('user-sessions').minUid()))) break; // This command can only run as user.
                 }
                 var replydata = "";
                 if (process.platform == 'win32') {
-                    if (data.type == 1) {
-                        // Windows command shell
-                        mesh.cmdchild = require('child_process').execFile(process.env['windir'] + '\\system32\\cmd.exe', ['cmd'], options);
-                        mesh.cmdchild.descriptorMetadata = 'UserCommandsShell';
-                        mesh.cmdchild.stdout.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
-                        mesh.cmdchild.stderr.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
-                        mesh.cmdchild.stdin.write(data.cmds + '\r\nexit\r\n');
-                        mesh.cmdchild.on('exit', function () {
-                            if (data.reply) {
-                                mesh.SendCommand({ action: 'msg', type: 'runcommands', result: replydata, sessionid: data.sessionid, responseid: data.responseid });
-                            } else {
-                                sendConsoleText("Run commands completed.");
-                            }
-                            delete mesh.cmdchild;
-                        });
-                    } else if (data.type == 2) {
-                        // Windows Powershell
-                        mesh.cmdchild = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], options);
+                    var runCommandCompleted = false;
+                    var runCommandFailed = false;
+                    var runCommandInputSent = false;
+                    var runCommandTimer = null;
+                    var runCommandBridgeMarker = '\x1b]MeshConsoleBridgeReady\x07';
+                    var runCommandBridgeMarkerSeen = false;
+                    var runCommandBridgeBuffer = '';
+                    function getRunCommandBridgeState() {
+                        if (mesh.cmdchild == null) { return ' bridge=missing'; }
+                        return (' bridgeReady=' + (mesh.cmdchild._meshTerminalReady === true) +
+                            ' bridgeClosed=' + (mesh.cmdchild._meshTerminalClosed === true) +
+                            ' markerSeen=' + runCommandBridgeMarkerSeen +
+                            ' mode=' + mesh.cmdchild._meshTerminalMode +
+                            ' tokenMode=' + mesh.cmdchild._meshTerminalTokenMode +
+                            ' writes=' + mesh.cmdchild._meshTerminalWriteCount +
+                            ' lastWriteBytes=' + mesh.cmdchild._meshTerminalLastWriteBytes +
+                            ' outputChunks=' + mesh.cmdchild._meshTerminalOutputChunks +
+                            ' outputBytes=' + mesh.cmdchild._meshTerminalOutputBytes);
+                    }
+                    function completeRunCommand() {
+                        if (runCommandCompleted) { return; }
+                        runCommandCompleted = true;
+                        if (runCommandTimer != null) { try { clearTimeout(runCommandTimer); } catch (ex) { } runCommandTimer = null; }
+                        if (data.reply) {
+                            mesh.SendCommand({ action: 'msg', type: 'runcommands', result: replydata, sessionid: data.sessionid, responseid: data.responseid });
+                        } else {
+                            sendConsoleText(runCommandFailed ? "Run commands failed." : "Run commands completed.");
+                        }
+                        delete mesh.cmdchild;
+                    }
+                    function filterRunCommandBridgeMarker(text) {
+                        var markerIndex = -1;
+                        var filtered = '';
+                        // The ready-marker wrapper consumes the marker before forwarding output.
+                        // Only bypass raw-marker parsing after that wrapper has proved readiness.
+                        if (mesh.cmdchild != null && mesh.cmdchild._meshTerminalReadyMarkerProtocol === true && mesh.cmdchild._meshTerminalReady === true) { return text; }
+                        if (runCommandBridgeMarkerSeen) { return text; }
+                        runCommandBridgeBuffer += text;
+                        markerIndex = runCommandBridgeBuffer.indexOf(runCommandBridgeMarker);
+                        if (markerIndex < 0) { return ''; }
+                        runCommandBridgeMarkerSeen = true;
+                        filtered = runCommandBridgeBuffer.substring(0, markerIndex) + runCommandBridgeBuffer.substring(markerIndex + runCommandBridgeMarker.length);
+                        runCommandBridgeBuffer = '';
+                        sendRunCommandInput();
+                        return filtered;
+                    }
+                    function appendRunCommandOutput(c) {
+                        var text = '';
+                        try { text = c.toString(); } catch (ex) { text = '' + c; }
+                        text = filterRunCommandBridgeMarker(text);
+                        if (text.length == 0) { return; }
+                        replydata += text;
+                        if (!data.reply && text.length > 0) { sendConsoleText(text); }
+                    }
+                    function sendRunCommandInput() {
+                        var term = mesh.cmdchild;
+                        if (runCommandInputSent || runCommandCompleted || term == null) { return; }
+                        runCommandInputSent = true;
+                        try {
+                            term.writeBridgeInput(commandText + '\r\n', function () {
+                                try { if (term.closeInput) { term.closeInput(); } } catch (ex) { }
+                            });
+                        } catch (writeEx) {
+                            runCommandFailed = true;
+                            replydata += 'Windows run commands failed writing to MeshConsoleBridgeW: ' + writeEx.toString() + getRunCommandBridgeState();
+                            if (!data.reply) { sendConsoleText(replydata); }
+                            terminal_close_stream(term);
+                            completeRunCommand();
+                        }
+                    }
+                    function registerRunCommandInputOnBridgeReady(term) {
+                        if (term == null || term._meshTerminalReadyMarkerProtocol !== true) { return; }
+                        if (term.onBridgeReady) { term.onBridgeReady(sendRunCommandInput); return; }
+                        if (term.isBridgeReady && term.isBridgeReady()) { sendRunCommandInput(); }
+                    }
+                    try {
+                        // UserOrAgent falls back only when no WTS session was selected;
+                        // once a user token is selected, token failures remain fail-closed.
+                        var runMethod = (data.runAsUser > 0 && targetSessionId != null) ? 'RunPowerShellCommandAsUser' : 'RunPowerShellCommand';
+                        mesh.cmdchild = require('win-terminal')[runMethod](80, 25, targetSessionId);
                         mesh.cmdchild.descriptorMetadata = 'UserCommandsPowerShell';
-                        mesh.cmdchild.stdout.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
-                        mesh.cmdchild.stderr.on('data', function (c) { replydata += c.toString(); sendConsoleText(c.toString()); });
-                        mesh.cmdchild.stdin.write(data.cmds + '\r\nexit\r\n');
-                        mesh.cmdchild.on('exit', function () {
-                            if (data.reply) {
-                                mesh.SendCommand({ action: 'msg', type: 'runcommands', result: replydata, sessionid: data.sessionid, responseid: data.responseid });
-                            } else {
-                                sendConsoleText("Run commands completed.");
-                            }
-                            delete mesh.cmdchild;
+                        if (mesh.cmdchild.onBridgeData) { mesh.cmdchild.onBridgeData(appendRunCommandOutput); }
+                        else { mesh.cmdchild.on('data', appendRunCommandOutput); }
+                        mesh.cmdchild.on('error', function (error) {
+                            runCommandFailed = true;
+                            replydata += 'Windows run commands failed through MeshConsoleBridgeW: ' + error.toString() + getRunCommandBridgeState();
+                            if (!data.reply) { sendConsoleText(replydata); }
+                            completeRunCommand();
                         });
+                        mesh.cmdchild.on('close', completeRunCommand);
+                        runCommandTimer = setTimeout(function () {
+                            runCommandFailed = true;
+                            replydata += 'Windows run commands timed out through MeshConsoleBridgeW.' + getRunCommandBridgeState();
+                            if (!data.reply) { sendConsoleText(replydata); }
+                            terminal_close_stream(mesh.cmdchild);
+                            completeRunCommand();
+                        }, 300000);
+                        registerRunCommandInputOnBridgeReady(mesh.cmdchild);
+                    } catch (ex) {
+                        replydata += 'Windows run commands failed before MeshConsoleBridgeW launch: ' + ex.toString();
+                        sendRunCommandResult(replydata);
+                        delete mesh.cmdchild;
                     }
                 } else if (data.type == 3) {
                     // Linux shell
@@ -2051,6 +1972,11 @@ function handleServerCommand(data) {
                         try { apftunnel.connect(); } catch (ex) { }
                     });
                 });
+                break;
+            }
+            case 'getScript': {
+                // Received a configuration script from the server
+                sendConsoleText('getScript: ' + JSON.stringify(data));
                 break;
             }
             case 'sysinfo': {
@@ -2324,12 +2250,6 @@ function getSystemInformation(func) {
         replaceSpacesWithUnderscoresRec(results);
         var hasher = require('SHA384Stream').create();
 
-        var finalizeResults = function ()
-        {
-            results.hash = hasher.syncHash(JSON.stringify(results)).toString('hex');
-            func(results);
-        };
-
         // On Windows platforms, get volume information - Needs more testing.
         if (process.platform == 'win32')
         {
@@ -2337,19 +2257,23 @@ function getSystemInformation(func) {
             if (require('win-volumes').volumes_promise != null)
             {
                 var p = require('win-volumes').volumes_promise();
-                p.then(function (res) {
-                    if (res && res.drives) { try { results.hardware.windows.volumes = cleanGetBitLockerVolumeInfo(res.drives); } catch (ex) { } }
-                    finalizeResults();
+                p.then(function (res)
+                {
+                    results.hardware.windows.volumes = cleanGetBitLockerVolumeInfo(res);
+                    results.hash = hasher.syncHash(JSON.stringify(results)).toString('hex');
+                    func(results);
                 });
             }
             else
             {
-                finalizeResults();
+                results.hash = hasher.syncHash(JSON.stringify(results)).toString('hex');
+                func(results);
             }
         }
         else
         {
-            finalizeResults();
+            results.hash = hasher.syncHash(JSON.stringify(results)).toString('hex');
+            func(results);
         }
         
     } catch (ex) { func(null, ex); }
@@ -2508,6 +2432,34 @@ function onTcpRelayServerTunnelData(data) {
     }
 }
 
+function closeFileUpload(request, removePartial) {
+    if (request == null) return true;
+    var uploadPath = request.uploadFilePath;
+    var closeOk = true;
+    if (request.uploadFile != null) {
+        try { fs.closeSync(request.uploadFile); } catch (ex) { closeOk = false; }
+    }
+    delete request.uploadFile;
+    delete request.uploadFileid;
+    delete request.uploadFilePath;
+    delete request.uploadFileSize;
+    if ((removePartial === true) && (uploadPath != null)) { try { fs.unlinkSync(uploadPath); } catch (ex) { } }
+    return closeOk;
+}
+
+function closeFileDownload(socket) {
+    if ((socket == null) || (socket.filedownload == null)) return;
+    if (socket.filedownload.f != null) { try { fs.closeSync(socket.filedownload.f); } catch (ex) { } }
+    delete socket.filedownload;
+}
+
+function closeBasicFileDownload(request, socket) {
+    if ((request == null) || (request.downloadFile == null)) return;
+    try { request.downloadFile.pause(); } catch (ex) { }
+    try { request.downloadFile.unpipe(socket); } catch (ex) { }
+    delete request.downloadFile;
+}
+
 function onTunnelClosed()
 {
     if (this.httprequest._dispatcher != null && this.httprequest.term == null)
@@ -2588,8 +2540,9 @@ function onTunnelClosed()
     */
 
     // If there is a upload or download active on this connection, close the file
-    if (this.httprequest.uploadFile) { fs.closeSync(this.httprequest.uploadFile); delete this.httprequest.uploadFile; delete this.httprequest.uploadFileid; delete this.httprequest.uploadFilePath; delete this.httprequest.uploadFileSize; }
-    if (this.httprequest.downloadFile) { delete this.httprequest.downloadFile; }
+    closeFileUpload(this.httprequest, false);
+    closeFileDownload(this);
+    closeBasicFileDownload(this.httprequest, this);
 
     // Clean up WebRTC
     if (this.webrtc != null) {
@@ -2763,6 +2716,14 @@ function terminal_promise_connection_resolved(term)
         this.ws.httprequest._term = term;
         this.ws.httprequest._term.tunnel = this.ws;
         stdoutstream = stdinstream = term;
+        term.on('error', function (error) {
+            var tunnel = this.tunnel;
+            if (tunnel != null) {
+                tunnel.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: error.toString(), msgid: 2 }));
+                tunnel.end();
+            }
+        });
+        term.on('close', function () { if (this.tunnel != null) { this.tunnel.end(); } });
     }
     else
     {
@@ -2825,30 +2786,81 @@ function terminal_promise_consent_rejected(e)
     } else { } // no websocket, maybe log some messages somewhere?
 }
 function promise_init(res, rej) { this._res = res; this._rej = rej; }
+function windows_add_js_module(moduleName)
+{
+    try
+    {
+        if (typeof addModule != 'function') { return; }
+        var script = getJSModule(moduleName);
+        if ((typeof script == 'string') && (script.length > 0)) { addModule(moduleName, script); }
+    }
+    catch (ex) { }
+}
+function windows_prepare_dispatcher_modules()
+{
+    if (process.platform != 'win32') { return; }
+    windows_add_js_module('win-system-paths');
+    windows_add_js_module('win-dispatcher');
+}
+function terminal_windows_prepare_modules()
+{
+    windows_add_js_module('win-system-paths');
+    windows_add_js_module('win-terminal');
+    windows_add_js_module('win-virtual-terminal');
+}
+function terminal_windows_active_user_session_id(users)
+{
+    var targetSessionId = terminal_windows_console_uid();
+    if (targetSessionId != null) { return targetSessionId; }
+    if ((users == null) || (users.Active == null) || (users.Active.length == 0)) { return null; }
+    if (users.Active[0].SessionId != null)
+    {
+        targetSessionId = parseInt(users.Active[0].SessionId);
+        if (!isNaN(targetSessionId) && targetSessionId >= 0) { return targetSessionId; }
+    }
+    return null;
+}
+function terminal_windows_start(protocol, cols, rows, targetSessionId)
+{
+    var method = ((protocol == 6) || (protocol == 9)) ? 'StartPowerShell' : 'Start';
+    terminal_windows_prepare_modules();
+    return require('win-terminal')[method](cols, rows, targetSessionId);
+}
+function terminal_windows_console_uid()
+{
+    try
+    {
+        var targetSessionId = require('user-sessions').consoleUid();
+        if ((typeof targetSessionId == 'number') && targetSessionId >= 0) { return targetSessionId; }
+    }
+    catch (ex) { }
+    return null;
+}
 function terminal_userpromise_resolved(u)
 {
-
     var that = this.that;
-    if (u.Active.length > 0)
+    try
     {
-        var tmp;
-        var username = '"' + u.Active[0].Domain + '\\' + u.Active[0].Username + '"';
-
-
-        if (require('win-virtual-terminal').supported)
+        if (u.Active.length > 0)
         {
-            // ConPTY PseudoTerminal
-            tmp = require('win-dispatcher').dispatch({ user: username, modules: [{ name: 'win-virtual-terminal', script: getJSModule('win-virtual-terminal') }], launch: { module: 'win-virtual-terminal', method: (that.httprequest.protocol == 9 ? 'StartPowerShell' : 'Start'), args: [this.cols, this.rows] } });
+            var targetSessionId = terminal_windows_active_user_session_id(u);
+            if (targetSessionId == null)
+            {
+                that.httprequest.connectionPromise._rej('Failed to start remote terminal session, no active user session ID found');
+            }
+            else
+            {
+                that.httprequest.connectionPromise._res(terminal_windows_start(that.httprequest.protocol, this.cols, this.rows, targetSessionId));
+            }
         }
         else
         {
-            // Legacy Terminal
-            tmp = require('win-dispatcher').dispatch({ user: username, modules: [{ name: 'win-terminal', script: getJSModule('win-terminal') }], launch: { module: 'win-terminal', method: (that.httprequest.protocol == 9 ? 'StartPowerShell' : 'Start'), args: [this.cols, this.rows] } });
+            that.httprequest.connectionPromise._rej('Failed to start remote terminal session, no active user session found');
         }
-        that.httprequest._dispatcher = tmp;
-        that.httprequest._dispatcher.connectionPromise = that.httprequest.connectionPromise;
-        that.httprequest._dispatcher.on('connection', terminal_user_onconnection);
-        that.httprequest._dispatcher.on('~', terminal_onfinalized);
+    }
+    catch (ex)
+    {
+        that.httprequest.connectionPromise._rej('Failed to start remote terminal session, ' + ex.toString());
     }
     this.that = null;
     that = null;
@@ -2864,6 +2876,7 @@ function terminal_promise_consent_resolved()
     {
         try
         {
+            terminal_windows_prepare_modules();
             var cols = 80, rows = 25;
             if (this.httprequest.xoptions)
             {
@@ -2873,23 +2886,7 @@ function terminal_promise_consent_resolved()
 
             if ((this.httprequest.protocol == 1) || (this.httprequest.protocol == 6))
             {
-                // Admin Terminal
-                if (require('win-virtual-terminal').supported)
-                {
-                    // ConPTY PseudoTerminal
-                    // this.httprequest._term = require('win-virtual-terminal')[this.httprequest.protocol == 6 ? 'StartPowerShell' : 'Start'](80, 25);
-
-                    // The above line is commented out, because there is a bug with ClosePseudoConsole() API, so this is the workaround
-                    this.httprequest._dispatcher = require('win-dispatcher').dispatch({ modules: [{ name: 'win-virtual-terminal', script: getJSModule('win-virtual-terminal') }], launch: { module: 'win-virtual-terminal', method: (this.httprequest.protocol == 6 ? 'StartPowerShell' : 'Start'), args: [cols, rows] } });
-                    this.httprequest._dispatcher.httprequest = this.httprequest;
-                    this.httprequest._dispatcher.on('connection', terminal_onconnection);
-                    this.httprequest._dispatcher.on('~', terminal_onfinalized);
-                }
-                else
-                {
-                    // Legacy Terminal
-                    this.httprequest.connectionPromise._res(require('win-terminal')[this.httprequest.protocol == 6 ? 'StartPowerShell' : 'Start'](cols, rows));
-                }
+                this.httprequest.connectionPromise._res(terminal_windows_start(this.httprequest.protocol, cols, rows, null));
             }
             else
             {
@@ -2916,15 +2913,7 @@ function terminal_promise_consent_resolved()
             var env = { HISTCONTROL: 'ignoreboth' };
             if (process.env['LANG']) { env['LANG'] = process.env['LANG']; }
             if (process.env['PATH']) { env['PATH'] = process.env['PATH']; }
-            if (typeof this.httprequest.terminalUserVariable == 'string' && this.httprequest.terminalUserVariable != '') {
-                if (this.httprequest.terminalUserVariable == 'realname') {
-                    env['MESHCENTRAL_USER'] = (this.httprequest.realname ? this.httprequest.realname : 'unknown');
-                } else if (this.httprequest.terminalUserVariable == 'identifier') {
-                    env['MESHCENTRAL_USER'] = (this.httprequest.userid ? this.httprequest.userid : (this.httprequest.guestuserid ? 'deviceshare:' + this.httprequest.guestuserid : 'unknown'));
-                } else if (this.httprequest.terminalUserVariable == 'username') {
-                    env['MESHCENTRAL_USER'] = (this.httprequest.username ? this.httprequest.username : 'unknown');
-                }
-            }
+            env['MESHCENTRAL_USER'] = (this.httprequest.userid ? this.httprequest.userid.split('/')[2] : (this.httprequest.guestuserid ? 'deviceshare:' + this.httprequest.guestuserid.split('/')[2] : 'unknown'));
             if (this.httprequest.xoptions)
             {
                 if (this.httprequest.xoptions.rows) { env.LINES = ('' + this.httprequest.xoptions.rows); }
@@ -3064,8 +3053,289 @@ function tunnel_kvm_end()
         this.httprequest.desktop.kvm.connectionBar.httprequest = null;
     }
 
+    desktop_audio_desktopClosed(this);
     this.httprequest = null;
     this.desktop.tunnel = null;
+}
+
+//
+// Desktop audio (tunnel protocol 20) streams the speaker output of the Windows session that an
+// already consented remote desktop session is showing. Rights, consent and notification are
+// inherited from that desktop session: audio is refused without a consented desktop tunnel on the
+// same tsid, adds a toast or privacy bar state only where the desktop session shows one, and ends
+// when the last consented desktop tunnel for the tsid ends. Audio is live only, never queued or stored.
+//
+function desktop_audio_module()
+{
+    // Returns the desktop-audio module when audio can be offered on this agent, otherwise null. Agents
+    // without the module, or with it disabled, never advertise audio and answer "unavailable".
+    if (DESKTOP_AUDIO_ENABLED !== true) { return null; }
+    try
+    {
+        var audio = require('desktop-audio');
+        if ((audio.supported() === true) && (audio.disabled() !== true)) { return audio; }
+    }
+    catch (ex) { }
+    return null;
+}
+function desktop_audio_sameSession(a, b)
+{
+    // tsid is a number when the viewer selected a session and null for the console session.
+    return (((a == null) ? null : a) === ((b == null) ? null : b));
+}
+function desktop_audio_findDesktop(tsid, exclude)
+{
+    // Find an open desktop tunnel on this tsid that completed its consent step. With desktop
+    // multiplexing the server holds a single desktop tunnel per device, so one match is enough; the
+    // requesting user's own desktop rights are checked on the audio tunnel itself.
+    for (var i in tunnels)
+    {
+        var t = tunnels[i];
+        if ((t == null) || (t.protocol != 2) || (t.desktop == null) || (t.desktop.consented !== true) || (t.desktop.tunnel == null) || (t.desktop.tunnel === exclude)) { continue; }
+        if (desktop_audio_sameSession(t.desktop.tunnel.tsid, tsid)) { return t; }
+    }
+    return null;
+}
+function desktop_audio_listeners(tsid)
+{
+    var count = 0;
+    for (var i in tunnels)
+    {
+        var t = tunnels[i];
+        if ((t != null) && (t.protocol == DESKTOP_AUDIO_PROTOCOL) && (t.audio != null) && (t.audio.started === true) && desktop_audio_sameSession(t.audio.tsid, tsid)) { count++; }
+    }
+    return count;
+}
+function desktop_audio_sendState(ws, state, code, reason)
+{
+    var msg = { ctrlChannel: '102938', type: 'audio', state: state };
+    if (typeof code == 'number') { msg.code = code; }
+    if ((reason != null) && (reason !== '')) { msg.reason = reason.toString(); }
+    try { ws.write(JSON.stringify(msg)); } catch (ex) { }
+}
+function desktop_audio_log(msgid, args, text, request)
+{
+    // Always-on audit record, independent of any notification: the server event log (msgid 2001 started,
+    // 2002 stopped, 2003 failed or refused) with the tsid as first argument, plus the agent's local log.
+    var tsid = ((request.xoptions != null) && (typeof request.xoptions.tsid == 'number')) ? request.xoptions.tsid : null;
+    var line = text + ' (tsid=' + tsid + ', ' + request.remoteaddr + ')';
+    try { MeshServerLogEx(msgid, [String(tsid)].concat(args), line, request); } catch (ex) { }
+    try { require('MeshAgent').log(line + ', user: ' + request.username); } catch (ex) { }
+}
+function desktop_audio_desktopReady(ws)
+{
+    // The desktop tunnel passed its consent step and is streaming. Record that for protocol 20 and, when
+    // this agent can offer audio, advertise it on the desktop tunnel. Old or disabled agents never send this.
+    if ((ws == null) || (ws.httprequest == null) || (ws.httprequest.desktop == null)) { return; }
+    ws.httprequest.desktop.consented = true;
+    if (desktop_audio_module() == null) { return; }
+    // tsid names the session this desktop tunnel streams (null = console). With desktop multiplexing every
+    // viewer watches this one tunnel, so viewers open audio on this session rather than their own selection.
+    try { ws.write(JSON.stringify({ ctrlChannel: '102938', type: 'audio', state: 'available', protocol: DESKTOP_AUDIO_PROTOCOL, tsid: ((ws.tsid == null) ? null : ws.tsid) })); } catch (ex) { }
+}
+function desktop_audio_desktopClosed(ws)
+{
+    // Called while a desktop tunnel ends. If another consented desktop tunnel remains on the tsid the
+    // privacy bar, which tunnel_kvm_end just rebuilt, gets its audio state back. Otherwise every audio
+    // tunnel for that tsid ends with state "stopped".
+    var tsid = ws.tsid;
+    if (desktop_audio_findDesktop(tsid, ws) != null) { desktop_audio_updateBar(tsid); return; }
+    var ending = [];
+    for (var i in tunnels)
+    {
+        var t = tunnels[i];
+        if ((t != null) && (t.protocol == DESKTOP_AUDIO_PROTOCOL) && (t.audio != null) && (t.s != null) && desktop_audio_sameSession(t.audio.tsid, tsid)) { ending.push(t.s); }
+    }
+    for (var j in ending) { desktop_audio_end(ending[j], 'stopped', null, 'Remote desktop session ended'); }
+}
+function desktop_audio_refuse(ws, state, reason)
+{
+    desktop_audio_log(2003, [state, reason], 'Desktop audio refused, ' + reason, ws.httprequest);
+    desktop_audio_sendState(ws, state, null, reason);
+    ws.httprequest.protocol = 999999; // Disengage this tunnel, as the other protocols do on a rights failure
+    try { ws.end(); } catch (ex) { }
+}
+function desktop_audio_start(ws, tsid)
+{
+    var audio = desktop_audio_module();
+    if (audio == null) { desktop_audio_refuse(ws, 'unavailable', 'Desktop audio is not available on this agent'); return; }
+    // Audio is live only: never stream it over a tunnel the relay announced ('cr') as recorded.
+    if (ws.httprequest.relayRecorded === true) { desktop_audio_refuse(ws, 'unavailable', 'This connection is recorded by the server and desktop audio is never recorded'); return; }
+    if (desktop_audio_findDesktop(tsid, null) == null) { desktop_audio_refuse(ws, 'nodesktop', 'No consented remote desktop session'); return; }
+
+    var state = { tsid: tsid, session: null, started: false, blocked: false, pendingConfig: null, discontinuity: false };
+    ws.httprequest.audio = state;
+    ws.end = tunnel_audio_end;
+    ws.on('drain', tunnel_audio_drain);
+    try { state.session = audio.open(tsid); }
+    catch (ex) { desktop_audio_refuse(ws, 'error', 'Desktop audio failed to start, ' + ex.toString()); return; }
+    state.session.ws = ws;
+    state.session.on('packet', desktop_audio_onPacket);
+    state.session.on('status', desktop_audio_onStatus);
+    state.session.on('close', desktop_audio_onClose);
+}
+function desktop_audio_copyPacket(packet)
+{
+    // Duktape's Buffer.from(buffer) returns an empty buffer, so copy explicitly.
+    var copy = Buffer.alloc(packet.length);
+    packet.copy(copy);
+    return copy;
+}
+function tunnel_audio_drain()
+{
+    if ((this.httprequest != null) && (this.httprequest.audio != null))
+    {
+        var state = this.httprequest.audio;
+        state.blocked = false;
+        if (state.pendingConfig != null)
+        {
+            var packet = state.pendingConfig;
+            state.pendingConfig = null;
+            try { if (this.write(packet) === false) { state.blocked = true; } }
+            catch (ex) { desktop_audio_end(this, 'error', null, 'Desktop audio write failed'); }
+        }
+    }
+}
+function tunnel_audio_end()
+{
+    // The viewer or the server closed the tunnel; the socket is going away so no state is written.
+    desktop_audio_release(this, null, null, null);
+}
+function desktop_audio_onPacket(packet)
+{
+    var ws = this.ws, state = ((ws != null) && (ws.httprequest != null)) ? ws.httprequest.audio : null;
+    if ((state == null) || (state.session !== this)) { return; }
+
+    // Live only: one packet per binary message, never queued. While the socket is backed up packets are
+    // dropped until it drains; the viewer resynchronizes on the next packet it receives.
+    if (state.blocked === true)
+    {
+        state.discontinuity = true;
+        // CONFIG is bounded metadata required by the decoder, not captured audio.
+        // Keep only the latest boundary if the device changes while blocked.
+        if (packet[1] == 1) { state.pendingConfig = desktop_audio_copyPacket(packet); }
+        return;
+    }
+    if (state.discontinuity)
+    {
+        packet = desktop_audio_copyPacket(packet); // other listeners share the source packet
+        packet.writeUInt16LE(packet.readUInt16LE(2) | 1, 2);
+        state.discontinuity = false;
+    }
+    try { if (ws.write(packet) === false) { state.blocked = true; } }
+    catch (ex) { desktop_audio_end(ws, 'error', null, 'Desktop audio write failed'); }
+}
+function desktop_audio_onStatus(status)
+{
+    var ws = this.ws, state = ((ws != null) && (ws.httprequest != null)) ? ws.httprequest.audio : null;
+    if ((state == null) || (state.session !== this)) { return; }
+    var kind = ((status != null) && (typeof status.state == 'string')) ? status.state : 'error';
+    var code = ((status != null) && (typeof status.code == 'number')) ? status.code : null;
+    var reason = ((status != null) && (status.reason != null)) ? status.reason.toString() : null;
+    if (kind == 'started')
+    {
+        if (state.started === true) { return; }
+        state.started = true;
+        desktop_audio_log(2001, [], 'Desktop audio started', ws.httprequest);
+        desktop_audio_sendState(ws, 'started', code, reason);
+        desktop_audio_notify(ws, state.tsid, true);
+        return;
+    }
+    if (kind != 'stopped')
+    {
+        if (kind != 'unavailable') { kind = 'error'; }
+        desktop_audio_log(2003, [kind, reason], 'Desktop audio failed, ' + kind + ((reason != null) ? (': ' + reason) : ''), ws.httprequest);
+    }
+    desktop_audio_end(ws, kind, code, reason);
+}
+function desktop_audio_onClose()
+{
+    var ws = this.ws, state = ((ws != null) && (ws.httprequest != null)) ? ws.httprequest.audio : null;
+    if ((state == null) || (state.session !== this)) { return; }
+    desktop_audio_end(ws, 'stopped', null, null);
+}
+function desktop_audio_end(ws, state, code, reason)
+{
+    desktop_audio_release(ws, state, code, reason);
+    try { ws.end(); } catch (ex) { }
+}
+function desktop_audio_release(ws, kind, code, reason)
+{
+    // Idempotent teardown shared by every close path: helper status or close, the viewer or server
+    // closing the tunnel, and the desktop session ending. A null kind writes no state message.
+    var state = (ws.httprequest != null) ? ws.httprequest.audio : null;
+    if (state == null) { return; }
+    delete ws.httprequest.audio;
+    try { ws.removeListener('drain', tunnel_audio_drain); } catch (ex) { }
+    var session = state.session;
+    state.session = null;
+    if (session != null)
+    {
+        session.ws = null;
+        try { session.close(); } catch (ex) { }
+    }
+    if (kind != null) { desktop_audio_sendState(ws, kind, code, reason); }
+    if (state.started === true)
+    {
+        desktop_audio_log(2002, [], 'Desktop audio stopped', ws.httprequest);
+        desktop_audio_notify(ws, state.tsid, false);
+    }
+}
+function desktop_audio_notify(ws, tsid, on)
+{
+    // Mirror the desktop session's own notification choices: a toast when it toasts, the privacy bar
+    // text when it shows a bar, and nothing when it shows nothing.
+    var desktop = desktop_audio_findDesktop(tsid, null);
+    if (desktop == null) { return; }
+    if (desktop.consent && (desktop.consent & 1))
+    {
+        var notifyTitle = 'MeshCentral';
+        var notifyMessage = currentTranslation[on ? 'desktopAudioNotify' : 'desktopAudioNotifyEnd'].replace(/\{0\}/g, ws.httprequest.realname).replace(/\{1\}/g, ws.httprequest.username);
+        if ((desktop.soptions != null) && (desktop.soptions.notifyTitle != null)) { notifyTitle = desktop.soptions.notifyTitle; }
+        try { require('toaster').Toast(notifyTitle, notifyMessage, ws.tsid); } catch (ex) { }
+    }
+    desktop_audio_updateBar(tsid);
+}
+function desktop_audio_updateBar(tsid)
+{
+    // The privacy bar cannot be edited in place; as with a user list change it is closed and recreated,
+    // and only when its audio state actually changed. No bar on the desktop session means no bar here.
+    var desktop = desktop_audio_findDesktop(tsid, null);
+    if ((desktop == null) || (desktop.desktop.kvm.connectionBar == null)) { return; }
+    var kvm = desktop.desktop.kvm, bar = kvm.connectionBar;
+    var listening = (desktop_audio_listeners(tsid) > 0);
+    if ((bar.audio === true) == listening) { return; }
+    var text = desktop.privacybartext.replace(/\{0\}/g, kvm.rusers.join(', ')).replace(/\{1\}/g, kvm.users.join(', '));
+    if (listening) { text += ' - ' + currentTranslation['privacyBarAudio']; }
+    bar.removeAllListeners('close');
+    bar.close();
+    kvm.connectionBar = null;
+    try
+    {
+        // Use the desktop tunnel's own session: require('MeshAgent')._tsid is overwritten by every later tunnel.
+        kvm.connectionBar = require('notifybar-desktop')(text.replace(/'/g, "\\'\\"), desktop.desktop.tunnel.tsid, color_options);
+        MeshServerLogEx(31, null, "Remote Desktop Connection Bar Activated/Updated (" + desktop.remoteaddr + ")", desktop);
+    }
+    catch (ex)
+    {
+        MeshServerLogEx(32, null, "Remote Desktop Connection Bar Failed or not Supported (" + desktop.remoteaddr + ")", desktop);
+        return;
+    }
+    kvm.connectionBar.audio = listening;
+    // tunnel_kvm_end clears connectionBar.httprequest whenever a desktop tunnel ends, so keep a request in
+    // state as well; otherwise the local user's close button would stop working on a prompt-path bar.
+    kvm.connectionBar.state = (bar.state != null) ? bar.state : desktop;
+    kvm.connectionBar.httprequest = (bar.httprequest != null) ? bar.httprequest : desktop;
+    kvm.connectionBar.on('close', desktop_audio_barClosed);
+}
+function desktop_audio_barClosed()
+{
+    // Same effect as the bars created by the desktop consent paths: the local user ends every desktop session.
+    var request = (this.httprequest != null) ? this.httprequest : this.state;
+    if (request == null) { return; }
+    MeshServerLogEx(29, null, "Remote Desktop Connection forcefully closed by local user (" + request.remoteaddr + ")", request);
+    for (var i in request.desktop.kvm._pipedStreams) { request.desktop.kvm._pipedStreams[i].end(); }
+    request.desktop.kvm.end();
 }
 
 function kvm_tunnel_consentpromise_closehandler()
@@ -3124,6 +3394,7 @@ function kvm_consent_ok(ws) {
     if (ws.httprequest.autolock) {
         destopLockHelper_pipe(ws.httprequest);
     }
+    desktop_audio_desktopReady(ws);
 }
 
 function kvm_consent_ask(ws){
@@ -3201,7 +3472,7 @@ function kvm_consentpromise_resolved(always)
             if (this.ws.httprequest.soptions.notifyTitle != null) { notifyTitle = this.ws.httprequest.soptions.notifyTitle; }
             if (this.ws.httprequest.soptions.notifyMsgDesktop != null) { notifyMessage = this.ws.httprequest.soptions.notifyMsgDesktop.replace(/\{0\}/g, this.ws.httprequest.realname).replace(/\{1\}/g, this.ws.httprequest.username); }
         }
-        try { require('toaster').Toast(notifyTitle, notifyMessage, tsid); } catch (ex) { }
+        try { require('toaster').Toast(notifyTitle, notifyMessage, this.ws.tsid); } catch (ex) { }
     }
     if (this.ws.httprequest.consent && (this.ws.httprequest.consent & 0x40))
     {
@@ -3248,6 +3519,7 @@ function kvm_consentpromise_resolved(always)
         destopLockHelper_pipe(this.ws.httprequest);
     }
     this.ws.resume();
+    desktop_audio_desktopReady(this.ws);
     this.ws = null;
 }
 
@@ -3355,111 +3627,21 @@ function files_tunnel_endhandler()
     if (this._consentpromise && this._consentpromise.close) { this._consentpromise.close(); }
 }
 
-function registry_consent_ok(ws){
-    if (ws.httprequest.consent && (ws.httprequest.consent & 0x0080)) {
-        MeshServerLogEx(165, null, "Started remote registry with toast notification (" + ws.httprequest.remoteaddr + ")", ws.httprequest);
-        var notifyMessage = currentTranslation['registryNotify'].replace(/\{0\}/g, ws.httprequest.realname);
-        var notifyTitle = "MeshCentral";
-        if (ws.httprequest.soptions != null) {
-            if (ws.httprequest.soptions.notifyTitle != null) { notifyTitle = ws.httprequest.soptions.notifyTitle; }
-            if (ws.httprequest.soptions.notifyMsgRegistry != null) { notifyMessage = ws.httprequest.soptions.notifyMsgRegistry.replace(/\{0\}/g, ws.httprequest.realname).replace(/\{1\}/g, ws.httprequest.username); }
-        }
-        try { require('toaster').Toast(notifyTitle, notifyMessage); } catch (ex) { }
-    } else {
-        MeshServerLogEx(166, null, "Started remote registry without notification (" + ws.httprequest.remoteaddr + ")", ws.httprequest);
-    }
-    ws.resume();
-}
-
-function registry_consent_ask(ws){
-    ws.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: "Waiting for user to grant access...", msgid: 1 }));
-    var consentMessage = currentTranslation['registryConsent'].replace(/\{0\}/g, ws.httprequest.realname).replace(/\{1\}/g, ws.httprequest.username);
-    var consentTitle = 'MeshCentral';
-    if (ws.httprequest.soptions != null) {
-        if (ws.httprequest.soptions.consentTitle != null) { consentTitle = ws.httprequest.soptions.consentTitle; }
-        if (ws.httprequest.soptions.consentMsgRegistry != null) { consentMessage = ws.httprequest.soptions.consentMsgRegistry.replace(/\{0\}/g, ws.httprequest.realname).replace(/\{1\}/g, ws.httprequest.username); }
-    }
-    var pr;
-    if (process.platform == 'win32') {
-        var enhanced = false;
-        if (ws.httprequest.oldStyle === false) { try { require('win-userconsent'); enhanced = true; } catch (ex) { } }
-        if (enhanced) {
-            var ipr = server_getUserImage(ws.httprequest.userid);
-            ipr.consentTitle = consentTitle;
-            ipr.consentMessage = consentMessage;
-            ipr.consentTimeout = ws.httprequest.consentTimeout;
-            ipr.consentAutoAccept = ws.httprequest.consentAutoAccept;
-            ipr.username = ws.httprequest.realname;
-            ipr.tsid = ws.tsid;
-            ipr.translations = { Allow: currentTranslation['allow'], Deny: currentTranslation['deny'], Auto: currentTranslation['autoAllowForFive'], Caption: consentMessage };
-            pr = ipr.then(function (img) {
-                this.consent = require('win-userconsent').create(this.consentTitle, this.consentMessage, this.username, { b64Image: img.split(',').pop(), uid: this.tsid, timeout: this.consentTimeout * 1000, timeoutAutoAccept: this.consentAutoAccept, translations: this.translations, background: color_options.background, foreground: color_options.foreground });
-                this.__childPromise.close = this.consent.close.bind(this.consent);
-                return (this.consent);
-            });
-        } else {
-            pr = require('message-box').create(consentTitle, consentMessage, ws.httprequest.consentTimeout, null);
-        }
-    } else {
-        pr = require('message-box').create(consentTitle, consentMessage, ws.httprequest.consentTimeout, null);
-    }
-    pr.ws = ws;
-    ws.pause();
-    ws._consentpromise = pr;
-    ws.prependOnceListener('end', files_tunnel_endhandler);
-    pr.then(registry_consentpromise_resolved, registry_consentpromise_rejected);
-}
-
-function registry_consentpromise_resolved(always)
-{
-    if (always && process.platform == 'win32') { server_set_consentTimer(this.ws.httprequest.userid); }
-    this.ws._consentpromise = null;
-    MeshServerLogEx(163, null, "Starting remote registry after local user accepted (" + this.ws.httprequest.remoteaddr + ")", this.ws.httprequest);
-    this.ws.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: null }));
-    if (this.ws.httprequest.consent && (this.ws.httprequest.consent & 0x0080)) {
-        var notifyMessage = currentTranslation['registryNotify'].replace(/\{0\}/g, this.ws.httprequest.realname);
-        var notifyTitle = "MeshCentral";
-        if (this.ws.httprequest.soptions != null) {
-            if (this.ws.httprequest.soptions.notifyTitle != null) { notifyTitle = this.ws.httprequest.soptions.notifyTitle; }
-            if (this.ws.httprequest.soptions.notifyMsgRegistry != null) { notifyMessage = this.ws.httprequest.soptions.notifyMsgRegistry.replace(/\{0\}/g, this.ws.httprequest.realname).replace(/\{1\}/g, this.ws.httprequest.username); }
-        }
-        try { require('toaster').Toast(notifyTitle, notifyMessage); } catch (ex) { }
-    }
-    this.ws.resume();
-    this.ws = null;
-}
-
-function registry_consentpromise_rejected(e)
-{
-    if (this.ws) {
-        if (this.ws.httprequest) {
-            if ((this.ws.httprequest.oldStyle === true) && (this.ws.httprequest.consentAutoAccept === true) && (e.toString() != "7")) {
-                registry_consentpromise_resolved.call(this);
-                return;
-            }
-            MeshServerLogEx(164, null, "Failed to start remote registry after local user rejected (" + this.ws.httprequest.remoteaddr + ")", this.ws.httprequest);
-        }
-        this.ws._consentpromise = null;
-        this.ws.end(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: e.toString(), msgid: 2 }));
-        this.ws = null;
-    }
-}
-
 function onTunnelData(data)
 {
     //sendConsoleText('OnTunnelData, ' + data.length + ', ' + typeof data + ', ' + data);
 
     // If this is upload data, save it to file
-    if ((this.httprequest.uploadFile) && (typeof data == 'object') && (data[0] != 123)) {
+    if ((this.httprequest.uploadFile != null) && (typeof data == 'object') && (data[0] != 123)) {
         // Save the data to file being uploaded.
         if (data[0] == 0) {
             // If data starts with zero, skip the first byte. This is used to escape binary file data from JSON.
             this.httprequest.uploadFileSize += (data.length - 1);
-            try { fs.writeSync(this.httprequest.uploadFile, data, 1, data.length - 1); } catch (ex) { sendConsoleText('FileUpload Error'); this.write(Buffer.from(JSON.stringify({ action: 'uploaderror' }))); return; } // Write to the file, if there is a problem, error out.
+            try { fs.writeSync(this.httprequest.uploadFile, data, 1, data.length - 1); } catch (ex) { var uploadReqId = this.httprequest.uploadFileid; closeFileUpload(this.httprequest, false); sendConsoleText('FileUpload Error'); this.write(Buffer.from(JSON.stringify({ action: 'uploaderror', reqid: uploadReqId }))); return; } // Write to the file, if there is a problem, error out.
         } else {
             // If data does not start with zero, save as-is.
             this.httprequest.uploadFileSize += data.length;
-            try { fs.writeSync(this.httprequest.uploadFile, data); } catch (ex) { sendConsoleText('FileUpload Error'); this.write(Buffer.from(JSON.stringify({ action: 'uploaderror' }))); return; } // Write to the file, if there is a problem, error out.
+            try { fs.writeSync(this.httprequest.uploadFile, data); } catch (ex) { var uploadReqId = this.httprequest.uploadFileid; closeFileUpload(this.httprequest, false); sendConsoleText('FileUpload Error'); this.write(Buffer.from(JSON.stringify({ action: 'uploaderror', reqid: uploadReqId }))); return; } // Write to the file, if there is a problem, error out.
         }
         this.write(Buffer.from(JSON.stringify({ action: 'uploadack', reqid: this.httprequest.uploadFileid }))); // Ask for more data.
         return;
@@ -3469,12 +3651,13 @@ function onTunnelData(data)
         // Check if this is a relay connection
         if ((data == 'c') || (data == 'cr')) {
             this.httprequest.state = 1;
+            this.httprequest.relayRecorded = (data == 'cr'); // The relay sends 'cr' when it records this tunnel
             //sendConsoleText("Tunnel #" + this.httprequest.index + " now active", this.httprequest.sessionid);
         }
     }
     else {
         // Handle tunnel data
-        if (this.httprequest.protocol == 0) { // 1 = Terminal (admin), 2 = Desktop, 4 = Registry, 5 = Files, 6 = PowerShell (admin), 7 = Plugin Data Exchange, 8 = Terminal (user), 9 = PowerShell (user), 10 = FileTransfer
+        if (this.httprequest.protocol == 0) { // 1 = Terminal (admin), 2 = Desktop, 5 = Files, 6 = PowerShell (admin), 7 = Plugin Data Exchange, 8 = Terminal (user), 9 = PowerShell (user), 10 = FileTransfer, 20 = Desktop Audio
             // Take a look at the protocol
             if ((data.length > 3) && (data[0] == '{')) { onTunnelControlData(data, this); return; }
             this.httprequest.protocol = parseInt(data);
@@ -3744,46 +3927,6 @@ function onTunnelData(data)
                 this.removeAllListeners('data');
                 this.on('data', onTunnelControlData);
                 //this.write('MeshCore KVM Hello!1');
-            } else if (this.httprequest.protocol == 4) {
-                //
-                // Remote Registry
-                //
-
-                // Check user access rights for registry
-                if ((this.httprequest.rights & MESHRIGHT_REMOTECONTROL) == 0) {
-                    // Disengage this tunnel, user does not have the rights to do this!!
-                    this.httprequest.protocol = 999999;
-                    this.httprequest.s.end();
-                    sendConsoleText("Error: No registry control rights.");
-                    return;
-                }
-
-                this.descriptorMetadata = "Remote Registry";
-
-                // Add the registry session to the count to update the server
-                if (this.httprequest.userid != null) {
-                    var userid = getUserIdAndGuestNameFromHttpRequest(this.httprequest);
-                    if (tunnelUserCount.registry[userid] == null) { tunnelUserCount.registry[userid] = 1; } else { tunnelUserCount.registry[userid]++; }
-                    try { mesh.SendCommand({ action: 'sessions', type: 'registry', value: tunnelUserCount.registry }); } catch (ex) { }
-                    broadcastSessionsToRegisteredApps();
-                }
-
-                this.end = function ()
-                {
-                    // Remove the registry session from the count to update the server
-                    if (this.httprequest.userid != null) {
-                        var userid = getUserIdAndGuestNameFromHttpRequest(this.httprequest);
-                        if (tunnelUserCount.registry[userid] != null) { tunnelUserCount.registry[userid]--; if (tunnelUserCount.registry[userid] <= 0) { delete tunnelUserCount.registry[userid]; } }
-                        try { mesh.SendCommand({ action: 'sessions', type: 'registry', value: tunnelUserCount.registry }); } catch (ex) { }
-                        broadcastSessionsToRegisteredApps();
-                    }
-                };
-
-                if (this.httprequest.consent && (this.httprequest.consent & 0x0100)) {
-                    registry_consent_ask(this);
-                } else {
-                    registry_consent_ok(this);
-                }
             } else if (this.httprequest.protocol == 5) {
                 //
                 // Remote Files
@@ -3881,6 +4024,31 @@ function onTunnelData(data)
 
                 // Setup files
                 // NOP
+            } else if (this.httprequest.protocol == DESKTOP_AUDIO_PROTOCOL) {
+                //
+                // Desktop Audio: speaker output of a session that an already consented remote desktop tunnel is showing
+                //
+
+                // Same rights check as desktop viewing; the requesting user needs them even when another user's desktop tunnel carries the consent.
+                if ((((this.httprequest.rights & MESHRIGHT_REMOTECONTROL) == 0) && ((this.httprequest.rights & MESHRIGHT_REMOTEVIEW) == 0)) || ((this.httprequest.rights != 0xFFFFFFFF) && ((this.httprequest.rights & MESHRIGHT_NODESKTOP) != 0))) {
+                    // Disengage this tunnel, user does not have the rights to do this!!
+                    desktop_audio_refuse(this, 'denied', 'No desktop rights');
+                    sendConsoleText("Error: No Desktop Audio Rights.");
+                    return;
+                }
+
+                this.descriptorMetadata = "Remote Desktop Audio";
+
+                // Look for a TSID, it travels in the connection options exactly as for desktop
+                var tsid = null;
+                if ((this.httprequest.xoptions != null) && (typeof this.httprequest.xoptions.tsid == 'number')) { tsid = this.httprequest.xoptions.tsid; }
+                this.tsid = tsid;
+
+                // Only control messages travel browser to agent on this tunnel
+                this.removeAllListeners('data');
+                this.on('data', onTunnelControlData);
+
+                desktop_audio_start(this, tsid);
             }
         } else if (this.httprequest.protocol == 1) {
             // Send data into terminal stdin
@@ -3892,108 +4060,6 @@ function onTunnelData(data)
                 this.httprequest.desktop.state = 1;
             } else {
                 this.httprequest.desktop.write(data);
-            }
-        } else if (this.httprequest.protocol == 4) {
-            // Process registry commands
-            var cmd = null;
-            try { cmd = JSON.parse(data); } catch (ex) { };
-            if (cmd == null) { return; }
-            if ((cmd.ctrlChannel == '102938') || ((cmd.type == 'offer') && (cmd.sdp != null))) { onTunnelControlData(cmd, this); return; } // If this is control data, handle it now.
-            if (cmd.action == undefined) { return; }
-            var remoteRegistry = null;
-            if (process.platform == 'win32') {
-                try { remoteRegistry = require('win-registry-remote'); }
-                catch (ex) { }
-            }
-
-            switch (cmd.action) {
-                case 'listroots': {
-                    var response = { action: 'listroots', reqid: cmd.reqid, roots: [] };
-                    if (process.platform != 'win32') {
-                        response.error = 'Registry is currently supported on Windows agents only.';
-                    } else {
-                        response.roots = remoteRegistry.getRoots();
-                    }
-                    this.write(JSON.stringify(response));
-                    break;
-                }
-                case 'list': {
-                    var response = { action: 'list', reqid: cmd.reqid, hive: cmd.hive, path: cmd.path, subkeys: [], values: [] };
-                    if (process.platform != 'win32') {
-                        response.error = 'Registry is currently supported on Windows agents only.';
-                    } else {
-                        try {
-                            var listResponse = remoteRegistry.listKey(cmd.hive, cmd.path || '');
-                            response.hive = listResponse.hive;
-                            response.path = listResponse.path;
-                            response.subkeys = listResponse.subkeys;
-                            response.values = listResponse.values;
-                        } catch (ex) {
-                            response.error = (ex && ex.message) ? ex.message : String(ex);
-                        }
-                    }
-                    this.write(JSON.stringify(response));
-                    break;
-                }
-                case 'createkey': {
-                    var response = { action: 'createkey', reqid: cmd.reqid, hive: cmd.hive, path: cmd.path, name: cmd.name };
-                    if (process.platform != 'win32') {
-                        response.error = 'Registry is currently supported on Windows agents only.';
-                    } else {
-                        try { remoteRegistry.createSubKey(cmd.hive, cmd.path || '', cmd.name); response.success = true; }
-                        catch (ex) { response.error = (ex && ex.message) ? ex.message : String(ex); }
-                    }
-                    this.write(JSON.stringify(response));
-                    break;
-                }
-                case 'delete': {
-                    var response = { action: 'delete', reqid: cmd.reqid };
-                    if (process.platform != 'win32') {
-                        response.error = 'Registry is currently supported on Windows agents only.';
-                    } else {
-                        try { remoteRegistry.deleteEntries(cmd.items || []); response.success = true; }
-                        catch (ex) { response.error = (ex && ex.message) ? ex.message : String(ex); }
-                    }
-                    this.write(JSON.stringify(response));
-                    break;
-                }
-                case 'setvalue': {
-                    var response = { action: 'setvalue', reqid: cmd.reqid, hive: cmd.hive, path: cmd.path, name: cmd.name, type: cmd.type };
-                    if (process.platform != 'win32') {
-                        response.error = 'Registry is currently supported on Windows agents only.';
-                    } else {
-                        try { remoteRegistry.setValue(cmd.hive, cmd.path || '', cmd.name, cmd.type, cmd.value); response.success = true; }
-                        catch (ex) { response.error = (ex && ex.message) ? ex.message : String(ex); }
-                    }
-                    this.write(JSON.stringify(response));
-                    break;
-                }
-                case 'rename': {
-                    var response = { action: 'rename', reqid: cmd.reqid };
-                    if (process.platform != 'win32') {
-                        response.error = 'Registry is currently supported on Windows agents only.';
-                    } else {
-                        try { remoteRegistry.renameEntry(cmd.item, cmd.newName); response.success = true; }
-                        catch (ex) { response.error = (ex && ex.message) ? ex.message : String(ex); }
-                    }
-                    this.write(JSON.stringify(response));
-                    break;
-                }
-                case 'export': {
-                    var response = { action: 'export', reqid: cmd.reqid, hive: cmd.hive, path: cmd.path };
-                    if (process.platform != 'win32') {
-                        response.error = 'Registry is currently supported on Windows agents only.';
-                    } else {
-                        try { response.success = true; response.content = remoteRegistry.exportKey(cmd.hive, cmd.path || ''); }
-                        catch (ex) { response.error = (ex && ex.message) ? ex.message : String(ex); }
-                    }
-                    this.write(JSON.stringify(response));
-                    break;
-                }
-                default: {
-                    this.write(JSON.stringify({ action: cmd.action, reqid: cmd.reqid, error: 'Unknown registry action.' }));
-                    break;
-                }
             }
         } else if (this.httprequest.protocol == 5) {
             // Process files commands
@@ -4047,9 +4113,17 @@ function onTunnelData(data)
                     MeshServerLogEx(164, [cmd.path], "Create file: \"" + cmd.path + "\"", this.httprequest);
                     break;
                 }
+                case 'execute': { nativeFileAction(this, cmd); break; }
                 case 'rm': {
                     // Delete, possibly recursive delete
+                    if (!Array.isArray(cmd.delfiles)) { break; }
                     for (var i in cmd.delfiles) {
+                        if (typeof cmd.delfiles[i] != 'string' || !cmd.delfiles[i] || cmd.delfiles[i] == '.' || cmd.delfiles[i] == '..' || /[\\/:\x00]/.test(cmd.delfiles[i])) { continue; }
+                        if (process.platform == 'win32') {
+                            nativeFileAction(this, { action: 'delete', reqid: cmd.reqid, path: obj.path.join(cmd.path, cmd.delfiles[i]), rec: cmd.rec });
+                            continue;
+                        }
+
                         var p = obj.path.join(cmd.path, cmd.delfiles[i]), delcount = 0;
                         try { delcount = deleteFolderRecursive(p, cmd.rec); } catch (ex) { }
                         if ((delcount == 1) && !cmd.rec) {
@@ -4065,11 +4139,9 @@ function onTunnelData(data)
                     break;
                 }
                 case 'open': {
-                    // Open the local file/folder on the users desktop
-                    if (cmd.path) {
-                        MeshServerLogEx(20, [cmd.path], "Opening: " + cmd.path, cmd);
-                        openFileOnDesktop(cmd.path);
-                    }
+                    if (process.platform == 'win32') { nativeFileAction(this, cmd); }
+                    else if (cmd.path) { openFileOnDesktop(cmd.path); }
+                    break;
                 }
                 case 'markcoredump': {
                     // If we are asking for the coredump file, set the right path.
@@ -4122,20 +4194,23 @@ function onTunnelData(data)
                                 }
                             }
                             MeshServerLogEx((cmd.ask == 'coredump') ? 104 : 49, [cmd.path], 'Download: \"' + cmd.path + '\"', this.httprequest);
-                            if ((cmd.path == null) || (this.filedownload != null)) { this.write({ action: 'download', sub: 'cancel', id: this.filedownload.id }); delete this.filedownload; }
-                            this.filedownload = { id: cmd.id, path: cmd.path, ptr: 0 }
-                            try { this.filedownload.f = fs.openSync(this.filedownload.path, 'rbN'); } catch (ex) { this.write({ action: 'download', sub: 'cancel', id: this.filedownload.id }); delete this.filedownload; }
+                            if (cmd.path == null) { this.write({ action: 'download', sub: 'cancel', id: cmd.id }); break; }
+                            if (this.filedownload != null) { var previousDownloadId = this.filedownload.id; closeFileDownload(this); this.write({ action: 'download', sub: 'cancel', id: previousDownloadId }); }
+                            this.filedownload = { id: cmd.id, path: cmd.path, ptr: 0 };
+                            try { this.filedownload.f = fs.openSync(this.filedownload.path, 'rbN'); } catch (ex) { var failedDownloadId = this.filedownload.id; closeFileDownload(this); this.write({ action: 'download', sub: 'cancel', id: failedDownloadId }); }
                             if (this.filedownload) { this.write({ action: 'download', sub: 'start', id: cmd.id }); }
                         } else if ((this.filedownload != null) && (cmd.id == this.filedownload.id)) { // Download commands
-                            if (cmd.sub == 'startack') { sendNextBlock = ((typeof cmd.ack == 'number') ? cmd.ack : 8); } else if (cmd.sub == 'stop') { delete this.filedownload; } else if (cmd.sub == 'ack') { sendNextBlock = 1; }
+                            if (cmd.sub == 'startack') { sendNextBlock = ((typeof cmd.ack == 'number') ? cmd.ack : 8); } else if ((cmd.sub == 'stop') || (cmd.sub == 'cancel')) { closeFileDownload(this); } else if (cmd.sub == 'ack') { sendNextBlock = 1; }
                         }
                         // Send the next download block(s)
-                        if (sendNextBlock > 0) {
+                        if ((sendNextBlock > 0) && (this.filedownload != null)) {
                             sendNextBlock--;
                             var buf = Buffer.alloc(16384);
-                            var len = fs.readSync(this.filedownload.f, buf, 4, 16380, null);
-                            this.filedownload.ptr += len;
-                            if (len < 16380) { buf.writeInt32BE(0x01000001, 0); fs.closeSync(this.filedownload.f); delete this.filedownload; sendNextBlock = 0; } else { buf.writeInt32BE(0x01000000, 0); }
+                            var activeDownload = this.filedownload;
+                            var len;
+                            try { len = fs.readSync(activeDownload.f, buf, 4, 16380, null); } catch (ex) { var failedDownloadId = activeDownload.id; closeFileDownload(this); this.write({ action: 'download', sub: 'cancel', id: failedDownloadId }); break; }
+                            activeDownload.ptr += len;
+                            if (len < 16380) { buf.writeInt32BE(0x01000001, 0); closeFileDownload(this); sendNextBlock = 0; } else { buf.writeInt32BE(0x01000000, 0); }
                             this.write(buf.slice(0, len + 4)); // Write as binary
                         }
                         break;
@@ -4143,41 +4218,34 @@ function onTunnelData(data)
                 case 'upload':
                     {
                         // Upload a file, browser to agent
-                        if (this.httprequest.uploadFile != null) { fs.closeSync(this.httprequest.uploadFile); delete this.httprequest.uploadFile; }
+                        if (this.httprequest.uploadFile != null) { closeFileUpload(this.httprequest, false); }
                         if (cmd.path == undefined) break;
                         var filepath = cmd.name ? obj.path.join(cmd.path, cmd.name) : cmd.path;
                         this.httprequest.uploadFilePath = filepath;
                         this.httprequest.uploadFileSize = 0;
-                        try { this.httprequest.uploadFile = fs.openSync(filepath, cmd.append ? 'abN' : 'wbN'); } catch (ex) { this.write(Buffer.from(JSON.stringify({ action: 'uploaderror', reqid: cmd.reqid }))); break; }
+                        try { this.httprequest.uploadFile = fs.openSync(filepath, cmd.append ? 'abN' : 'wbN'); } catch (ex) { closeFileUpload(this.httprequest, false); this.write(Buffer.from(JSON.stringify({ action: 'uploaderror', reqid: cmd.reqid }))); break; }
                         this.httprequest.uploadFileid = cmd.reqid;
-                        if (this.httprequest.uploadFile) { this.write(Buffer.from(JSON.stringify({ action: 'uploadstart', reqid: this.httprequest.uploadFileid }))); }
+                        if (this.httprequest.uploadFile != null) { this.write(Buffer.from(JSON.stringify({ action: 'uploadstart', reqid: this.httprequest.uploadFileid }))); }
                         break;
                     }
                 case 'uploaddone':
                     {
                         // Indicates that an upload is done
-                        if (this.httprequest.uploadFile) {
+                        if (this.httprequest.uploadFile != null) {
                             MeshServerLogEx(105, [this.httprequest.uploadFilePath, this.httprequest.uploadFileSize], 'Upload: \"' + this.httprequest.uploadFilePath + '\", Size: ' + this.httprequest.uploadFileSize, this.httprequest);
-                            fs.closeSync(this.httprequest.uploadFile);
-                            this.write(Buffer.from(JSON.stringify({ action: 'uploaddone', reqid: this.httprequest.uploadFileid }))); // Indicate that we closed the file.
-                            delete this.httprequest.uploadFile;
-                            delete this.httprequest.uploadFileid;
-                            delete this.httprequest.uploadFilePath;
-                            delete this.httprequest.uploadFileSize;
+                            var uploadReqId = this.httprequest.uploadFileid;
+                            var closeOk = closeFileUpload(this.httprequest, false);
+                            this.write(Buffer.from(JSON.stringify({ action: closeOk ? 'uploaddone' : 'uploaderror', reqid: uploadReqId }))); // Indicate whether the file closed and flushed successfully.
                         }
                         break;
                     }
                 case 'uploadcancel':
                     {
                         // Indicates that an upload is canceled
-                        if (this.httprequest.uploadFile) {
-                            fs.closeSync(this.httprequest.uploadFile);
-                            fs.unlinkSync(this.httprequest.uploadFilePath);
-                            this.write(Buffer.from(JSON.stringify({ action: 'uploadcancel', reqid: this.httprequest.uploadFileid }))); // Indicate that we closed the file.
-                            delete this.httprequest.uploadFile;
-                            delete this.httprequest.uploadFileid;
-                            delete this.httprequest.uploadFilePath;
-                            delete this.httprequest.uploadFileSize;
+                        if (this.httprequest.uploadFile != null) {
+                            var uploadReqId = this.httprequest.uploadFileid;
+                            closeFileUpload(this.httprequest, true);
+                            this.write(Buffer.from(JSON.stringify({ action: 'uploadcancel', reqid: uploadReqId }))); // Indicate that we closed the file.
                         }
                         break;
                     }
@@ -4414,11 +4482,6 @@ function onTunnelControlData(data, ws) {
         case 'close': {
             // We received the close on the websocket
             //sendConsoleText('Tunnel #' + ws.tunnel.index + ' WebSocket control close');
-            // Attempt to send EOF (Ctrl-D) multiple times to exit nested shells (screen, su, etc.) cleanly,
-            // This allows the shell to write its history before the process is killed
-            if (process.platform != 'win32' && ws.httprequest && ws.httprequest.process && ws.httprequest.process.stdin) {
-                try { ws.httprequest.process.stdin.write('\x04\x04\x04'); } catch (ex) { }
-            }
             try { ws.close(); } catch (ex) { }
             break;
         }
@@ -4549,44 +4612,9 @@ function openFileOnDesktop(file) {
     try {
         switch (process.platform) {
             case 'win32':
-                var uid = require('user-sessions').consoleUid();
-                var user = require('user-sessions').getUsername(uid);
-                var domain = require('user-sessions').getDomain(uid);
-                var task = { name: 'MeshChatTask', user: user, domain: domain, execPath: (require('fs').statSync(file).isDirectory() ? process.env['windir'] + '\\explorer.exe' : file) };
-                if (require('fs').statSync(file).isDirectory()) task.arguments = [file];
-                try {
-                    require('win-tasks').addTask(task);
-                    require('win-tasks').getTask({ name: 'MeshChatTask' }).run();
-                    require('win-tasks').deleteTask('MeshChatTask');
-                    return (true);
-                }
-                catch (ex) {
-                    var taskoptions = { env: { _target: (require('fs').statSync(file).isDirectory() ? process.env['windir'] + '\\explorer.exe' : file), _user: '"' + domain + '\\' + user + '"' }, _args: "" };
-                    if (require('fs').statSync(file).isDirectory()) taskoptions.env._args = file;
-                    for (var c1e in process.env) {
-                        taskoptions.env[c1e] = process.env[c1e];
-                    }
-                    var child = require('child_process').execFile(process.env['windir'] + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', ['powershell', '-noprofile', '-nologo', '-command', '-'], taskoptions);
-                    child.stderr.on('data', function (c) { });
-                    child.stdout.on('data', function (c) { });
-                    child.stdin.write('SCHTASKS /CREATE /F /TN MeshChatTask /SC ONCE /ST 00:00 ');
-                    if (user) { child.stdin.write('/RU $env:_user '); }
-                    child.stdin.write('/TR "$env:_target $env:_args"\r\n');
-                    child.stdin.write('$ts = New-Object -ComObject Schedule.service\r\n');
-                    child.stdin.write('$ts.connect()\r\n');
-                    child.stdin.write('$tsfolder = $ts.getfolder("\\")\r\n');
-                    child.stdin.write('$task = $tsfolder.GetTask("MeshChatTask")\r\n');
-                    child.stdin.write('$taskdef = $task.Definition\r\n');
-                    child.stdin.write('$taskdef.Settings.StopIfGoingOnBatteries = $false\r\n');
-                    child.stdin.write('$taskdef.Settings.DisallowStartIfOnBatteries = $false\r\n');
-                    child.stdin.write('$taskdef.Actions.Item(1).Path = $env:_target\r\n');
-                    child.stdin.write('$taskdef.Actions.Item(1).Arguments = $env:_args\r\n');
-                    child.stdin.write('$tsfolder.RegisterTaskDefinition($task.Name, $taskdef, 4, $null, $null, $null)\r\n');
-                    child.stdin.write('SCHTASKS /RUN /TN MeshChatTask\r\n');
-                    child.stdin.write('SCHTASKS /DELETE /F /TN MeshChatTask\r\nexit\r\n');
-                    child.waitExit();
-                }
-                break;
+                if (typeof mesh.fileAction != 'function') { return null; }
+                var nativeResult = mesh.fileAction('open', file, false);
+                return nativeResult.ok ? true : null;
             case 'linux':
                 child = require('child_process').execFile('/usr/bin/xdg-open', ['xdg-open', file], { uid: require('user-sessions').consoleUid() });
                 break;
@@ -4667,18 +4695,17 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
         switch (cmd) {
             case 'help': { // Displays available commands
                 var fin = '', f = '', availcommands = 'domain,translations,agentupdate,errorlog,msh,timerinfo,coreinfo,coreinfoupdate,coredump,service,fdsnapshot,fdcount,startupoptions,';
-                availcommands += 'alert,agentsize,versions,help,info,osinfo,args,print,type,dbkeys,dbget,dbset,dbdelete,dbcompact,eval,parseuri,httpget,wslist,plugin,wsconnect,wssend,wsclose,notify,';
-                availcommands += 'ls,ps,kill,netinfo,location,power,wakeonlan,setdebug,smbios,rawsmbios,toast,lock,users,openurl,getclip,setclip,log,cpuinfo,sysinfo,';
-                availcommands += 'apf,scanwifi,wallpaper,agentmsg,task,uninstallagent,display,openfile,installedapps';
+                availcommands += 'alert,agentsize,versions,help,info,osinfo,args,print,type,dbkeys,dbget,dbset,dbcompact,eval,parseuri,httpget,wslist,plugin,wsconnect,wssend,wsclose,notify,';
+                availcommands += 'ls,ps,kill,netinfo,location,power,wakeonlan,setdebug,smbios,rawsmbios,toast,lock,users,openurl,getscript,getclip,setclip,log,cpuinfo,sysinfo';
+                availcommands += 'apf,scanwifi,wallpaper,agentmsg,task,uninstallagent,display,openfile,umhctl';
                 if (require('os').dns != null) { availcommands += ',dnsinfo'; }
                 try { require('linux-dhcp'); availcommands += ',dhcp'; } catch (ex) { }
                 if (process.platform == 'win32') {
-                    availcommands += ',bitlocker,cs,wpfhwacceleration,uac,volumes,rdpport,domaininfo,printers,wmi';
+                    availcommands += ',bitlocker,cs,wpfhwacceleration,uac,volumes,rdpport,domaininfo';
                     if (bcdOK()) { availcommands += ',safemode'; }
                     if (require('notifybar-desktop').DefaultPinned != null) { availcommands += ',privacybar'; }
                     try { require('win-utils'); availcommands += ',taskbar'; } catch (ex) { }
-                    try { require('win-info'); availcommands += ',qfe,defender,av,installedstoreapps'; } catch (ex) { }
-                    try { require('win-updates'); availcommands += ',winupdates,winupdatesinstalled,winupdateshistory,winupdatesdedup'; } catch (ex) { }
+                    try { require('win-info'); availcommands += ',installedapps,qfe,defender,av,installedstoreapps'; } catch (ex) { }
                     try { require('win-deskutils'); availcommands += ',mousetrails,idletime,deskbackground'; } catch (ex) { }
                 }
                 if (amt != null) { availcommands += ',amt,amtconfig,amtevents'; }
@@ -4759,30 +4786,6 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                         }
                 }
                 break;
-            case 'printers':
-                if (process.platform != 'win32') {
-                    response = 'Unknown command "printers", type "help" for list of available commands.';
-                } else {
-                    var winInfo = require('win-info');
-                    var printers = winInfo.printers();
-                    for (var i = 0; i < printers.length; ++i) {
-                        var p = printers[i];
-                        if (p.type === 'system') {
-                            var line = p.name + ' - ' + p.port;
-                            if (p.portDesc) { line += ' (' + p.portDesc + ')'; }
-                            line += ' [' + p.status + ']';
-                            if (p.errors.length > 0) { line += ' [' + p.errors.join(', ') + ']'; }
-                            if (p.jobCount > 0) { line += ' [' + p.jobCount + ' job' + (p.jobCount > 1 ? 's' : '') + ' queued]'; }
-                            sendConsoleText(line, sessionid);
-                        } else if (p.type === 'adgpo') {
-                            var line = p.name + ' [User/AD-GPO]';
-                            if (p.portDesc) { line += ' - ' + p.portDesc; }
-                            line += ' (source: ' + p.label + ')';
-                            sendConsoleText(line, sessionid);
-                        }
-                    }
-                }
-                break;
             case 'privacybar':
                 if (process.platform != 'win32' || require('notifybar-desktop').DefaultPinned == null) {
                     response = 'Unknown command "privacybar", type "help" for list of available commands.';
@@ -4827,7 +4830,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                     }
 
                     sendConsoleText('Querying Domain Controller... This can take up to 60 seconds. Please wait...', sessionid);
-                    global._domainQuery = require('win-wmi-fixed').queryAsync('ROOT\\CIMV2', 'SELECT * FROM Win32_NTDomain');
+                    global._domainQuery = require('win-wmi').queryAsync('ROOT\\CIMV2', 'SELECT * FROM Win32_NTDomain');
                     global._domainQuery.session = sessionid;
                     global._domainQuery.then(function (v) {
                         var results = [];
@@ -4857,41 +4860,6 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                     });
                     break;
                 }
-            case 'wmi':
-                if (process.platform != 'win32') {
-                    response = 'Unknown command "wmi", type "help" for list of available commands.';
-                    break;
-                }
-                if (args['_'].length < 2 || args['_'].length > 3) {
-                    response = 'Execute a WMI query.\r\nUsage: wmi namespace "query" [(n)sync][(u)npretty][(s)ilence][(i)ncludesystemproperties]\r\n' +
-                            'Default: async, pretty and shows progress\r\n' +
-                            'Note: Sync queries block the agent for the duration of the query\r\n' +
-                            'Example: wmi CIMV2 "SELECT Name,ProcessId FROM Win32_Process WHERE Name=\'meshagent.exe\'" in\r\n';
-                    break;
-                }
-                var opt = (args['_'][2]|| '').toLowerCase();
-                var ns = args['_'][0].trim();
-                if (!/^root\\\w/i.test(ns)) { ns = 'ROOT\\' + ns; }
-                var q = (args['_'][1]).trim();
-                var indent = (opt.indexOf('u') === -1); // unpretty, so default true
-                var showProgress = (opt.indexOf('s') === -1);   //s is now silence
-                var includeSysProp = (opt.indexOf('i') !== -1);
-                var async = opt.indexOf('n') === -1;
-                var wmi = require('win-wmi-fixed');
-                var output = function (res) { sendConsoleText((res && res.length > 0) ? (JSON.stringify(res, null, (indent ? 2 : 0))) : 'No results', sessionid); };
-                var error = function (e) {
-                    e = e || {};
-                    sendConsoleText(((e.results && e.results.length) ? 'Partial result:\r\n' + JSON.stringify(e.results, null, (indent ? 2 : 0)) + '\r\nPartial resultcount: ' + e.results.length + '\r\n' : '') +
-                        'Error: ' + (e.message || JSON.stringify(e)), sessionid); };
-                if (showProgress) { sendConsoleText('Performing ' + (async ? 'asynchronous ': '') + 'query ' + (async ? '': 'synchronously (be careful with large queries as it blocks the agent for the duration)'), sessionid); }
-                if (async) {
-                    wmi.queryAsync(ns, q, null, includeSysProp, null, (showProgress ? sessionid : null))
-                    .then( output )
-                    .catch( error );
-                } else {
-                    try { output(wmi.query(ns, q, null, includeSysProp, null, (showProgress ? sessionid : null) )); } catch (e) { error(e); }
-                }
-                break;
             case 'translations': {
                 response = JSON.stringify(coretranslations, null, 2);
                 break;
@@ -4901,37 +4869,10 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 break;
             case 'bitlocker':
                 if (process.platform == 'win32') {
-                    if (require('user-sessions').isRoot()) {
-                        if (require('win-volumes').volumes_promise != null) {
-                            var p = require('win-volumes').volumes_promise();
-                            p.sessionid = sessionid;
-                            p.then(function (res) {
-                                if (res && res.error) { sendConsoleText('Bitlocker error: ' + (res.error.message ? res.error.message : res.error), this.sessionid); }
-                                var drives = (res && res.drives && (Object.keys(res.drives).length !== 0)) ? res.drives : null;     // win-volumes returns 'drives' as at least {}, so also check on empty object
-                                if (drives) {
-                                    var conversionStatuses = { 0: 'FullyDecrypted', 1: 'FullyEncrypted', 2: 'EncryptionInProgress', 3: 'DecryptionInProgress', 4: 'EncryptionPaused', 5: 'DecryptionPaused' };
-                                    var encryptionMethods = { 0: 'None', 1: 'AES_128_WITH_DIFFUSER', 2: 'AES_256_WITH_DIFFUSER', 3: 'AES_128', 4: 'AES_256', 5: 'HARDWARE_ENCRYPTION', 6: 'XTS_AES_128', 7: 'XTS_AES_256' };
-                                    var protectionStatuses = { 0: 'Off', 1: 'On', 2: 'Locked'};
-                                    var driveType = { 0: "Unknown", 1: "No Root Directory", 2: "Removable Disk", 3: "Local Disk", 4: "Network Drive", 5: "Compact Disc", 6: "RAM Disk" };
-                                    for (var i in drives) {
-                                        const v = drives[i];
-                                        if (conversionStatuses[v.volumeStatus]) { v.volumeStatus = conversionStatuses[v.volumeStatus]; } else { v.volumeStatus = 'Unknown'; }
-                                        if (encryptionMethods[v.encryptionMethod]) { v.encryptionMethod = encryptionMethods[v.encryptionMethod]; } else { v.encryptionMethod = 'Unknown'; }
-                                        if (protectionStatuses[v.protectionStatus]) { v.protectionStatus = protectionStatuses[v.protectionStatus]; } else { v.protectionStatus = 'Unknown'; }
-                                        if (driveType[v.dType]) {v.dType = driveType[v.dType]; } else { v.dType = 'Unknown'; }
-                                        if (v.recoveryPassword && (rights != MESHRIGHT_ADMIN)) { v.recoveryPassword = '(Only admins)'; }
-                                    }
-                                }
-                                sendConsoleText(JSON.stringify((drives ? drives : 'No volume/bitlocker info'), null, 1), this.sessionid);
-                            });
-                        } else {
-                            sendConsoleText('BitLocker info not available.', sessionid);
-                        }
-                    } else {
-                        sendConsoleText('Bitlocker info requires an elevated agent', sessionid);
+                    if (require('win-volumes').volumes_promise != null) {
+                        var p = require('win-volumes').volumes_promise();
+                        p.then(function (res) { sendConsoleText(JSON.stringify(cleanGetBitLockerVolumeInfo(res), null, 1), this.session); });
                     }
-                } else {
-                    sendConsoleText('BitLocker is only supported on Windows.', sessionid);
                 }
                 break;
             case 'dhcp': // This command is only supported on Linux, this is because Linux does not give us the DNS suffix for each network adapter independently so we have to ask the DHCP server.
@@ -5017,10 +4958,10 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 break;
             case 'agentupdateex':
                 // Perform an direct agent update without requesting any information from the server, this should not typically be used.
-                if (args['_'].length == 1) {
-                    if (args['_'][0].startsWith('https://')) { agentUpdate_Start(args['_'][0], { sessionid: sessionid }); } else { response = "Usage: agentupdateex https://server/path"; }
+                if (args['_'].length == 2) {
+                    if (args['_'][0].startsWith('https://') && /^[0-9a-f]{96}$/i.test(args['_'][1])) { agentUpdate_Start(args['_'][0], { sessionid: sessionid, hash: args['_'][1] }); } else { response = "Usage: agentupdateex https://server/path SHA384"; }
                 } else {
-                    agentUpdate_Start(null, { sessionid: sessionid });
+                    response = "Usage: agentupdateex https://server/path SHA384";
                 }
                 break;
             case 'errorlog':
@@ -5632,9 +5573,6 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 if (process.platform == 'win32') {
                     // Windows Command: "wmic /Namespace:\\root\SecurityCenter2 Path AntiVirusProduct get /FORMAT:CSV"
                     response = JSON.stringify(require('win-info').av(), null, 1);
-                } else if (process.platform == 'linux') {
-                    require('linux-info').av(function (r) { sendConsoleText(JSON.stringify(r, null, 1), sessionid); });
-                    response = null;
                 } else {
                     response = 'Not supported on the platform';
                 }
@@ -5650,53 +5588,23 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
             case 'log':
                 if (args['_'].length != 1) { response = 'Proper usage: log "sample text"'; } else { MeshServerLog(args['_'][0]); response = 'ok'; }
                 break;
-            case 'getclip':
-                if (require('MeshAgent').isService) {
-                    require('clipboard').dispatchRead().then(function (str) { sendConsoleText(str, sessionid); });
-                } else {
-                    require('clipboard').read().then(function (str) { sendConsoleText(str, sessionid); });
-                }
+            case 'getclip': {
+                var consoleClipboardFailure = function (error) { sendConsoleText('Clipboard failed: ' + error, sessionid); };
+                try {
+                    var consoleClipboardRead = require('MeshAgent').isService ? require('clipboard').dispatchRead() : require('clipboard').read();
+                    consoleClipboardRead.then(function (str) { sendConsoleText(str, sessionid); }, consoleClipboardFailure);
+                } catch (error) { consoleClipboardFailure(error); }
                 break;
+            }
             case 'setclip': {
-                if (pendingSetClip) {
-                    response = 'Busy';
-                } else if (args['_'].length != 1) {
-                    response = 'Proper usage: setclip "sample text"';
-                } else {
-                    if (require('MeshAgent').isService) {
-                        if (process.platform != 'win32') {
-                            require('clipboard').dispatchWrite(args['_'][0]);
-                        }
-                        else {
-                            var clipargs = args['_'][0];
-                            var uid = require('user-sessions').consoleUid();
-                            var user = require('user-sessions').getUsername(uid);
-                            var domain = require('user-sessions').getDomain(uid);
-                            user = (domain + '\\' + user);
-
-                            if (this._dispatcher) { this._dispatcher.close(); }
-                            this._dispatcher = require('win-dispatcher').dispatch({ user: user, modules: [{ name: 'clip-dispatch', script: "module.exports = { dispatch: function dispatch(val) { require('clipboard')(val); process.exit(); } };" }], launch: { module: 'clip-dispatch', method: 'dispatch', args: [clipargs] } });
-                            this._dispatcher.parent = this;
-                            //require('events').setFinalizerMetadata.call(this._dispatcher, 'clip-dispatch');
-                            pendingSetClip = true;
-                            this._dispatcher.on('connection', function (c) {
-                                this._c = c;
-                                this._c.root = this.parent;
-                                this._c.on('end', function ()
-                                {
-                                    pendingSetClip = false;
-                                    try { this.root._dispatcher.close(); } catch (ex) { }
-                                    this.root._dispatcher = null;
-                                    this.root = null;
-                                });
-                            });
-                        }
-                        response = 'Setting clipboard to: "' + args['_'][0] + '"';
-                    }
-                    else {
-                        require('clipboard')(args['_'][0]); response = 'Setting clipboard to: "' + args['_'][0] + '"';
-                    }
-                }
+                if (args['_'].length != 1) { response = 'Proper usage: setclip "sample text"'; break; }
+                var consoleClipboardWriteSuccess = function () { sendConsoleText('Clipboard set.', sessionid); };
+                var consoleClipboardWriteFailure = function (error) { sendConsoleText('Clipboard failed: ' + error, sessionid); };
+                try {
+                    var consoleClipboardWrite = require('MeshAgent').isService ? require('clipboard').dispatchWrite(args['_'][0]) : require('clipboard')(args['_'][0]);
+                    if (consoleClipboardWrite && typeof consoleClipboardWrite.then == 'function') { consoleClipboardWrite.then(consoleClipboardWriteSuccess, consoleClipboardWriteFailure); }
+                    else { consoleClipboardWriteSuccess(); }
+                } catch (error) { consoleClipboardWriteFailure(error); }
                 break;
             }
             case 'openurl': {
@@ -5705,6 +5613,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 break;
             }
             case 'openfile': {
+                if (rights != 0xFFFFFFFF && (rights & 131072) == 0) { response = 'Access denied.'; break; }
                 if (args['_'].length != 1) { response = 'Proper usage: openfile (filepath)'; } // Display usage
                 else { if (openFileOnDesktop(args['_'][0]) == null) { response = 'Failed.'; } else { response = 'Success.'; } }
                 break;
@@ -5806,7 +5715,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 if (args['_'].length < 1) {
                     response = 'Proper usage: eval "JavaScript code"'; // Display correct command usage
                 } else {
-                    var evalResult = mesh.eval(args['_'][0]); try { response = JSON.stringify(evalResult); } catch (ex) { response = null; } // This can only be run by trusted administrator.
+                    response = JSON.stringify(mesh.eval(args['_'][0])); // This can only be run by trusted administrator.
                 }
                 break;
             }
@@ -5856,31 +5765,8 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                     if (results == null) {
                         sendConsoleText(err, this.sessionid);
                     } else {
-                        // Send the full data to the server first
+                        sendConsoleText(JSON.stringify(results, null, 1), this.sessionid);
                         mesh.SendCommand({ action: 'sysinfo', sessionid: this.sessionid, data: results });
-                        // Mask BitLocker recovery keys for non-admins in the console output only and optionally replace codes with strings
-                        pretty = !(args['_'].length > 0 && args['_'][0] == 'raw');
-                        const encMethod = { 0: '', 1: "AES-128 with diffuser", 2: "AES-256 with diffuser", 3: 'AES-128', 4: 'AES-256', 5: "Hardware encryption", 6: 'XTS-AES-128', 7: 'XTS-AES-256' };
-                        const driveType = { 0: "Unknown", 1: "No Root Directory", 2: "Removable Disk", 3: "Local Disk", 4: "Network Drive", 5: "Compact Disc", 6: "RAM Disk" };
-                        const conversionStatus = { "-1": "Unknown", 1: "Fully Encrypted", 2: "Encryption In Progress", 3: "Decryption In Progress", 4: "Encryption Paused", 5: "Decryption Paused" };
-                        const protectionStatus = { 0: "Off", 1: "On", 2: "Locked"};
-                        var replacer = function (k, val) {
-                            if ( k === 'recoveryPassword' && rights != MESHRIGHT_ADMIN) { return '(Only admins)'; }
-                            else if (pretty && typeof val === 'number') {
-                                switch (k) {
-                                    case 'encryptionMethod':
-                                        return (val >= 1 && val <= 7)  ? encMethod[val] : val;
-                                    case 'protectionStatus':
-                                        return (val >= 0 && val <= 2) ? protectionStatus[val] : val;
-                                    case 'volumeStatus':
-                                        return (val >= -1 && val <= 5) ? conversionStatus[val] : val;
-                                    case 'dType':
-                                        return (val >= 1 && val <= 6) ? driveType[val]: val;
-                                }
-                            }
-                            return val;
-                        };
-                        sendConsoleText(JSON.stringify(results, replacer, 1), this.sessionid);
                     }
                 });
                 break;
@@ -5906,6 +5792,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                     var pr = require('os').name();
                     pr.sessionid = sessionid;
                     pr.then(function (v) {
+                        if (process.platform == 'win32') { terminal_windows_prepare_modules(); }
                         sendConsoleText("OS: " + v + (process.platform == 'win32' ? (require('win-virtual-terminal').supported ? ' [ConPTY: YES]' : ' [ConPTY: NO]') : ''), this.sessionid);
                     });
                 }
@@ -5939,16 +5826,15 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 break;
             }
             case 'dbkeys': { // Return all data store keys
-                if (db == null) { response = 'Database not accessible.'; break; }
                 response = JSON.stringify(db.Keys);
                 break;
             }
             case 'dbget': { // Return the data store value for a given key
                 if (db == null) { response = 'Database not accessible.'; break; }
                 if (args['_'].length != 1) {
-                    response = 'Proper usage: dbget (key)';
+                    response = 'Proper usage: dbget (key)'; // Display the value for a given database key
                 } else {
-                    response = (db.Get(args['_'][0]) != null ? db.Get(args['_'][0]) : 'Key not found');
+                    response = db.Get(args['_'][0]);
                 }
                 break;
             }
@@ -5958,26 +5844,14 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                     response = 'Proper usage: dbset (key) (value)'; // Set a database key
                 } else {
                     var r = db.Put(args['_'][0], args['_'][1]);
-                    response = r == 0 ? 'Key set' : 'Failed to set key';
-                }
-                break;
-            }
-            case 'dbdelete': { // Delete a data store key
-                if (db == null) { response = 'Database not accessible.'; break; }
-                if (args['_'].length != 1) {
-                    response = 'Proper usage: dbdelete (key)'; // Delete a database key
-                } else {
-                    var existed = db.Get(args['_'][0]) != null;
-                    db.Delete(args['_'][0]); // new agent with Delete fix
-                    db.Delete('0/' + args['_'][0]); // old agent without Delete fix
-                    response = existed ? 'Key deleted' : 'Key not found';
+                    response = 'Key set: ' + r;
                 }
                 break;
             }
             case 'dbcompact': { // Compact the data store
                 if (db == null) { response = 'Database not accessible.'; break; }
                 var r = db.Compact();
-                response = r == 0 ? 'Database compacted' : 'Compact failed';
+                response = 'Database compacted: ' + r;
                 break;
             }
             case 'httpget': {
@@ -6123,7 +5997,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 var interfaces = require('os').networkInterfaces();
                 if (process.platform == 'win32') {
                     try {
-                        var ret = require('win-wmi-fixed').query('ROOT\\CIMV2', 'SELECT InterfaceIndex,NetConnectionID,Speed FROM Win32_NetworkAdapter', ['InterfaceIndex','NetConnectionID','Speed']);
+                        var ret = require('win-wmi').query('ROOT\\CIMV2', 'SELECT InterfaceIndex,NetConnectionID,Speed FROM Win32_NetworkAdapter', ['InterfaceIndex','NetConnectionID','Speed']);
                         if (ret[0]) {
                             var speedMap = {};
                             for (var i = 0; i < ret.length; i++) speedMap[ret[i].InterfaceIndex] = ret[i].Speed;
@@ -6226,6 +6100,14 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 response = JSON.stringify(services, null, 1);
                 break;
             }
+            case 'getscript': {
+                if (args['_'].length != 1) {
+                    response = "Proper usage: getscript [scriptNumber].";
+                } else {
+                    mesh.SendCommand({ action: 'getScript', type: args['_'][0] });
+                }
+                break;
+            }
             case 'diagnostic':
                 {
                     if (!mesh.DAIPC.listening) {
@@ -6323,6 +6205,14 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 }
                 break;
             }
+            case 'umhctl': {
+                try {
+                    response = require('umhctl').consoleaction(args, rights, sessionid, mesh);
+                } catch (ex) {
+                    response = 'umhctl unavailable: ' + ex;
+                }
+                break;
+            }
             case 'plugin': {
                 if (typeof args['_'][0] == 'string') {
                     try {
@@ -6339,393 +6229,17 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 break;
             }
             case 'installedapps': {
-                if (process.platform == 'win32') {
-                    try {
-                        sendConsoleText('Fetching installed apps, please wait...', sessionid);
-                        var iaPr = require('win-info').installedApps();
-                        iaPr.sessionid = sessionid;
-                        iaPr.then(function (apps) {
-                            if (apps.length === 0) { sendConsoleText('No installed apps found.', this.sessionid); return; }
-                            var lines = ['Installed Apps (' + apps.length + '):'];
-                            for (var i = 0; i < apps.length; i++) {
-                                var a = apps[i];
-                                var line = '  [' + (i + 1) + '] ' + a.name;
-                                if (a.version) line += ' (v' + a.version + ')';
-                                if (a.publisher) line += ' - ' + a.publisher;
-                                if (a.date) line += ' [Installed: ' + a.date + ']';
-                                if (a.location) line += '\n       Location: ' + a.location;
-                                lines.push(line);
-                            }
-                            sendConsoleText(lines.join('\n'), this.sessionid);
-                        }, function (e) { sendConsoleText('Error: ' + e, this.sessionid); });
-                    } catch (ex) {
-                        sendConsoleText('Module win-info error: ' + ex, sessionid);
-                    }
-                } else if (process.platform == 'linux') {
-                    try {
-                        sendConsoleText('Fetching installed apps, please wait...', sessionid);
-                        var iaLPr = require('linux-info').packages();
-                        iaLPr.sessionid = sessionid;
-                        iaLPr.then(function (apps) {
-                            if (apps.length === 0) { sendConsoleText('No installed apps found.', this.sessionid); return; }
-                            var lines = ['Installed Apps (' + apps.length + '):'];
-                            for (var i = 0; i < apps.length; i++) {
-                                var a = apps[i];
-                                var line = '  [' + (i + 1) + '] ' + a.name;
-                                if (a.version) line += ' (v' + a.version + ')';
-                                if (a.arch) line += ' [' + a.arch + ']';
-                                if (a.publisher) line += ' - ' + a.publisher;
-                                if (a.date) line += ' [Installed: ' + a.date + ']';
-                                if (a.location) line += ' (' + a.location + ')';
-                                lines.push(line);
-                            }
-                            sendConsoleText(lines.join('\n'), this.sessionid);
-                        }, function (e) { sendConsoleText('Error: ' + e, this.sessionid); });
-                    } catch (ex) {
-                        sendConsoleText('Module linux-info error: ' + ex, sessionid);
-                    }
-                } else if (process.platform == 'darwin') {
-                    try {
-                        sendConsoleText('Fetching installed apps, please wait...', sessionid);
-                        var iaMPr = require('mac-info').apps();
-                        iaMPr.sessionid = sessionid;
-                        iaMPr.then(function (apps) {
-                            if (apps.length === 0) { sendConsoleText('No installed apps found.', this.sessionid); return; }
-                            var lines = ['Installed Apps (' + apps.length + '):'];
-                            for (var i = 0; i < apps.length; i++) {
-                                var a = apps[i];
-                                var line = '  [' + (i + 1) + '] ' + a.name;
-                                if (a.version) line += ' (v' + a.version + ')';
-                                if (a.arch) line += ' [' + a.arch + ']';
-                                if (a.publisher) line += ' - ' + a.publisher;
-                                if (a.date) line += ' [Installed: ' + a.date + ']';
-                                if (a.location) line += ' (' + a.location + ')';
-                                lines.push(line);
-                            }
-                            sendConsoleText(lines.join('\n'), this.sessionid);
-                        }, function (e) { sendConsoleText('Error: ' + e, this.sessionid); });
-                    } catch (ex) {
-                        sendConsoleText('Module mac-info error: ' + ex, sessionid);
-                    }
-                } else {
-                    sendConsoleText('Installed apps not supported on this platform.', sessionid);
+                if(process.platform == 'win32'){
+                    require('win-info').installedApps().then(function (apps){ sendConsoleText(JSON.stringify(apps,null,1)); });
                 }
                 break;
             }
             case 'installedstoreapps': {
-                if (process.platform == 'win32') {
-                    try {
-                        sendConsoleText('Fetching installed Store apps, please wait...', sessionid);
-                        var isaPr = require('win-info').installedStoreApps();
-                        isaPr.sessionid = sessionid;
-                        isaPr.then(function (apps) {
-                            if (!apps || apps.length === 0) { sendConsoleText('No Store apps found.', this.sessionid); return; }
-                            var lines = ['Installed Store Apps (' + apps.length + '):'];
-                            for (var i = 0; i < apps.length; i++) {
-                                var a = apps[i];
-                                var line = '  [' + (i + 1) + '] ' + a.name;
-                                if (a.version) line += ' (v' + a.version + ')';
-                                if (a.publisher) line += ' - ' + a.publisher;
-                                if (a.scope) line += ' [' + a.scope + ']';
-                                if (a.packageFullName) line += '\n       Package: ' + a.packageFullName;
-                                lines.push(line);
-                            }
-                            sendConsoleText(lines.join('\n'), this.sessionid);
-                        }, function (e) { sendConsoleText('Error: ' + e, this.sessionid); });
-                    } catch (ex) {
-                        sendConsoleText('Module win-info error: ' + ex, sessionid);
-                    }
-                } else {
-                    sendConsoleText('Installed Store Apps not supported on this platform.', sessionid);
-                }
-                break;
-            }
-            case 'winupdates': {
-                if (process.platform == 'win32') {
-                    try {
-                        sendConsoleText('Checking for pending updates, this may take up to 60 seconds...', sessionid);
-                        var wuPr = require('win-updates').getAvailableUpdates();
-                        wuPr.sessionid = sessionid;
-                        wuPr.then(function (updates) {
-                            if (updates.length === 0) { sendConsoleText('No pending updates.', this.sessionid); return; }
-                            var lines = ['Pending Updates (' + updates.length + '):'];
-                            for (var i = 0; i < updates.length; i++) {
-                                lines.push('  [' + (i + 1) + '] ' + updates[i].title + (updates[i].kbArticleIDs.length ? ' (' + updates[i].kbArticleIDs.join(', ') + ')' : '') + (updates[i].severity ? ' [' + updates[i].severity + ']' : ''));
-                            }
-                            sendConsoleText(lines.join('\n'), this.sessionid);
-                        }, function (e) { sendConsoleText('Error: ' + e, this.sessionid); });
-                    } catch (ex) { sendConsoleText('win-updates error: ' + ex, sessionid); }
-                } else { sendConsoleText('Windows updates not supported on this platform.', sessionid); }
-                break;
-            }
-            case 'winupdatesinstalled': {
-                if (process.platform == 'win32') {
-                    try {
-                        sendConsoleText('Checking installed updates, this may take up to 60 seconds...', sessionid);
-                        var wuiPr = require('win-updates').getInstalledUpdates();
-                        wuiPr.sessionid = sessionid;
-                        wuiPr.then(function (updates) {
-                            if (updates.length === 0) { sendConsoleText('No installed updates found.', this.sessionid); return; }
-                            var lines = ['Installed Updates (' + updates.length + '):'];
-                            for (var i = 0; i < updates.length; i++) {
-                                lines.push('  [' + (i + 1) + '] ' + updates[i].title + (updates[i].kbArticleIDs.length ? ' (' + updates[i].kbArticleIDs.join(', ') + ')' : ''));
-                            }
-                            sendConsoleText(lines.join('\n'), this.sessionid);
-                        }, function (e) { sendConsoleText('Error: ' + e, this.sessionid); });
-                    } catch (ex) { sendConsoleText('win-updates error: ' + ex, sessionid); }
-                } else { sendConsoleText('Windows updates not supported on this platform.', sessionid); }
-                break;
-            }
-            case 'winupdateshistory': {
-                if (process.platform == 'win32') {
-                    try {
-                        sendConsoleText('Fetching update history, this may take up to 60 seconds...', sessionid);
-                        var wuhPr = require('win-updates').getInstalledUpdateHistory();
-                        wuhPr.sessionid = sessionid;
-                        wuhPr.then(function (updates) {
-                            if (updates.length === 0) { sendConsoleText('No update history found.', this.sessionid); return; }
-                            var lines = ['Update History (' + updates.length + '):'];
-                            for (var i = 0; i < updates.length; i++) {
-                                lines.push('  [' + (i + 1) + '] ' + updates[i].title + (updates[i].kbArticleIDs.length ? ' (' + updates[i].kbArticleIDs.join(', ') + ')' : ''));
-                            }
-                            sendConsoleText(lines.join('\n'), this.sessionid);
-                        }, function (e) { sendConsoleText('Error: ' + e, this.sessionid); });
-                    } catch (ex) { sendConsoleText('win-updates error: ' + ex, sessionid); }
-                } else { sendConsoleText('Windows updates not supported on this platform.', sessionid); }
-                break;
-            }
-            case 'winupdatesdedup': {
-                if (process.platform == 'win32') {
-                    try {
-                        sendConsoleText('Fetching de-duplicated update history, this may take up to 60 seconds...', sessionid);
-                        var wudPr = require('win-updates').getInstalledUpdatesDeDuplicated();
-                        wudPr.sessionid = sessionid;
-                        wudPr.then(function (updates) {
-                            if (updates.length === 0) { sendConsoleText('No update history found.', this.sessionid); return; }
-                            var lines = ['Installed Updates De-duplicated (' + updates.length + '):'];
-                            for (var i = 0; i < updates.length; i++) {
-                                lines.push('  [' + (i + 1) + '] ' + updates[i].title + (updates[i].kbArticleIDs.length ? ' (' + updates[i].kbArticleIDs.join(', ') + ')' : ''));
-                            }
-                            sendConsoleText(lines.join('\n'), this.sessionid);
-                        }, function (e) { sendConsoleText('Error: ' + e, this.sessionid); });
-                    } catch (ex) { sendConsoleText('win-updates error: ' + ex, sessionid); }
-                } else { sendConsoleText('Windows updates not supported on this platform.', sessionid); }
-                break;
-            }
-            case 'uninstallapp': {
-                if (args['_'].length < 1) {
-                    response = "Usage: uninstallapp <base64-encoded-command>";
-                } else {
-                    var base64Cmd = args['_'][0];
-                    var uninstallCmd = '';
-                    try {
-                        var b = Buffer.from(base64Cmd, 'base64');
-                        var decoded = b.toString();
-                        var lc = decoded ? decoded.toLowerCase() : '';
-                        if (decoded && decoded.length > 0 && (lc.indexOf('msiexec') >= 0 || lc.indexOf('.exe') >= 0)) {
-                            uninstallCmd = decoded;
-                        } else {
-                            uninstallCmd = base64Cmd;
-                        }
-                    } catch (e) {
-                        uninstallCmd = base64Cmd;
-                    }
-                    if (!uninstallCmd || uninstallCmd.trim() === '' || uninstallCmd.trim() === '\\') {
-                        response = JSON.stringify({ success: false, error: 'No valid uninstall command available' });
-                        break;
-                    }
-                    var logDir = (process.env['ProgramData'] || 'C:\\ProgramData') + '\\MeshAgent';
-                    try { if (!require('fs').existsSync(logDir)) { require('fs').mkdirSync(logDir); } } catch (e) { }
-                    var logFile = logDir + '\\MeshAgent_Uninstall.log';
-                    var child_process = require('child_process');
-                    var cmdPath = process.env['windir'] + '\\system32\\cmd.exe';
-                    function writeLog(message, callback) {
-                        try {
-                            var timestamp = new Date().toISOString();
-                            var logLine = timestamp + ' | ' + message;
-                            logLine = logLine.replace(/"/g, '""').replace(/&/g, '^&').replace(/</g, '^<').replace(/>/g, '^>').replace(/\|/g, '^|');
-                            var logChild = child_process.execFile(cmdPath, ['cmd', '/c', 'echo ' + logLine + ' >> "' + logFile + '"'], { timeout: 5000 });
-                            logChild.on('exit', function() {
-                                if (callback) callback();
-                            });
-                        } catch (e) {
-                            if (callback) callback();
-                        }
-                    }
-                    try {
-                        writeLog('UNINSTALL START - Command: ' + uninstallCmd.replace(/\\/g, '/'));
-                        var originalCmd = uninstallCmd;
-                        if (uninstallCmd.toLowerCase().indexOf('msiexec') >= 0) {
-                            uninstallCmd = uninstallCmd.replace(/\/I\s*(\{[^}]+\})/gi, '/X $1');
-                            uninstallCmd = uninstallCmd.replace(/\/q[nbrf]?/gi, '');
-                            if (uninstallCmd.indexOf('/QN') < 0) {
-                                uninstallCmd = uninstallCmd + ' /QN /norestart';
-                            }
-                        } else {
-                            if (uninstallCmd.toLowerCase().indexOf('/s') < 0) {
-                                uninstallCmd = uninstallCmd + ' /S /silent /SILENT /VERYSILENT /quiet /norestart';
-                            }
-                        }
-                        uninstallCmd = uninstallCmd.replace(/\s+/g, ' ').trim();
-                        writeLog('UNINSTALL EXEC - Modified: ' + uninstallCmd.replace(/\\/g, '/'));
-                        var child = child_process.execFile(cmdPath, ['cmd', '/c', uninstallCmd], { timeout: 300000 });
-                        child.stdout.str = '';
-                        child.stderr.str = '';
-                        child._sessionid = sessionid;
-                        child._cmd = uninstallCmd;
-                        child._originalCmd = originalCmd;
-                        child._writeLog = writeLog;
-                        child.stdout.on('data', function(c) { this.str += c.toString(); });
-                        child.stderr.on('data', function(c) { this.str += c.toString(); });
-                        child.on('exit', function(code) {
-                            var success = (code === 0 || code === null || code === 3010);
-                            var status = success ? 'SUCCESS' : 'FAILED';
-                            child._writeLog('UNINSTALL ' + status + ' - ExitCode: ' + code);
-                            var result = { 
-                                success: success, 
-                                exitCode: code,
-                                command: child._cmd
-                            };
-                            if (child.stdout.str) result.stdout = child.stdout.str.trim().substring(0, 500);
-                            if (child.stderr.str) result.stderr = child.stderr.str.trim().substring(0, 500);
-                            sendConsoleText(JSON.stringify(result), child._sessionid);
-                        });
-                        response = JSON.stringify({ status: 'Silent uninstall started', command: uninstallCmd });
-                    } catch (ex) {
-                        writeLog('UNINSTALL ERROR - ' + ex.toString());
-                        response = JSON.stringify({ error: ex.toString() });
-                    }
-                }
-                break;
-            }
-            case 'uninstallstoreapp': {
-                if (args['_'].length < 1) {
-                    response = "Usage: uninstallstoreapp <PackageName>";
-                } else {
-                    var packageName = args['_'][0];
-                    var logDir = (process.env['ProgramData'] || 'C:\\ProgramData') + '\\MeshAgent';
-                    try { if (!require('fs').existsSync(logDir)) { require('fs').mkdirSync(logDir); } } catch (e) { }
-                    var logFile = logDir + '\\MeshAgent_StoreUninstall.log';
-                    try {
-                        var psPath = (process.env['SystemRoot'] || 'C:\\Windows') + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
-                        var child_process = require('child_process');
-                        var safePackageName = packageName.replace(/'/g, "''");
-                        var completionMarker = '###DONE###' + Date.now();
-                        var child = child_process.execFile(psPath, ['powershell', '-NoProfile', '-NoLogo', '-Command', '-'], {});
-                        child.stdout.str = '';
-                        child.stderr.str = '';
-                        child._sessionid = sessionid;
-                        child._packageName = packageName;
-                        child._marker = completionMarker;
-                        child._completed = false;
-                        child._logFile = logFile;
-                        child.stdout.on('data', function(c) { 
-                            this.str += c.toString();
-                            if (!child._completed && this.str.indexOf(child._marker) >= 0) {
-                                child._completed = true;
-                                var result = this.str.split(child._marker)[0].trim();
-                                if (result === 'NO_MATCH' || result === '') {
-                                    sendConsoleText(JSON.stringify({ 
-                                        success: false, 
-                                        error: 'No matching packages found',
-                                        package: child._packageName
-                                    }), child._sessionid);
-                                } else if (result.indexOf('REMOVED') >= 0 || result.indexOf('DEPROVISIONED') >= 0) {
-                                    var items = result.split('|').filter(function(x) { return x.length > 0; });
-                                    sendConsoleText(JSON.stringify({ 
-                                        success: true, 
-                                        message: 'Store app removed',
-                                        results: items
-                                    }), child._sessionid);
-                                } else if (result.indexOf('FAILED') >= 0) {
-                                    sendConsoleText(JSON.stringify({ 
-                                        success: false, 
-                                        error: 'Removal failed',
-                                        details: result.split('|')
-                                    }), child._sessionid);
-                                } else {
-                                    sendConsoleText(JSON.stringify({ output: result }), child._sessionid);
-                                }
-                            }
-                        });
-                        child.stderr.on('data', function(c) { this.str += c.toString(); });
-                        var script = [
-                            "$LogFile = '" + logFile + "'",
-                            "function Write-Log { param([string]$Message); $LogLine = \"$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $Message\"; Add-Content -Path $LogFile -Value $LogLine -ErrorAction SilentlyContinue }",
-                            "",
-                            "Write-Log 'STORE UNINSTALL START: " + safePackageName + "'",
-                            "Write-Log \"Running as: $([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)\"",
-                            "",
-                            "$ErrorActionPreference = 'SilentlyContinue'",
-                            "$results = @()",
-                            "",
-                            "# Packages suchen",
-                            "$pkgs = Get-AppxPackage -AllUsers -Name '*" + safePackageName + "*'",
-                            "Write-Log \"Found (AllUsers): $($pkgs.Count) packages\"",
-                            "",
-                            "if (-not $pkgs) {",
-                            "    $pkgs = Get-AppxPackage -Name '*" + safePackageName + "*'",
-                            "    Write-Log \"Found (CurrentUser): $($pkgs.Count) packages\"",
-                            "}",
-                            "",
-                            "foreach ($p in $pkgs) {",
-                            "    Write-Log \"Removing: $($p.PackageFullName)\"",
-                            "    try {",
-                            "        Remove-AppxPackage -Package $p.PackageFullName -AllUsers -ErrorAction Stop",
-                            "        Write-Log 'SUCCESS: Removed with -AllUsers'",
-                            "        $results += 'REMOVED_ALLUSERS:' + $p.PackageFullName",
-                            "    } catch {",
-                            "        Write-Log \"FAILED -AllUsers: $($_.Exception.Message)\"",
-                            "        try {",
-                            "            Remove-AppxPackage -Package $p.PackageFullName -ErrorAction Stop",
-                            "            Write-Log 'SUCCESS: Removed'",
-                            "            $results += 'REMOVED:' + $p.PackageFullName",
-                            "        } catch {",
-                            "            Write-Log \"FAILED: $($_.Exception.Message)\"",
-                            "            $results += 'FAILED:' + $p.PackageFullName + ':' + $_.Exception.Message",
-                            "        }",
-                            "    }",
-                            "}",
-                            "",
-                            "# Provisioned Packages entfernen",
-                            "$prov = Get-AppxProvisionedPackage -Online 2>$null | Where-Object { $_.PackageName -like '*" + safePackageName + "*' }",
-                            "Write-Log \"Found provisioned: $($prov.Count) packages\"",
-                            "",
-                            "foreach ($pr in $prov) {",
-                            "    Write-Log \"Deprovisioning: $($pr.DisplayName)\"",
-                            "    try {",
-                            "        Remove-AppxProvisionedPackage -Online -PackageName $pr.PackageName -ErrorAction Stop | Out-Null",
-                            "        Write-Log 'SUCCESS: Deprovisioned'",
-                            "        $results += 'DEPROVISIONED:' + $pr.DisplayName",
-                            "    } catch {",
-                            "        Write-Log \"FAILED: $($_.Exception.Message)\"",
-                            "        $results += 'DEPROV_FAILED:' + $pr.DisplayName",
-                            "    }",
-                            "}",
-                            "",
-                            "if ($results.Count -eq 0) {",
-                            "    Write-Log 'NO_MATCH'",
-                            "    'NO_MATCH'",
-                            "} else {",
-                            "    $output = $results -join '|'",
-                            "    Write-Log \"RESULT: $output\"",
-                            "    $output",
-                            "}",
-                            "'" + completionMarker + "'",
-                            "exit"
-                        ].join("\r\n");
-                        child.stdin.write(script + "\r\n");
-                        setTimeout(function() {
-                            if (!child._completed) {
-                                sendConsoleText(JSON.stringify({ error: 'Timeout after 2 minutes' }), child._sessionid);
-                            }
-                        }, 120000);
-                        response = JSON.stringify({ status: 'Store app removal started', package: packageName });
-                    } catch (ex) {
-                        var logErr = new Date().toISOString() + ' - STORE UNINSTALL ERROR: ' + ex.toString() + '\r\n';
-                        try { require('fs').appendFileSync(logFile, logErr); } catch (e) { }
-                        response = JSON.stringify({ error: ex.toString() });
-                    }
+                if(process.platform == 'win32'){
+                    var apps = require('win-info').installedStoreApps();
+                    if (apps[0]) {
+                        sendConsoleText(JSON.stringify(apps,null,1));
+                    };
                 }
                 break;
             }
@@ -6990,33 +6504,25 @@ function bsd_execv(name, agentfilename, sessionid) {
     sendAgentMessage('Self Update failed because execv() failed', 3);
 }
 
-function windows_execve(name, agentfilename, sessionid) {
-    var libc;
-    try {
-        libc = require('_GenericMarshal').CreateNativeProxy('msvcrt.dll');
-        libc.CreateMethod('_wexecve');
-    } catch (ex) {
-        sendConsoleText('Self Update failed because msvcrt.dll is missing', sessionid);
-        sendAgentMessage('Self Update failed because msvcrt.dll is missing', 3);
-        return;
-    }
-    
-    var cmd = require('_GenericMarshal').CreateVariable(process.env['windir'] + '\\system32\\cmd.exe', { wide: true });
-    var args = require('_GenericMarshal').CreateVariable(3 * require('_GenericMarshal').PointerSize);
-    var arg1 = require('_GenericMarshal').CreateVariable('cmd.exe', { wide: true });
-    var arg2 = require('_GenericMarshal').CreateVariable('/C net stop "' + name + '" & "' + process.cwd() + agentfilename + '.update.exe" -b64exec ' + 'dHJ5CnsKICAgIHZhciBzZXJ2aWNlTG9jYXRpb24gPSBwcm9jZXNzLmFyZ3YucG9wKCkudG9Mb3dlckNhc2UoKTsKICAgIHJlcXVpcmUoJ3Byb2Nlc3MtbWFuYWdlcicpLmVudW1lcmF0ZVByb2Nlc3NlcygpLnRoZW4oZnVuY3Rpb24gKHByb2MpCiAgICB7CiAgICAgICAgZm9yICh2YXIgcCBpbiBwcm9jKQogICAgICAgIHsKICAgICAgICAgICAgaWYgKHByb2NbcF0ucGF0aCAmJiAocHJvY1twXS5wYXRoLnRvTG93ZXJDYXNlKCkgPT0gc2VydmljZUxvY2F0aW9uKSkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgcHJvY2Vzcy5raWxsKHByb2NbcF0ucGlkKTsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICBwcm9jZXNzLmV4aXQoKTsKICAgIH0pOwp9CmNhdGNoIChlKQp7CiAgICBwcm9jZXNzLmV4aXQoKTsKfQ==' +
-        ' "' + process.execPath + '" & copy "' + process.cwd() + agentfilename + '.update.exe" "' + process.execPath + '" & net start "' + name + '" & erase "' + process.cwd() + agentfilename + '.update.exe"', { wide: true });
-
-    arg1.pointerBuffer().copy(args.toBuffer());
-    arg2.pointerBuffer().copy(args.toBuffer(), require('_GenericMarshal').PointerSize);
-
-    libc._wexecve(cmd, args, 0);
+function agentUpdate_ReportFailure() {
+    try { require('MeshAgent').SendCommand({ action: 'agentupdatefailed' }); } catch (ex) { }
 }
 
 // Start a JavaScript based Agent Self-Update
 function agentUpdate_Start(updateurl, updateoptions) {
     // If this value is null
     var sessionid = (updateoptions != null) ? updateoptions.sessionid : null; // If this is null, messages will be broadcast. Otherwise they will be unicasted
+    if (process.platform == 'win32') {
+        sendConsoleText('Windows JavaScript self-update is disabled; native binary update is handled by the agent control channel.', sessionid);
+        sendAgentMessage('Windows JavaScript self-update is disabled; native binary update is handled by the agent control channel.', 3);
+        return;
+    }
+    if (updateoptions == null || typeof updateoptions.hash != 'string' || !/^[0-9a-f]{96}$/i.test(updateoptions.hash)) {
+        sendConsoleText('Self Update refused because a valid SHA-384 hash was not supplied.', sessionid);
+        sendAgentMessage('Self Update refused because a valid SHA-384 hash was not supplied.', 3);
+        agentUpdate_ReportFailure();
+        return;
+    }
 
     // If the url starts with *, switch it to use the same protoco, host and port as the control channel.
     if (updateurl != null) {
@@ -7083,78 +6589,120 @@ function agentUpdate_Start(updateurl, updateoptions) {
                 sendConsoleText('Self Update failed, because there was a problem trying to download the update from ' + updateurl, sessionid);
                 sendAgentMessage('Self Update failed, because there was a problem trying to download the update from ' + updateurl, 3);
                 agentUpdate_Start._selfupdate = null;
+                agentUpdate_ReportFailure();
             });
             agentUpdate_Start._selfupdate.on('response', function (img) {
-                this._file = require('fs').createWriteStream(agentfilename + (process.platform == 'win32' ? '.update.exe' : '.update'), { flags: 'wb' });
+                if (img.statusCode != 200) {
+                    sendConsoleText('Self Update failed because the update server returned HTTP status ' + img.statusCode + '.', sessionid);
+                    sendAgentMessage('Self Update failed because the update server returned HTTP status ' + img.statusCode + '.', 3);
+                    try { img.resume(); } catch (ex) { }
+                    agentUpdate_Start._selfupdate = null;
+                    agentUpdate_ReportFailure();
+                    return;
+                }
+                var self = this;
+                this._fileClosed = false;
+                this._downloadFailed = false;
+                this._verifiedHash = null;
+                var stagedUpdatePath = process.execPath + '.update';
+                try { this._file = require('fs').createWriteStream(stagedUpdatePath, { flags: 'wb' }); }
+                catch (openError) {
+                    sendConsoleText('Self Update failed while opening the staged update: ' + openError, sessionid);
+                    sendAgentMessage('Self Update failed while opening the staged update.', 3);
+                    agentUpdate_Start._selfupdate = null;
+                    agentUpdate_ReportFailure();
+                    return;
+                }
                 this._filehash = require('SHA384Stream').create();
+                this._file.on('error', function (e) {
+                    if (self._downloadFailed) { return; }
+                    self._downloadFailed = true;
+                    sendConsoleText('Self Update failed while writing the staged update: ' + e, sessionid);
+                    sendAgentMessage('Self Update failed while writing the staged update.', 3);
+                    try { require('fs').unlinkSync(stagedUpdatePath); } catch (ex) { }
+                    agentUpdate_Start._selfupdate = null;
+                    agentUpdate_ReportFailure();
+                });
+                this._file.on('close', function () {
+                    self._fileClosed = true;
+                    if (self._downloadFailed) { try { require('fs').unlinkSync(stagedUpdatePath); } catch (ex) { } return; }
+                    if (!self._downloadFailed && self._verifiedHash != null) {
+                        var verifiedHash = self._verifiedHash;
+                        self._verifiedHash = null;
+                        self._filehash.emit('hash', verifiedHash);
+                    }
+                });
                 this._filehash.on('hash', function (h) {
-                    if (updateoptions != null && updateoptions.hash != null) {
-                        if (updateoptions.hash.toLowerCase() == h.toString('hex').toLowerCase()) {
-                            if (sessionid != null) { sendConsoleText('Download complete. HASH verified.', sessionid); }
-                        } else {
-                            agentUpdate_Start._retryCount++;
-                            sendConsoleText('Self Update FAILED because the downloaded agent FAILED hash check (' + agentUpdate_Start._retryCount + '), URL: ' + updateurl, sessionid);
-                            sendConsoleText(updateoptions.hash + " != " + h.toString('hex'));
-                            sendAgentMessage('Self Update FAILED because the downloaded agent FAILED hash check (' + agentUpdate_Start._retryCount + '), URL: ' + updateurl, 3);
-                            agentUpdate_Start._selfupdate = null;
+                    if (self._downloadFailed) { return; }
+                    if (updateoptions.hash.toLowerCase() == h.toString('hex').toLowerCase()) {
+                        if (sessionid != null) { sendConsoleText('Download complete. HASH verified.', sessionid); }
+                    } else {
+                        self._downloadFailed = true;
+                        agentUpdate_Start._retryCount++;
+                        sendConsoleText('Self Update FAILED because the downloaded agent FAILED hash check (' + agentUpdate_Start._retryCount + '), URL: ' + updateurl, sessionid);
+                        sendConsoleText(updateoptions.hash + " != " + h.toString('hex'));
+                        sendAgentMessage('Self Update FAILED because the downloaded agent FAILED hash check (' + agentUpdate_Start._retryCount + '), URL: ' + updateurl, 3);
+                        agentUpdate_Start._selfupdate = null;
 
-                            if (agentUpdate_Start._retryCount < 4) {
-                                // Retry the download again
-                                sendConsoleText('Self Update will try again in 60 seconds...', sessionid);
-                                agentUpdate_Start._timeout = setTimeout(agentUpdate_Start, 60000, updateurl, updateoptions);
-                            }
-                            else {
-                                sendConsoleText('Self Update giving up, too many failures...', sessionid);
-                                sendAgentMessage('Self Update giving up, too many failures...', 3);
-                            }
-                            return;
+                        if (agentUpdate_Start._retryCount < 4) {
+                            // Retry the download again
+                            sendConsoleText('Self Update will try again in 60 seconds...', sessionid);
+                            agentUpdate_Start._timeout = setTimeout(agentUpdate_Start, 60000, updateurl, updateoptions);
                         }
+                        else {
+                            sendConsoleText('Self Update giving up, too many failures...', sessionid);
+                            sendAgentMessage('Self Update giving up, too many failures...', 3);
+                            agentUpdate_ReportFailure();
+                        }
+                        return;
                     }
-                    else {
-                        sendConsoleText('Download complete. HASH=' + h.toString('hex'), sessionid);
-                    }
+                    if (!self._fileClosed) { self._verifiedHash = h; return; }
 
                     // Send an indication to the server that we got the update download correctly.
                     try { require('MeshAgent').SendCommand({ action: 'agentupdatedownloaded' }); } catch (ex) { }
 
-                    if (sessionid != null) { sendConsoleText('Updating and restarting agent...', sessionid); }
-                    if (process.platform == 'win32') {
-                        // Use _wexecve() equivalent to perform the update
-                        windows_execve(name, agentfilename, sessionid);
+                    if (process.platform != 'freebsd' && process.platform != 'linux') {
+                        sendConsoleText('Self Update disabled for this platform; native service lifecycle is required.', sessionid);
+                        sendAgentMessage('Self Update disabled for this platform; native service lifecycle is required.', 3);
+                        try { require('fs').unlinkSync(stagedUpdatePath); } catch (ex) { }
+                        agentUpdate_Start._selfupdate = null;
+                        agentUpdate_ReportFailure();
+                        return;
                     }
-                    else {
+
+                    if (sessionid != null) { sendConsoleText('Updating and restarting agent...', sessionid); }
+                    try {
                         var m = require('fs').statSync(process.execPath).mode;
-                        require('fs').chmodSync(process.cwd() + agentfilename + '.update', m);
+                        require('fs').chmodSync(stagedUpdatePath, m);
+                        // POSIX rename in the executable directory is atomic and leaves the
+                        // working binary intact if replacement fails.
+                        require('fs').renameSync(stagedUpdatePath, process.execPath);
+                    } catch (replaceError) {
+                        sendConsoleText('Self Update failed while atomically replacing the agent: ' + replaceError, sessionid);
+                        sendAgentMessage('Self Update failed while atomically replacing the agent.', 3);
+                        agentUpdate_Start._selfupdate = null;
+                        agentUpdate_ReportFailure();
+                        return;
+                    }
 
-                        // remove binary
-                        require('fs').unlinkSync(process.execPath);
-
-                        // copy update
-                        require('fs').copyFileSync(process.cwd() + agentfilename + '.update', process.execPath);
-                        require('fs').chmodSync(process.execPath, m);
-
-                        // erase update
-                        require('fs').unlinkSync(process.cwd() + agentfilename + '.update');
-
-                        switch (process.platform) {
-                            case 'freebsd':
-                                bsd_execv(name, agentfilename, sessionid);
-                                break;
-                            case 'linux':
-                                linux_execv(name, agentfilename, sessionid);
-                                break;
-                            default:
-                                try {
-                                    // restart service
-                                    var s = require('service-manager').manager.getService(name);
-                                    s.restart();
-                                }
-                                catch (ex) {
-                                    sendConsoleText('Self Update encountered an error trying to restart service', sessionid);
-                                    sendAgentMessage('Self Update encountered an error trying to restart service', 3);
-                                }
-                                break;
-                        }
+                    switch (process.platform) {
+                        case 'freebsd':
+                            bsd_execv(name, agentfilename, sessionid);
+                            break;
+                        case 'linux':
+                            linux_execv(name, agentfilename, sessionid);
+                            break;
+                        default:
+                            try {
+                                // restart service
+                                var s = require('service-manager').manager.getService(name);
+                                s.restart();
+                            }
+                            catch (ex) {
+                                sendConsoleText('Self Update encountered an error trying to restart service', sessionid);
+                                sendAgentMessage('Self Update encountered an error trying to restart service', 3);
+                            }
+                            break;
                     }
                 });
                 img.pipe(this._file);
@@ -7187,6 +6735,9 @@ function handleServerConnection(state) {
             sendAgentMessage("This is an old agent version, consider updating.", 3, 117);
         }
 
+        var oldNodeId = db.Get('OldNodeId');
+        if (oldNodeId != null) { mesh.SendCommand({ action: 'mc1migration', oldnodeid: oldNodeId }); }
+
         // Send SMBios tables if present
         if (SMBiosTablesRaw != null) { mesh.SendCommand({ action: 'smbios', value: SMBiosTablesRaw }); }
 
@@ -7213,217 +6764,6 @@ function handleServerConnection(state) {
     broadcastToRegisteredApps({ cmd: 'serverstate', value: meshServerConnectionState, url: require('MeshAgent').ConnectedServer });
 }
 
-function getProbableMainLanIp() {
-    if (process.platform != 'win32') return null;
-
-    function str(v) {
-        if (v == null) return '';
-        try { return String(v); } catch (ex) { return ''; }
-    }
-
-    function intVal(v, d) {
-        var x;
-        try { x = parseInt(str(v)); } catch (ex) { x = NaN; }
-        if (isNaN(x)) return d;
-        return x;
-    }
-
-    function isIPv4(ip) {
-        var p, i, n;
-
-        ip = str(ip);
-        if (ip == '') return false;
-        if (ip == '0.0.0.0') return false;
-        if (ip.indexOf(':') >= 0) return false;
-        if (ip.indexOf('169.254.') == 0) return false;
-        if (ip.indexOf('127.') == 0) return false;
-
-        p = ip.split('.');
-        if (p.length != 4) return false;
-
-        for (i = 0; i < 4; i++) {
-            if (p[i] == '') return false;
-            n = parseInt(p[i]);
-            if (isNaN(n)) return false;
-            if ((n < 0) || (n > 255)) return false;
-        }
-
-        return true;
-    }
-
-    function hasAnyValue(v) {
-        var i;
-
-        if (v == null) return false;
-
-        if (typeof v == 'string') {
-            return (v != '');
-        }
-
-        if (typeof v == 'number') {
-            return true;
-        }
-
-        // Duktape/WMI may expose arrays or array-like objects.
-        try {
-            if (v.length != null) {
-                for (i = 0; i < v.length; i++) {
-                    if (str(v[i]) != '') return true;
-                }
-                return false;
-            }
-        } catch (ex) { }
-
-        return (str(v) != '');
-    }
-
-    function firstIPv4(v) {
-        var i, s;
-
-        if (v == null) return null;
-
-        if (typeof v == 'string') {
-            return isIPv4(v) ? v : null;
-        }
-
-        try {
-            if (v.length != null) {
-                for (i = 0; i < v.length; i++) {
-                    s = str(v[i]);
-                    if (isIPv4(s)) return s;
-                }
-            }
-        } catch (ex) { }
-
-        s = str(v);
-        if (isIPv4(s)) return s;
-
-        return null;
-    }
-
-    function isUpAdapter(a) {
-        var op, media;
-
-        if (a == null) return true;
-
-        // InterfaceOperationalStatus commonly has 1 = Up.
-        // But do not hard-fail unknown values; WMI support varies.
-        op = intVal(a.InterfaceOperationalStatus, -1);
-        if ((op != -1) && (op != 1)) return false;
-
-        // MediaConnectState commonly has 1 = Connected.
-        media = intVal(a.MediaConnectState, -1);
-        if ((media != -1) && (media != 1)) return false;
-
-        return true;
-    }
-
-    function adapterPriority(a) {
-        var pm, medium, link, hardware, connector;
-
-        if (a == null) return 20;
-
-        pm = intVal(a.NdisPhysicalMedium, -1);
-        medium = intVal(a.NdisMedium, -1);
-        link = intVal(a.LinkTechnology, -1);
-
-        hardware = (str(a.HardwareInterface).toLowerCase() == 'true');
-        connector = (str(a.ConnectorPresent).toLowerCase() == 'true');
-
-        /*
-            MSFT_NetAdapter is documented in ROOT\StandardCimv2.
-            Useful physical media values include:
-              14 = 802.3 / Ethernet
-               1 = Wireless LAN
-               9 = Native 802.11
-
-            These numeric values avoid matching adapter names such as
-            "Wi-Fi", "WLAN", or "Wireless".
-        */
-
-        if (pm == 14) return 0;                         // wired Ethernet
-        if ((medium == 0) && connector) return 1;       // 802.3-style fallback
-        if ((link == 2) && hardware) return 2;          // Ethernet-ish fallback
-
-        if ((pm == 1) || (pm == 9)) return 10;          // Wi-Fi / WLAN
-        if (link == 11) return 11;                      // wireless fallback
-
-        return 20;                                      // VPN, virtual, tunnel, unknown
-    }
-
-    try {
-        var wmi = require('win-wmi-fixed');
-        var configs;
-        var adapters;
-        var adapterByIndex = {};
-        var candidates = [];
-        var i, cfg, a, ip, gw, idx, metric;
-
-        configs = wmi.query(
-            'ROOT\\CIMV2',
-            'SELECT InterfaceIndex,IPAddress,DefaultIPGateway,IPConnectionMetric FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled = True',
-            ['InterfaceIndex', 'IPAddress', 'DefaultIPGateway', 'IPConnectionMetric']
-        );
-
-        if ((configs == null) || (configs.length == null) || (configs.length == 0)) {
-            return null;
-        }
-
-        try {
-            adapters = wmi.query(
-                'ROOT\\StandardCimv2',
-                'SELECT InterfaceIndex,NdisPhysicalMedium,NdisMedium,LinkTechnology,HardwareInterface,ConnectorPresent,InterfaceOperationalStatus,MediaConnectState FROM MSFT_NetAdapter',
-                ['InterfaceIndex', 'NdisPhysicalMedium', 'NdisMedium', 'LinkTechnology', 'HardwareInterface', 'ConnectorPresent', 'InterfaceOperationalStatus', 'MediaConnectState']
-            );
-
-            if ((adapters != null) && (adapters.length != null)) {
-                for (i = 0; i < adapters.length; i++) {
-                    idx = intVal(adapters[i].InterfaceIndex, -1);
-                    if (idx >= 0) adapterByIndex['i' + idx] = adapters[i];
-                }
-            }
-        } catch (ex2) {
-            adapters = null;
-        }
-
-        for (i = 0; i < configs.length; i++) {
-            cfg = configs[i];
-
-            gw = cfg.DefaultIPGateway;
-            if (!hasAnyValue(gw)) continue;
-
-            ip = firstIPv4(cfg.IPAddress);
-            if (ip == null) continue;
-
-            idx = intVal(cfg.InterfaceIndex, -1);
-            a = adapterByIndex['i' + idx];
-
-            if (!isUpAdapter(a)) continue;
-
-            metric = intVal(cfg.IPConnectionMetric, 999999);
-
-            candidates[candidates.length] = {
-                ip: ip,
-                idx: idx,
-                pri: adapterPriority(a),
-                metric: metric
-            };
-        }
-
-        if (candidates.length == 0) return null;
-
-        candidates.sort(function (x, y) {
-            if (x.pri != y.pri) return x.pri - y.pri;
-            if (x.metric != y.metric) return x.metric - y.metric;
-            return x.idx - y.idx;
-        });
-
-        return candidates[0].ip;
-    } catch (ex) {
-        return null;
-    }
-}
-
 // Update the server with the latest network interface information
 var sendNetworkUpdateNagleTimer = null;
 function sendNetworkUpdateNagle() { if (sendNetworkUpdateNagleTimer != null) { clearTimeout(sendNetworkUpdateNagleTimer); sendNetworkUpdateNagleTimer = null; } sendNetworkUpdateNagleTimer = setTimeout(sendNetworkUpdate, 5000); }
@@ -7435,7 +6775,7 @@ function sendNetworkUpdate(force) {
         var netInfo = { netif2: require('os').networkInterfaces() };
         if (process.platform == 'win32') {
             try {
-                var ret = require('win-wmi-fixed').query('ROOT\\CIMV2', 'SELECT InterfaceIndex,NetConnectionID,Speed FROM Win32_NetworkAdapter', ['InterfaceIndex','NetConnectionID','Speed']);
+                var ret = require('win-wmi').query('ROOT\\CIMV2', 'SELECT InterfaceIndex,NetConnectionID,Speed FROM Win32_NetworkAdapter', ['InterfaceIndex','NetConnectionID','Speed']);
                 if (ret[0]) {
                     var speedMap = {};
                     for (var i = 0; i < ret.length; i++) speedMap[ret[i].InterfaceIndex] = ret[i].Speed;
@@ -7449,13 +6789,6 @@ function sendNetworkUpdate(force) {
                     }
                 }
             } catch(ex) { }
-            
-			try {
-                var probableMainLanIp = getProbableMainLanIp();
-                if (probableMainLanIp != null) {
-                    netInfo.probable_main_lan_ip = probableMainLanIp;
-                }
-            } catch (ex) { }
         } else if (process.platform == 'linux') {
             var adapterNames = Object.keys(netInfo.netif2);
             for (var i = 0; i < adapterNames.length; i++) {
@@ -7481,107 +6814,67 @@ function sendNetworkUpdate(force) {
 }
 
 // Called periodically to check if we need to send updates to the server
-var sendPeriodicServerUpdateInProgress = false;
 function sendPeriodicServerUpdate(flags, force) {
     if (meshServerConnectionState == 0) return; // Not connected to server, do nothing.
+    if (!flags) { flags = 0xFFFFFFFF; }
+    if (!force) { force = false; }
 
-    // Defensive guard against re-entrancy. The info collectors below are currently
-    // non-blocking (Linux av()/firewall() are async; Windows uses native WMI), so
-    // nothing here pumps the event loop and this guard never actually fires. It's
-    // kept as a safety net: if a future collector re-introduces a blocking
-    // child.waitExit() (which runs a nested event loop), a timer firing inside it
-    // could re-enter and throw 'waitExit() already in progress'. Skipping the
-    // overlapping run avoids that.
-    if (sendPeriodicServerUpdateInProgress) return;
-    sendPeriodicServerUpdateInProgress = true;
-    try {
-        if (!flags) { flags = 0xFFFFFFFF; }
-        if (!force) { force = false; }
+    // If we have a connected MEI, get Intel ME information
+    if ((flags & 1) && (amt != null) && (amt.state == 2)) {
+        delete meshCoreObj.intelamt;
+        amt.getMeiState(9, function (meinfo) {
+            meshCoreObj.intelamt = meinfo;
+            meshCoreObj.intelamt.microlms = amt.lmsstate;
+            meshCoreObjChanged();
+        });
+    }
 
-        // If we have a connected MEI, get Intel ME information
-        if ((flags & 1) && (amt != null) && (amt.state == 2)) {
-            delete meshCoreObj.intelamt;
-            amt.getMeiState(9, function (meinfo) {
-                meshCoreObj.intelamt = meinfo;
-                meshCoreObj.intelamt.microlms = amt.lmsstate;
-                meshCoreObjChanged();
-            });
-        }
+    // Update network information
+    if (flags & 2) { sendNetworkUpdateNagle(false); }
 
-        // Update network information
-        if (flags & 2) { sendNetworkUpdateNagle(false); }
-
-        // Update anti-virus information
-        if ((flags & 4) && (process.platform == 'win32')) {
-            // Windows Command: "wmic /Namespace:\\root\SecurityCenter2 Path AntiVirusProduct get /FORMAT:CSV"
-            try { meshCoreObj.av = require('win-info').av(); meshCoreObjChanged(); } catch (ex) { av = null; } // Antivirus
-        }
-        // Update Linux AV/Firewall information. av()/firewall() are asynchronous (they
-        // spawn child processes), so they don't block this periodic update with a nested
-        // waitExit() loop. Results are applied in the callbacks and flushed via
-        // meshCoreObjChanged().
-        if ((flags & 4) && (process.platform == 'linux')) {
+    // Update anti-virus information
+    if ((flags & 4) && (process.platform == 'win32')) {
+        // Windows Command: "wmic /Namespace:\\root\SecurityCenter2 Path AntiVirusProduct get /FORMAT:CSV"
+        try { meshCoreObj.av = require('win-info').av(); meshCoreObjChanged(); } catch (ex) { av = null; } // Antivirus
+        //if (process.platform == 'win32') { try { meshCoreObj.pr = require('win-info').pendingReboot(); meshCoreObjChanged(); } catch (ex) { meshCoreObj.pr = null; } } // Pending reboot
+    }
+    if (process.platform == 'win32') {
+        if (require('MeshAgent')._securitycenter == null) {
             try {
-                require('linux-info').av(function (avResult) {
-                    try {
-                        var lsc = {};
-                        if (avResult && avResult.length > 0) { meshCoreObj.av = avResult; lsc.antiVirus = 'OK'; }
-                        require('linux-info').firewall(function (fwResult) {
-                            try {
-                                if (fwResult && fwResult.installed) { lsc.firewall = fwResult.enabled ? 'OK' : 'BAD'; }
-                                if (Object.keys(lsc).length > 0) { meshCoreObj.lsc = lsc; meshCoreObjChanged(); }
-                            } catch (ex) { }
-                        });
-                    } catch (ex) { }
-                });
-            } catch (ex) { }
-        }
-
-        if (process.platform == 'win32') {
-            if (require('MeshAgent')._securitycenter == null) {
-                try {
+                require('MeshAgent')._securitycenter = require('win-securitycenter').status();
+                meshCoreObj['wsc'] = require('MeshAgent')._securitycenter; // Windows Security Central (WSC)
+                require('win-securitycenter').on('changed', function () {
                     require('MeshAgent')._securitycenter = require('win-securitycenter').status();
                     meshCoreObj['wsc'] = require('MeshAgent')._securitycenter; // Windows Security Central (WSC)
-                    require('win-securitycenter').on('changed', function () {
-                        require('MeshAgent')._securitycenter = require('win-securitycenter').status();
-                        meshCoreObj['wsc'] = require('MeshAgent')._securitycenter; // Windows Security Central (WSC)
-                        require('MeshAgent').SendCommand({ action: 'coreinfo', wsc: require('MeshAgent')._securitycenter });
-                    });
-                } catch (ex) { }
-            }
-
-            // Pending reboot
-            try {
-                meshCoreObj.pr = require('win-info').pendingReboot();
-                meshCoreObjChanged();
-            } catch (ex) { }
-
-
-            // Get Defender Information
-            try {
-                meshCoreObj.defender = require('win-info').defender();
-                meshCoreObjChanged();
-            } catch (ex) { }
-
-            // Calculate Windows Idle Time
-            try {
-                require('win-deskutils').idle.getSecondsAllSessions().then(function (seconds) {
-                    meshCoreObj.idletime = seconds;
-                    meshCoreObjChanged();
+                    require('MeshAgent').SendCommand({ action: 'coreinfo', wsc: require('MeshAgent')._securitycenter });
                 });
-            } catch (ex) { sendConsoleText('Error getting idle time: ' + ex.toString());}
+            } catch (ex) { }
         }
 
-        // Send available data right now
-        if (force) {
-            meshCoreObj = sortObjRec(meshCoreObj);
-            var x = JSON.stringify(meshCoreObj);
-            if (x != LastPeriodicServerUpdate) {
-                LastPeriodicServerUpdate = x;
-                mesh.SendCommand(meshCoreObj);
-            }
+        // Get Defender Information
+        try {
+            meshCoreObj.defender = require('win-info').defender();
+            meshCoreObjChanged();
+        } catch (ex) { }
+
+        // Calculate Windows Idle Time
+        try {
+            require('win-deskutils').idle.getSecondsAllSessions().then(function (seconds) {
+                meshCoreObj.idletime = seconds;
+                meshCoreObjChanged();
+            });
+        } catch (ex) { sendConsoleText('Error getting idle time: ' + ex.toString());}
+    }
+
+    // Send available data right now
+    if (force) {
+        meshCoreObj = sortObjRec(meshCoreObj);
+        var x = JSON.stringify(meshCoreObj);
+        if (x != LastPeriodicServerUpdate) {
+            LastPeriodicServerUpdate = x;
+            mesh.SendCommand(meshCoreObj);
         }
-    } finally { sendPeriodicServerUpdateInProgress = false; }
+    }
 }
 
 // Sort the names in an object
@@ -7589,17 +6882,17 @@ function sortObject(obj) { return Object.keys(obj).sort().reduce(function(a, v) 
 
 // Fix the incoming data and cut down how much data we use
 function cleanGetBitLockerVolumeInfo(volumes) {
-    // Keep the raw codes info and let the view convert to strings
     for (var i in volumes) {
         const v = volumes[i];
         if (typeof v.size == 'string') { v.size = parseInt(v.size); }
         if (typeof v.sizeremaining == 'string') { v.sizeremaining = parseInt(v.sizeremaining); }
         if (v.identifier == '') { delete v.identifier; }
         if (v.name == '') { delete v.name; }
+        if (v.removable != true) { delete v.removable; }
+        if (v.cdrom != true) { delete v.cdrom; }
+        if (v.protectionStatus == 'On') { v.protectionStatus = true; } else { delete v.protectionStatus; }
+        if (v.volumeStatus == 'FullyDecrypted') { delete v.volumeStatus; }
         if (v.recoveryPassword == '') { delete v.recoveryPassword; }
-        if (v.volumeStatus === 0) { delete v.volumeStatus; }
-        if (v.encryptionMethod === 0) { delete v.encryptionMethod; }
-        if (v.protectionStatus === 0) { delete v.protectionStatus; }
     }
     return sortObject(volumes);
 }
