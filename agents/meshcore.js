@@ -4560,17 +4560,31 @@ function onTunnelData(data)
                 }
                 case 'execute': { nativeFileAction(this, cmd); break; }
                 case 'rm': {
-                    // Delete, possibly recursive delete
-                    if (!Array.isArray(cmd.delfiles)) { break; }
+                    // Delete, possibly recursive delete. Every rejected or failed entry is answered with an
+                    // error, and the batch ends with one 'rm' reply. Replies carry no path: the viewer reads
+                    // a reply with a path as a folder listing.
+                    var rmFailed = 0;
+                    if (!Array.isArray(cmd.delfiles)) {
+                        this.write(Buffer.from(JSON.stringify({ action: 'fileaction', operation: 'rm', reqid: cmd.reqid, ok: false, done: true, failed: 0, error: 'Invalid delete request.' })));
+                        break;
+                    }
                     for (var i in cmd.delfiles) {
-                        if (typeof cmd.delfiles[i] != 'string' || !cmd.delfiles[i] || cmd.delfiles[i] == '.' || cmd.delfiles[i] == '..' || /[\\/:\x00]/.test(cmd.delfiles[i])) { continue; }
+                        if (typeof cmd.delfiles[i] != 'string' || !cmd.delfiles[i] || cmd.delfiles[i] == '.' || cmd.delfiles[i] == '..' || /[\\/:\x00]/.test(cmd.delfiles[i])) {
+                            rmFailed++;
+                            this.write(Buffer.from(JSON.stringify({ action: 'fileaction', operation: 'delete', reqid: cmd.reqid, ok: false, error: 'Invalid file name.', name: String(cmd.delfiles[i]) })));
+                            continue;
+                        }
                         if (process.platform == 'win32') {
-                            nativeFileAction(this, { action: 'delete', reqid: cmd.reqid, path: obj.path.join(cmd.path, cmd.delfiles[i]), rec: cmd.rec });
+                            if (!nativeFileAction(this, { action: 'delete', reqid: cmd.reqid, path: obj.path.join(cmd.path, cmd.delfiles[i]), rec: cmd.rec }).ok) { rmFailed++; }
                             continue;
                         }
 
                         var p = obj.path.join(cmd.path, cmd.delfiles[i]), delcount = 0;
-                        try { delcount = deleteFolderRecursive(p, cmd.rec); } catch (ex) { }
+                        try { delcount = deleteFolderRecursive(p, cmd.rec); }
+                        catch (ex) {
+                            rmFailed++;
+                            this.write(Buffer.from(JSON.stringify({ action: 'fileaction', operation: 'delete', reqid: cmd.reqid, ok: false, error: String(ex), name: cmd.delfiles[i] })));
+                        }
                         if ((delcount == 1) && !cmd.rec) {
                             MeshServerLogEx(45, [p], "Delete: \"" + p + "\"", this.httprequest);
                         } else {
@@ -4581,11 +4595,19 @@ function onTunnelData(data)
                             }
                         }
                     }
+                    this.write(Buffer.from(JSON.stringify({ action: 'fileaction', operation: 'rm', reqid: cmd.reqid, ok: rmFailed == 0, done: true, failed: rmFailed })));
                     break;
                 }
                 case 'open': {
-                    if (process.platform == 'win32') { nativeFileAction(this, cmd); }
-                    else if (cmd.path) { openFileOnDesktop(cmd.path); }
+                    if (process.platform == 'win32') { nativeFileAction(this, cmd); break; }
+                    // Other platforms open through the desktop's own handler; audited like upstream, and answered.
+                    MeshServerLogEx(20, [cmd.path], "Opening: " + cmd.path, this.httprequest);
+                    var openReply = { action: 'fileaction', operation: 'open', reqid: cmd.reqid, ok: true };
+                    try {
+                        if ((typeof cmd.path != 'string') || (cmd.path.length == 0)) { throw new Error('Invalid file action.'); }
+                        openFileOnDesktop(cmd.path);
+                    } catch (ex) { openReply.ok = false; openReply.error = String(ex); }
+                    this.write(Buffer.from(JSON.stringify(openReply)));
                     break;
                 }
                 case 'markcoredump': {
@@ -5056,27 +5078,25 @@ function consoleHttpResponse(response) {
     response.close = function () { sendConsoleText('httprequest.response.close', this.sessionid); consoleHttpRequest = null; }
 }
 
-// Open a local file on current user's desktop
+// Open a local file on current user's desktop. Throws with the reason when the file cannot be opened.
 function openFileOnDesktop(file) {
     var child = null;
-    try {
-        switch (process.platform) {
-            case 'win32':
-                if (typeof mesh.fileAction != 'function') { return null; }
-                var nativeResult = mesh.fileAction('open', file, false);
-                return nativeResult.ok ? true : null;
-            case 'linux':
-                child = require('child_process').execFile('/usr/bin/xdg-open', ['xdg-open', file], { uid: require('user-sessions').consoleUid() });
-                break;
-            case 'darwin':
-                child = require('child_process').execFile('/usr/bin/open', ['open', file]);
-                break;
-            default:
-                // Unknown platform, ignore this command.
-                break;
-        }
-    } catch (ex) { }
-    return child;
+    switch (process.platform) {
+        case 'win32':
+            if (typeof mesh.fileAction != 'function') { throw new Error('Update the agent to enable native file actions.'); }
+            var nativeResult = mesh.fileAction('open', file, false);
+            if (!nativeResult.ok) { throw new Error('Native open failed: ' + nativeResult.error); }
+            return;
+        case 'linux':
+            child = require('child_process').execFile('/usr/bin/xdg-open', ['xdg-open', file], { uid: require('user-sessions').consoleUid() });
+            break;
+        case 'darwin':
+            child = require('child_process').execFile('/usr/bin/open', ['open', file]);
+            break;
+        default:
+            throw new Error('Opening files is not supported on this platform.');
+    }
+    if (child == null) { throw new Error('Opening the file failed: the launch was denied by process policy.'); }
 }
 
 // Open a web browser to a specified URL on current user's desktop
@@ -6155,7 +6175,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
             case 'openfile': {
                 if (rights != 0xFFFFFFFF && (rights & 131072) == 0) { response = 'Access denied.'; break; }
                 if (args['_'].length != 1) { response = 'Proper usage: openfile (filepath)'; } // Display usage
-                else { if (openFileOnDesktop(args['_'][0]) == null) { response = 'Failed.'; } else { response = 'Success.'; } }
+                else { try { openFileOnDesktop(args['_'][0]); response = 'Success.'; } catch (ex) { response = 'Failed: ' + ex; } }
                 break;
             }
             case 'users': {

@@ -78,3 +78,86 @@ for (const core of CORES) {
             'the lost reply must be visible: ' + JSON.stringify(state.console));
     });
 }
+
+// The Files tunnel command cases from "case 'rm'" up to the given end marker, as handle(cmd) with the
+// tunnel as `this`.
+const RM_CASES = { 'meshcore.js': ["case 'rm': {", "case 'markcoredump': {"], 'recoverycore.js': ["case 'rm':", "case 'rename':"] };
+function loadFilesCases(core, platform, fileAction, openFileOnDesktop) {
+    const source = sources[core];
+    const [startMarker, endMarker] = RM_CASES[core];
+    const start = source.indexOf(startMarker);
+    const end = source.indexOf(endMarker, start);
+    assert(start >= 0 && end > start, core + ': files rm case must be found');
+    const { sandbox, state } = loadNativeFileAction(core, fileAction);
+    const pathModule = platform == 'win32' ? path.win32 : path.posix;
+    state.deleted = [];
+    Object.assign(sandbox, {
+        path: pathModule, obj: { path: pathModule },
+        deleteFolderRecursive(target, rec) { if (/locked/.test(target)) { throw new Error('EBUSY'); } state.deleted.push([target, rec]); return 1; },
+        openFileOnDesktop
+    });
+    sandbox.process.platform = platform;
+    vm.runInNewContext('function handle(cmd) { switch (cmd.action) {\n' + source.slice(start, end) + '\n} }', sandbox);
+    const writes = [];
+    const tunnel = { httprequest: { rights: RIGHTS_ALL, sessionid: 'session-1' }, write(data) { writes.push(JSON.parse(data)); } };
+    return { handle: cmd => sandbox.handle.call(tunnel, cmd), writes, state };
+}
+
+for (const core of CORES) {
+    for (const platform of ['win32', 'linux']) {
+        test(core + ' (' + platform + '): batch delete answers every entry and ends with one rm reply', () => {
+            const files = loadFilesCases(core, platform, action => action == 'delete' ? { ok: false, error: 5 } : { ok: true });
+            files.handle({ action: 'rm', reqid: 7, path: platform == 'win32' ? 'C:\\dir' : '/dir', rec: false, delfiles: ['..', 'a/b', 42, '', 'locked.txt'] });
+            const replies = files.writes.map(w => JSON.parse(JSON.stringify(w)));
+            assert(replies.every(r => r.action === 'fileaction' && r.reqid === 7 && r.path === undefined), 'replies never carry path (the viewer reads that as a listing)');
+            const rejected = replies.filter(r => r.operation === 'delete' && r.ok === false && r.error === 'Invalid file name.');
+            assert.deepEqual(rejected.map(r => r.name), ['..', 'a/b', '42', '']);
+            assert.deepEqual(replies[replies.length - 1], { action: 'fileaction', operation: 'rm', reqid: 7, ok: false, done: true, failed: 5 });
+            assert.equal(replies.filter(r => r.operation === 'rm').length, 1);
+        });
+
+        test(core + ' (' + platform + '): a batch delete without a file list is answered', () => {
+            const files = loadFilesCases(core, platform);
+            files.handle({ action: 'rm', reqid: 8, path: '/dir', delfiles: 'a.txt' });
+            assert.deepEqual(JSON.parse(JSON.stringify(files.writes)), [{ action: 'fileaction', operation: 'rm', reqid: 8, ok: false, done: true, failed: 0, error: 'Invalid delete request.' }]);
+        });
+    }
+
+    test(core + ': a clean batch delete reports success', () => {
+        const files = loadFilesCases(core, 'win32');
+        files.handle({ action: 'rm', reqid: 9, path: 'C:\\dir', rec: true, delfiles: ['a.txt', 'b'] });
+        assert.deepEqual(files.state.native, [['delete', 'C:\\dir\\a.txt', true], ['delete', 'C:\\dir\\b', true]]);
+        const replies = JSON.parse(JSON.stringify(files.writes));
+        assert.deepEqual(replies.map(r => [r.operation, r.ok]), [['delete', true], ['delete', true], ['rm', true]]);
+    });
+}
+
+test('meshcore.js (linux): Files open is audited and answered', () => {
+    let opened = null;
+    const files = loadFilesCases('meshcore.js', 'linux', null, file => { opened = file; });
+    files.handle({ action: 'open', reqid: 3, path: '/home/a.txt' });
+    assert.equal(opened, '/home/a.txt');
+    assert.deepEqual(files.state.audit.map(a => [a.msgid, a.args, a.sessionid]), [[20, ['/home/a.txt'], 'session-1']]);
+    assert.deepEqual(JSON.parse(JSON.stringify(files.writes)), [{ action: 'fileaction', operation: 'open', reqid: 3, ok: true }]);
+
+    const failing = loadFilesCases('meshcore.js', 'linux', null, () => { throw new Error('no desktop session'); });
+    failing.handle({ action: 'open', reqid: 4, path: '/home/b.txt' });
+    assert.equal(failing.state.audit.length, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(failing.writes)), [{ action: 'fileaction', operation: 'open', reqid: 4, ok: false, error: 'Error: no desktop session' }]);
+});
+
+test('meshcore.js: openFileOnDesktop reports why an open failed', () => {
+    for (const [platform, mesh, child, expected] of [
+        ['win32', { fileAction: () => ({ ok: false, error: 1155 }) }, null, /Native open failed: 1155/],
+        ['win32', {}, null, /Update the agent/],
+        ['linux', {}, null, /launch was denied/],
+        ['freebsd', {}, null, /not supported on this platform/]]) {
+        const sandbox = { process: { platform }, mesh, require(name) {
+            if (name === 'child_process') { return { execFile: () => child }; }
+            if (name === 'user-sessions') { return { consoleUid: () => 1000 }; }
+            throw new Error('unexpected require: ' + name);
+        } };
+        vm.runInNewContext(extractFunction(sources['meshcore.js'], 'function openFileOnDesktop('), sandbox);
+        assert.throws(() => sandbox.openFileOnDesktop('/x'), expected, platform);
+    }
+});

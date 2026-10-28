@@ -1277,20 +1277,34 @@ require('MeshAgent').AddCommandHandler(function (data)
                                                                     break;
                                                                 }
                                                             case 'execute': { nativeFileAction(this, cmd); break; }
-                case 'open': { nativeFileAction(this, cmd); break; }
-                case 'rm':
+                                                            case 'open': { nativeFileAction(this, cmd); break; }
+                                                            case 'rm':
                                                                 {
-                                                                    // Delete, possibly recursive delete
-                                                                    if (!Array.isArray(cmd.delfiles)) { break; }
-                    for (var i in cmd.delfiles) {
-                        if (typeof cmd.delfiles[i] != 'string' || !cmd.delfiles[i] || cmd.delfiles[i] == '.' || cmd.delfiles[i] == '..' || /[\\/:\x00]/.test(cmd.delfiles[i])) { continue; }
-                        if (process.platform == 'win32') {
-                            nativeFileAction(this, { action: 'delete', reqid: cmd.reqid, path: path.join(cmd.path, cmd.delfiles[i]), rec: cmd.rec });
-                            continue;
-                        }
-
-                                                                        try { deleteFolderRecursive(path.join(cmd.path, cmd.delfiles[i]), cmd.rec); } catch (e) { }
+                                                                    // Delete, possibly recursive delete. Every rejected or failed entry is answered
+                                                                    // with an error, and the batch ends with one 'rm' reply. Replies carry no path:
+                                                                    // the viewer reads a reply with a path as a folder listing.
+                                                                    var rmFailed = 0;
+                                                                    if (!Array.isArray(cmd.delfiles)) {
+                                                                        this.write(Buffer.from(JSON.stringify({ action: 'fileaction', operation: 'rm', reqid: cmd.reqid, ok: false, done: true, failed: 0, error: 'Invalid delete request.' })));
+                                                                        break;
                                                                     }
+                                                                    for (var i in cmd.delfiles) {
+                                                                        if (typeof cmd.delfiles[i] != 'string' || !cmd.delfiles[i] || cmd.delfiles[i] == '.' || cmd.delfiles[i] == '..' || /[\\/:\x00]/.test(cmd.delfiles[i])) {
+                                                                            rmFailed++;
+                                                                            this.write(Buffer.from(JSON.stringify({ action: 'fileaction', operation: 'delete', reqid: cmd.reqid, ok: false, error: 'Invalid file name.', name: String(cmd.delfiles[i]) })));
+                                                                            continue;
+                                                                        }
+                                                                        if (process.platform == 'win32') {
+                                                                            if (!nativeFileAction(this, { action: 'delete', reqid: cmd.reqid, path: path.join(cmd.path, cmd.delfiles[i]), rec: cmd.rec }).ok) { rmFailed++; }
+                                                                            continue;
+                                                                        }
+                                                                        try { deleteFolderRecursive(path.join(cmd.path, cmd.delfiles[i]), cmd.rec); }
+                                                                        catch (e) {
+                                                                            rmFailed++;
+                                                                            this.write(Buffer.from(JSON.stringify({ action: 'fileaction', operation: 'delete', reqid: cmd.reqid, ok: false, error: String(e), name: cmd.delfiles[i] })));
+                                                                        }
+                                                                    }
+                                                                    this.write(Buffer.from(JSON.stringify({ action: 'fileaction', operation: 'rm', reqid: cmd.reqid, ok: rmFailed == 0, done: true, failed: rmFailed })));
                                                                     break;
                                                                 }
                                                             case 'rename':
