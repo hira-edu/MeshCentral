@@ -23,6 +23,94 @@ function SerialTunnel(options) {
     return obj;
 }
 
+// Append an exact IP address to an agent block list file.
+function AppendAgentBlockedIp(filename, ip, fsModule) {
+    if ((typeof filename != 'string') || (filename.length == 0) || (typeof ip != 'string') || (ip.length == 0)) { return false; }
+    try {
+        const separator = (fsModule.existsSync(filename) && (fsModule.statSync(filename).size > 0)) ? '\r\n' : '';
+        fsModule.appendFileSync(filename, separator + ip + '\r\n');
+        return true;
+    } catch (ex) { return false; }
+}
+
+// Create a sliding-window limiter for new agent registrations by source IP.
+function CreateAgentRegistrationLimiter(config, nowFunc, ipMatchFunc, onBlockFunc) {
+    if ((config == null) || (typeof config != 'object') || Array.isArray(config)) { return null; }
+    if (!Number.isSafeInteger(config.agents) || (config.agents < 1)) { return null; }
+    if (!Number.isSafeInteger(config.minutes) || (config.minutes < 1)) { return null; }
+
+    const obj = {};
+    const windowMilliseconds = config.minutes * 60000;
+    const autoBlock = (config.autoblock !== false);
+    const registrations = Object.create(null);
+    const now = (typeof nowFunc == 'function') ? nowFunc : Date.now;
+    var operationsSinceClean = 0;
+    var exclusions = [];
+
+    if (typeof config.exclude == 'string') {
+        exclusions = config.exclude.split(',').map(function (x) { return x.trim(); }).filter(function (x) { return x.length > 0; });
+    } else if (Array.isArray(config.exclude)) {
+        exclusions = config.exclude.filter(function (x) { return typeof x == 'string'; }).map(function (x) { return x.trim(); }).filter(function (x) { return x.length > 0; });
+    }
+
+    function normalizeIp(ip) {
+        if ((typeof ip != 'string') || (ip.length == 0) || (ip.length > 128)) { return null; }
+        ip = ip.toLowerCase();
+        if (ip.indexOf('::ffff:') == 0) { ip = ip.substring(7); }
+        if (require('net').isIP(ip) == 0) { return null; }
+        return ip;
+    }
+
+    function isExcluded(ip) {
+        if (exclusions.length == 0) { return false; }
+        const ipMatch = (typeof ipMatchFunc == 'function') ? ipMatchFunc : require('ipcheck').match;
+        for (var i = 0; i < exclusions.length; i++) {
+            try { if (ipMatch(ip, exclusions[i]) == true) { return true; } } catch (ex) { }
+        }
+        return false;
+    }
+
+    function prune(ip, currentTime) {
+        const timestamps = registrations[ip];
+        if (timestamps == null) { return null; }
+        const cutoffTime = currentTime - windowMilliseconds;
+        while ((timestamps.length > 0) && (timestamps[0] <= cutoffTime)) { timestamps.shift(); }
+        if (timestamps.length == 0) { delete registrations[ip]; return null; }
+        return timestamps;
+    }
+
+    obj.clean = function () {
+        const currentTime = now();
+        for (var ip in registrations) { prune(ip, currentTime); }
+        operationsSinceClean = 0;
+    };
+
+    obj.isBlocked = function (ip) {
+        if (autoBlock == false) { return false; }
+        ip = normalizeIp(ip);
+        if ((ip == null) || isExcluded(ip)) { return false; }
+        const timestamps = prune(ip, now());
+        return (timestamps != null) && (timestamps.length >= config.agents);
+    };
+
+    // Returns false when this registration would exceed the configured limit.
+    obj.register = function (ip) {
+        ip = normalizeIp(ip);
+        if (ip == null) { return false; }
+        if (isExcluded(ip)) { return true; }
+        const currentTime = now();
+        var timestamps = prune(ip, currentTime);
+        if ((timestamps != null) && (timestamps.length >= config.agents)) { return false; }
+        if (timestamps == null) { timestamps = registrations[ip] = []; }
+        timestamps.push(currentTime);
+        if ((autoBlock == true) && (timestamps.length == config.agents) && (typeof onBlockFunc == 'function')) { try { onBlockFunc(ip); } catch (ex) { } }
+        if (++operationsSinceClean > 100) { obj.clean(); }
+        return true;
+    };
+
+    return obj;
+}
+
 // ExpressJS login sample
 // https://github.com/expressjs/express/blob/master/examples/auth/index.js
 
@@ -95,6 +183,20 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
     obj.relaySessionErrorCount = 0;
     obj.blockedUsers = 0;
     obj.blockedAgents = 0;
+    obj.persistAgentBlockedIp = function (ip) {
+        if (parent.agentBlockedIpFile == null) { return false; }
+        if (AppendAgentBlockedIp(parent.agentBlockedIpFile, ip, obj.fs) == false) {
+            console.log('Unable to permanently block agent IP address ' + ip + ' in ' + parent.agentBlockedIpFile + '; temporary block remains active.');
+            return false;
+        }
+        if (!Array.isArray(parent.config.settings.agentblockedip)) { parent.config.settings.agentblockedip = []; }
+        if (parent.config.settings.agentblockedip.indexOf(ip) < 0) { parent.config.settings.agentblockedip.push(ip); }
+        obj.agentBlockedIp = parent.config.settings.agentblockedip;
+        parent.debug('agent', 'Permanently blocked agent IP address ' + ip + ' in ' + parent.agentBlockedIpFile + '.');
+        return true;
+    };
+    obj.agentRegistrationLimiter = CreateAgentRegistrationLimiter(parent.config.settings.agentenrollmentratelimitbyip, null, null, obj.persistAgentBlockedIp);
+    obj.recordAgentRegistration = function (ip) { return (obj.agentRegistrationLimiter == null) || obj.agentRegistrationLimiter.register(ip); };
     obj.renderPages = null;
     obj.renderLanguages = [];
     obj.destroyedSessions = {};                 // userid/req.session.x --> destroyed session time
@@ -441,7 +543,8 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
         duplicateAgentCount: 0,
         maxDomainDevicesReached: 0,
         agentInTrouble: 0,
-        agentInBigTrouble: 0
+        agentInBigTrouble: 0,
+        agentRegistrationBlockCount: 0
     }
     obj.getAgentStats = function () { return obj.agentStats; }
 
@@ -876,17 +979,43 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
     function checkAgentIpAddress(req, res) {
         if ((parent.config.settings.agentblockedip != null) && (checkIpAddressEx(req, res, parent.config.settings.agentblockedip, null) == true)) { obj.blockedAgents++; return null; }
         if ((parent.config.settings.agentallowedip != null) && (checkIpAddressEx(req, res, parent.config.settings.agentallowedip, null) == false)) { obj.blockedAgents++; return null; }
+        const clientIp = (req.clientIp != null) ? req.clientIp : res.clientIp;
+        if ((obj.agentRegistrationLimiter != null) && obj.agentRegistrationLimiter.isBlocked(clientIp)) {
+            obj.blockedAgents++;
+            obj.agentStats.agentRegistrationBlockCount++;
+            parent.debug('agent', 'Agent connection from ' + clientIp + ' blocked by new registration limit.');
+            return null;
+        }
         const domain = (req.url ? getDomain(req) : getDomain(res));
         if ((domain.agentblockedip != null) && (checkIpAddressEx(req, res, domain.agentblockedip, null) == true)) { obj.blockedAgents++; return null; }
         if ((domain.agentallowedip != null) && (checkIpAddressEx(req, res, domain.agentallowedip, null) == false)) { obj.blockedAgents++; return null; }
         return domain;
     }
 
+    // True when the address is IPv4/IPv6 loopback (not a general private-network address)
+    function isLoopbackAddress(addr) {
+        if (typeof addr != 'string') { return false; }
+        if (addr.indexOf('::ffff:') == 0) { addr = addr.substring(7); }
+        if ((addr == '127.0.0.1') || (addr == '::1') || (addr == 'localhost')) { return true; }
+        return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(addr);
+    }
+
+    // Domainid URL selection is only for real local connections, not a Host: localhost header alone
+    function isLocalhostDomainSelect(req) {
+        if ((req == null) || (req.hostname != 'localhost') || (req.query == null) || (req.query.domainid == null)) { return false; }
+        if (isLoopbackAddress(req.clientIp) == false) { return false; }
+        var peer = null;
+        if ((req.connection != null) && (typeof req.connection.remoteAddress == 'string')) { peer = req.connection.remoteAddress; }
+        else if ((req.socket != null) && (typeof req.socket.remoteAddress == 'string')) { peer = req.socket.remoteAddress; }
+        if ((peer != null) && (isLoopbackAddress(peer) == false)) { return false; }
+        return true;
+    }
+
     // Return the current domain of the request
     // Request or connection says open regardless of the response
     function getDomain(req) {
         if (req.xdomain != null) { return req.xdomain; } // Domain already set for this request, return it.
-        if ((req.hostname == 'localhost') && (req.query.domainid != null)) { const d = parent.config.domains[req.query.domainid]; if (d != null) return d; } // This is a localhost access with the domainid specified in the URL
+        if (isLocalhostDomainSelect(req)) { const d = parent.config.domains[req.query.domainid]; if (d != null) return d; } // Local access with the domainid specified in the URL
         if (req.hostname != null) { const d = obj.dnsDomains[req.hostname.toLowerCase()]; if (d != null) return d; } // If this is a DNS name domain, return it here.
         const x = req.url.split('/');
         if (x.length < 2) return parent.config.domains[''];
@@ -1133,15 +1262,18 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
         // Check Google Authenticator
         if (user.otpsecret && (typeof (token) == 'string') && (token.length == 6)){
             const otplib = require('otplib');
-            const verified = otplib.verifySync({ 
-                epochTolerance: 60, 
-                token: token, 
-                secret: user.otpsecret,
-                guardrails: otplib.createGuardrails({
-                    MIN_SECRET_BYTES: 10, // https://github.com/yeojz/otplib/issues/671#issuecomment-4368647105
-                })
-            });
-            if (verified.valid === true) {
+            var verified = null;
+            try {
+                verified = otplib.verifySync({ 
+                    epochTolerance: 60, 
+                    token: token, 
+                    secret: user.otpsecret,
+                    guardrails: otplib.createGuardrails({
+                        MIN_SECRET_BYTES: 10, // https://github.com/yeojz/otplib/issues/671#issuecomment-4368647105
+                    })
+                });
+            } catch (ex) { parent.debug('web', 'checkUserOneTimePassword: exception ' + ex); }
+            if ((verified != null) && (verified.valid === true)) {
                 parent.debug('web', 'checkUserOneTimePassword: success (authenticator).');
                 func(true, { twoFactorType: 'otp' });
                 return;
@@ -1232,8 +1364,10 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
         if (req.body == null) { res.sendStatus(404); return; } // Post body is empty or can't be parsed
         if (req.session == null) { req.session = {}; }
 
+        const blockingMode = parent.config.settings.maxinvalidlogin?.blocking || 'iprange';
+
         // Check if this is a banned ip address
-        if (obj.checkAllowLogin(req) == false) {
+        if (blockingMode !== 'username' && obj.checkAllowLogin(req) === false) {
             // Wait and redirect the user
             setTimeout(function () {
                 req.session.messageid = 114; // IP address blocked, try again later.
@@ -1247,6 +1381,16 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
         if ((xusername == null) && (xpassword == null) && (req.body.token != null)) {
             const sec = parent.decryptSessionData(req.session.e);
             xusername = sec.tuser; xpassword = sec.tpass;
+        }
+
+        // Check if the user is locked out
+        if (blockingMode === 'username' && obj.checkAllowLogin(null, xusername) === false) {
+            // Wait and redirect the user
+            setTimeout(function () {
+                req.session.messageid = 110; // Account locked
+                if (direct === true) { handleRootRequestEx(req, res, domain); } else { res.redirect(domain.url + getQueryPortion(req)); }
+            }, 2000 + (obj.crypto.randomBytes(2).readUInt16BE(0) % 4095));
+            return;
         }
 
         // Authenticate the user
@@ -1461,19 +1605,19 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                             req.session.messageid = 110; // Account locked.
                             const ua = obj.getUserAgentInfo(req);
                             obj.parent.DispatchEvent(['*', 'server-users', xuserid], obj, { action: 'authfail', userid: xuserid, username: xusername, domain: domain.id, msg: 'User login attempt on locked account from ' + req.clientIp, msgid: 109, msgArgs: [req.clientIp, ua.browserStr, ua.osStr] });
-                            obj.setbadLogin(req);
+                            obj.setbadLogin(req, xusername);
                         } else if (err == 'denied') {
                             parent.debug('web', 'handleLoginRequest: login failed, access denied');
                             req.session.messageid = 111; // Access denied.
                             const ua = obj.getUserAgentInfo(req);
                             obj.parent.DispatchEvent(['*', 'server-users', xuserid], obj, { action: 'authfail', userid: xuserid, username: xusername, domain: domain.id, msg: 'Denied user login from ' + req.clientIp, msgid: 155, msgArgs: [req.clientIp, ua.browserStr, ua.osStr] });
-                            obj.setbadLogin(req);
+                            obj.setbadLogin(req, xusername);
                         } else {
                             parent.debug('web', 'handleLoginRequest: login failed, bad username and password');
                             req.session.messageid = 112; // Login failed, check username and password.
                             const ua = obj.getUserAgentInfo(req);
                             obj.parent.DispatchEvent(['*', 'server-users', xuserid], obj, { action: 'authfail', userid: xuserid, username: xusername, domain: domain.id, msg: 'Invalid user login attempt from ' + req.clientIp, msgid: 110, msgArgs: [req.clientIp, ua.browserStr, ua.osStr] });
-                            obj.setbadLogin(req);
+                            obj.setbadLogin(req, xusername);
                         }
                     }
 
@@ -3988,24 +4132,27 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
 
     // Return a customised mainifest.json for PWA
     function handleManifestRequest(req, res){
-        const domain = checkUserIpAddress(req);
+        const domain = checkUserIpAddress(req, res);
         if (domain == null) { parent.debug('web', 'handleManifestRequest: no domain'); res.sendStatus(404); return; }
+        if ((domain.pwa != null) && (domain.pwa.disabled == true)) { parent.debug('web', 'handleManifestRequest: PWA disabled'); res.sendStatus(404); return; }
+        const pwa = (domain.pwa != null) ? domain.pwa : {};
         parent.debug('web', 'handleManifestRequest()');
         var manifest = {
-            "name": (domain.title != null) ? domain.title : 'MeshCentral',
-            "short_name": (domain.title != null) ? domain.title : 'MeshCentral',
+            "name": (pwa.name != null) ? pwa.name : ((domain.title != null) ? domain.title : 'MeshCentral'),
+            "short_name": (pwa.short_name != null) ? pwa.short_name : ((domain.title != null) ? domain.title : 'MeshCentral'),
             "description": "Open source web based, remote computer management.",
             "scope": ".",
             "start_url": "/",
-            "display": "fullscreen",
-            "orientation": "any",
-            "theme_color": "#ffffff",
-            "background_color": "#ffffff",
-            "icons": [{
+            "display": (pwa.display != null) ? pwa.display : "fullscreen",
+            "orientation": (pwa.orientation != null) ? pwa.orientation : "any",
+            "theme_color": (pwa.themecolor != null) ? pwa.themecolor : "#ffffff",
+            "background_color": (pwa.backgroundcolor != null) ? pwa.backgroundcolor : "#ffffff",
+            "icons": (pwa.icons != null) ? pwa.icons : [{
                 "src": "pwalogo.png",
                 "sizes": "512x512",
                 "type": "image/png"
-            }]
+            }],
+            "shortcuts": pwa.shortcuts
         };
         res.json(manifest);
     }
@@ -4034,7 +4181,8 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                 // The download page puts the filename inside a JavaScript string (var filename = '...'),
                 // so escape backslashes and single quotes to keep it inside that string.
                 var filenamejs = filename.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-                render(req, res, getRenderPage((domain.sitestyle >= 2) ? 'download2' : 'download', req, domain), getRenderArgs({ rootCertLink: getRootCertLink(domain), messageid: 1, fileurl: req.path + '?download=1', filename: filenamejs, filesize: stat.size }, req, domain));
+                var fileurljs = (req.path + '?download=1').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                render(req, res, getRenderPage((domain.sitestyle >= 2) ? 'download2' : 'download', req, domain), getRenderArgs({ rootCertLink: getRootCertLink(domain), messageid: 1, fileurl: fileurljs, filename: filenamejs, filesize: stat.size }, req, domain));
             }
         } else {
             render(req, res, getRenderPage((domain.sitestyle >= 2) ? 'download2' : 'download', req, domain), getRenderArgs({ rootCertLink: getRootCertLink(domain), messageid: 2 }, req, domain));
@@ -4064,6 +4212,7 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
         // Check if this user has permission to manage this computer
         obj.GetNodeWithRights(domain, user, 'node/' + domain.id + '/' + req.query.n, function (node, rights, visible) {
             if ((node == null) || ((rights & MESHRIGHT_REMOTECONTROL) == 0) || (visible == false)) { res.sendStatus(404); return; } // We don't have remote control rights to this device
+            if ((rights != MESHRIGHT_ADMIN) && ((rights & MESHRIGHT_NOFILES) != 0)) { res.sendStatus(404); return; } // This user is not allowed to use files on this device
 
             // All good, start the file transfer
             req.query.id = getRandomLowerCase(12);
@@ -4343,10 +4492,13 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                             if ((command == null) || (typeof command.action != 'string')) return;
                             switch (command.action) {
                                 case 'get': {
-                                    const buffer = Buffer.alloc(8 + command.size);
-                                    //buffer.writeUInt32BE((command.ptr >> 32), 0);
-                                    buffer.writeUInt32BE((command.ptr & 0xFFFFFFFF), 4);
-                                    obj.fs.read(fd, buffer, 8, command.size, command.ptr, function (err, bytesRead, buffer) { if (bytesRead > (buffer.length - 8)) { buffer = buffer.slice(0, bytesRead + 8); } ws.send(buffer); });
+                                    if (!Number.isInteger(command.size) || !Number.isInteger(command.ptr) || (command.size < 0) || (command.size > 1048576) || (command.ptr < 0)) break;
+                                    try {
+                                        const buffer = Buffer.alloc(8 + command.size);
+                                        //buffer.writeUInt32BE((command.ptr >> 32), 0);
+                                        buffer.writeUInt32BE((command.ptr & 0xFFFFFFFF), 4);
+                                        obj.fs.read(fd, buffer, 8, command.size, command.ptr, function (err, bytesRead, buffer) { if (err != null) return; if (bytesRead > (buffer.length - 8)) { buffer = buffer.slice(0, bytesRead + 8); } ws.send(buffer); });
+                                    } catch (ex) { }
                                     break;
                                 }
                             }
@@ -4474,7 +4626,8 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                     if (webRelayPort == 0) { res.sendStatus(404); return; }
 
                     // Create the authentication cookie
-                    const authCookieData = { userid: c.uid, domainid: domain.id, nid: c.nid, ip: req.clientIp, p: c.p, gn: c.gn, r: 8, expire: c.expire, pid: c.pid, port: c.port };
+                    // Include cf so these cookies match the device-share guest shape used elsewhere.
+                    const authCookieData = { userid: c.uid, domainid: domain.id, nid: c.nid, ip: req.clientIp, p: c.p, gn: c.gn, cf: (typeof c.cf == 'number') ? c.cf : 0, r: 8, expire: c.expire, pid: c.pid, port: c.port };
                     if ((authCookieData.userid == null) && (authCookieData.pid.startsWith('AS:node/'))) { authCookieData.nouser = 1; }
                     const authCookie = obj.parent.encodeCookie(authCookieData, obj.parent.loginCookieEncryptionKey);
 
@@ -4502,7 +4655,7 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                     var httpsPort = ((obj.args.aliasport == null) ? obj.args.port : obj.args.aliasport); // Use HTTPS alias port is specified
                     parent.debug('web', 'handleSharingRequest: Sending guest sharing page for \"' + c.uid + '\", guest \"' + c.gn + '\".');
                     res.set({ 'Cache-Control': 'no-store' });
-                    render(req, res, getRenderPage('sharing', req, domain), getRenderArgs({ authCookie: authCookie, authRelayCookie: '', domainurl: encodeURIComponent(domain.url).replace(/'/g, '%27'), nodeid: c.nid, serverDnsName: obj.getWebServerName(domain, req), serverRedirPort: args.redirport, serverPublicPort: httpsPort, expire: c.expire, viewOnly: (c.vo == 1) ? 1 : 0, nodeName: encodeURIComponent(node.name).replace(/'/g, '%27'), features: c.p, features2: features2 }, req, domain));
+                    render(req, res, getRenderPage('sharing', req, domain), getRenderArgs({ authCookie: authCookie, authRelayCookie: '', domainurl: encodeURIComponent(domain.url).replace(/'/g, '%27'), nodeid: c.nid, agentId: (node.agent != null) ? node.agent.id : 0, serverDnsName: obj.getWebServerName(domain, req), serverRedirPort: args.redirport, serverPublicPort: httpsPort, expire: c.expire, viewOnly: (c.vo == 1) ? 1 : 0, nodeName: encodeURIComponent(node.name).replace(/'/g, '%27'), features: c.p, features2: features2 }, req, domain));
                 }
             });
         });
@@ -5005,6 +5158,10 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
             var totalsize = readTotalFileSize(xfile.fullpath);
             if ((xfile.quota == null) || (totalsize < xfile.quota)) { // Check if the quota is not already broken
                 if (fields.name != null) {
+                    if ((fields.name.length != 1) || (typeof fields.name[0] != 'string') ||
+                        (fields.size == null) || (fields.size.length != 1) || (typeof fields.size[0] != 'string') ||
+                        (fields.type == null) || (fields.type.length != 1) || (typeof fields.type[0] != 'string') ||
+                        (fields.data == null) || (fields.data.length != 1) || (typeof fields.data[0] != 'string')) { res.sendStatus(400); return; }
 
                     // See if we need to create the folder
                     var domainx = 'domain';
@@ -5128,11 +5285,15 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
             // More typical upload method, the file data is in a multipart mime post.
             for (var i in files.files) {
                 var file = files.files[i];
-                const ftarget = getRandomPassword() + '-' + file.originalFilename;
+                // Keep only a plain filename for the temporary target, matching the single-file upload handler above.
+                var originalFilename = (typeof file.originalFilename === 'string') ? file.originalFilename : '';
+                var safeOriginalFilename = obj.path.basename(originalFilename);
+                if ((safeOriginalFilename !== originalFilename) || (obj.common.IsFilenameValid(safeOriginalFilename) == false)) { res.sendStatus(404); return; }
+                const ftarget = getRandomPassword() + '-' + safeOriginalFilename;
                 const targetPath = obj.path.join(serverpath, ftarget);
                 const uploadTempPath = resolveSafeUploadTempPath(file.path);
                 if (uploadTempPath == null) { res.sendStatus(400); return; }
-                cmd.files.push({ name: file.originalFilename, target: ftarget });
+                cmd.files.push({ name: safeOriginalFilename, target: ftarget });
                 // Rename the file
                 obj.fs.rename(uploadTempPath, targetPath, function (err) {
                     if (err && (err.code === 'EXDEV')) {
@@ -5151,6 +5312,7 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
             for (var i in cmd.nodeids) {
                 obj.GetNodeWithRights(cmd.domain, cmd.user, cmd.nodeids[i], function (node, rights, visible) {
                     if ((node == null) || ((rights & 8) == 0) || (visible == false)) return; // We don't have remote control rights to this device
+                    if ((rights != MESHRIGHT_ADMIN) && ((rights & MESHRIGHT_NOFILES) != 0)) return; // This user is not allowed to use files on this device
                     var agentPath = (((node.agent.id > 0) && (node.agent.id < 5)) || (node.agent.id == 34)) ? cmd.windowsPath : cmd.linuxPath;
                     if (agentPath == null) return;
 
@@ -6053,6 +6215,9 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
         });
     };
 
+    // Backup files prepared through the web UI, by userid. backup.zip serves each one once.
+    obj.preparedBackups = {};
+
     // Handle a server backup request
     async function handleBackupRequest(req, res) {
         const domain = checkUserIpAddress(req, res);
@@ -6063,6 +6228,17 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
 
         var user = obj.users[req.session.userid];
         if ((user == null) || ((user.siteadmin & 1) == 0)) { res.sendStatus(401); return; } // Check if we have server backup rights
+
+        // If the web UI already prepared a backup for this user, send it right away
+        const preparedBackup = obj.preparedBackups[user._id];
+        if (preparedBackup != null) {
+            delete obj.preparedBackups[user._id];
+            if (obj.fs.existsSync(preparedBackup)) {
+                res.setHeader('Content-Type', 'application/x-zip-compressed');
+                res.download(preparedBackup);
+                return;
+            }
+        }
 
         // start a new backup and async wait for it to finish with a timeout
         if (parent.config.settings.autobackup.backupintervalhours == -1) { res.status(403).send("Backup disabled."); return; };
@@ -6118,7 +6294,11 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
         if (domain == null) { parent.debug('web', 'handleRootRequest: invalid domain.'); try { res.sendStatus(404); } catch (ex) { } return; }
 
         // If required, check if this user has rights to do this
-        if ((obj.parent.config.settings != null) && ((obj.parent.config.settings.lockagentdownload == true) || (domain.lockagentdownload == true)) && (req.session.userid == null)) { res.sendStatus(401); return; }
+        if ((obj.parent.config.settings != null) && ((obj.parent.config.settings.lockagentdownload == true) || (domain.lockagentdownload == true)) && (req.session.userid == null)) {
+            // Agents fetching their own update have no session, the agentupdate command gives them a cookie instead
+            var updatecookie = obj.parent.decodeCookie(req.query.auth, obj.parent.loginCookieEncryptionKey, 10); // 10 minute timeout, covers the agent's download retries
+            if ((updatecookie == null) || (updatecookie.a != 'aupd') || (req.query.id == null) || (updatecookie.i != req.query.id)) { res.sendStatus(401); return; }
+        }
 
         if ((req.query.meshinstall != null) && (req.query.id != null)) {
             if ((domain.loginkey != null) && (domain.loginkey.indexOf(req.query.key) == -1)) { try { res.sendStatus(404); } catch (ex) { } return; } // Check 3FA URL key
@@ -6359,7 +6539,7 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                     if (req.query.meshaction == 'winrouter') {
                         var p = null;
                         if (obj.parent.meshToolsBinaries['MeshCentralRouter']) { p = obj.parent.meshToolsBinaries['MeshCentralRouter'].path; }
-                        if ((p == null) || (!obj.fs.existsSync(p))) { p = obj.path.join(__dirname, 'agents', 'MeshCentralRouter.exe'); }
+                        if ((p == null) || (!obj.fs.existsSync(p))) { p = obj.parent.getAgentBinaryPath('MeshCentralRouter.exe'); }
                         if (obj.fs.existsSync(p)) {
                             setContentDispositionHeader(res, 'application/octet-stream', 'MeshCentralRouter.exe', null, 'MeshCentralRouter.exe');
                             try { res.sendFile(p); } catch (ex) { }
@@ -6368,7 +6548,7 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                     } else if (req.query.meshaction == 'winassistant') {
                         var p = null;
                         if (obj.parent.meshToolsBinaries['MeshCentralAssistant']) { p = obj.parent.meshToolsBinaries['MeshCentralAssistant'].path; }
-                        if ((p == null) || (!obj.fs.existsSync(p))) { p = obj.path.join(__dirname, 'agents', 'MeshCentralAssistant.exe'); }
+                        if ((p == null) || (!obj.fs.existsSync(p))) { p = obj.parent.getAgentBinaryPath('MeshCentralAssistant.exe'); }
                         if (obj.fs.existsSync(p)) {
                             setContentDispositionHeader(res, 'application/octet-stream', 'MeshCentralAssistant.exe', null, 'MeshCentralAssistant.exe');
                             try { res.sendFile(p); } catch (ex) { }
@@ -6377,7 +6557,7 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                     } else if (req.query.meshaction == 'macrouter') {
                         var p = null;
                         if (obj.parent.meshToolsBinaries['MeshCentralRouterMacOS']) { p = obj.parent.meshToolsBinaries['MeshCentralRouterMacOS'].path; }
-                        if ((p == null) || (!obj.fs.existsSync(p))) { p = obj.path.join(__dirname, 'agents', 'MeshCentralRouter.dmg'); }
+                        if ((p == null) || (!obj.fs.existsSync(p))) { p = obj.parent.getAgentBinaryPath('MeshCentralRouter.dmg'); }
                         if (obj.fs.existsSync(p)) {
                             setContentDispositionHeader(res, 'application/octet-stream', 'MeshCentralRouter.dmg', null, 'MeshCentralRouter.dmg');
                             try { res.sendFile(p); } catch (ex) { }
@@ -6440,7 +6620,7 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
             } else if (req.query.meshaction == 'winrouter') {
                 var p = null;
                 if (parent.meshToolsBinaries['MeshCentralRouter']) { p = parent.meshToolsBinaries['MeshCentralRouter'].path; }
-                if ((p == null) || !obj.fs.existsSync(p)) { p = obj.path.join(__dirname, 'agents', 'MeshCentralRouter.exe'); }
+                if ((p == null) || !obj.fs.existsSync(p)) { p = obj.parent.getAgentBinaryPath('MeshCentralRouter.exe'); }
                 if (obj.fs.existsSync(p)) {
                     setContentDispositionHeader(res, 'application/octet-stream', 'MeshCentralRouter.exe', null, 'MeshCentralRouter.exe');
                     try { res.sendFile(p); } catch (ex) { }
@@ -6449,7 +6629,7 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
             } else if (req.query.meshaction == 'winassistant') {
                 var p = null;
                 if (parent.meshToolsBinaries['MeshCentralAssistant']) { p = parent.meshToolsBinaries['MeshCentralAssistant'].path; }
-                if ((p == null) || !obj.fs.existsSync(p)) { p = obj.path.join(__dirname, 'agents', 'MeshCentralAssistant.exe'); }
+                if ((p == null) || !obj.fs.existsSync(p)) { p = obj.parent.getAgentBinaryPath('MeshCentralAssistant.exe'); }
                 if (obj.fs.existsSync(p)) {
                     setContentDispositionHeader(res, 'application/octet-stream', 'MeshCentralAssistant.exe', null, 'MeshCentralAssistant.exe');
                     try { res.sendFile(p); } catch (ex) { }
@@ -6458,7 +6638,7 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
             } else if (req.query.meshaction == 'macrouter') {
                 var p = null;
                 if (parent.meshToolsBinaries['MeshCentralRouterMacOS']) { p = parent.meshToolsBinaries['MeshCentralRouterMacOS'].path; }
-                if ((p == null) || !obj.fs.existsSync(p)) { p = obj.path.join(__dirname, 'agents', 'MeshCentralRouter.dmg'); }
+                if ((p == null) || !obj.fs.existsSync(p)) { p = obj.parent.getAgentBinaryPath('MeshCentralRouter.dmg'); }
                 if (obj.fs.existsSync(p)) {
                     setContentDispositionHeader(res, 'application/octet-stream', 'MeshCentralRouter.dmg', null, 'MeshCentralRouter.dmg');
                     try { res.sendFile(p); } catch (ex) { }
@@ -6550,7 +6730,7 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                 var response = '<html><head><title>Mesh Agents Cores</title><style>table,th,td { border:1px solid black;border-collapse:collapse;padding:3px; }</style></head><body style=overflow:auto><table>';
                 response += '<tr style="background-color:lightgray"><th>Name</th><th>Size</th><th>Comp</th><th>Decompressed Hash SHA384</th></tr>';
                 for (var i in parent.defaultMeshCores) {
-                    response += '<tr><td>' + i.split(' ').join('&nbsp;') + '</td><td style="text-align:right"><a download href="/meshagents?dlcore=' + i + '">' + parent.defaultMeshCores[i].length + (req.query.key ? ('?key=' + encodeURIComponent(req.query.key)) : '') + '</a></td><td style="text-align:right"><a download href="/meshagents?dlccore=' + i + (req.query.key ? ('?key=' + encodeURIComponent(req.query.key)) : '') + '">' + parent.defaultMeshCoresDeflate[i].length + '</a></td><td>' + Buffer.from(parent.defaultMeshCoresHash[i], 'binary').toString('hex') + '</td></tr>';
+                    response += '<tr><td>' + i.split(' ').join('&nbsp;') + '</td><td style="text-align:right"><a download href="/meshagents?dlcore=' + i + (req.query.key ? ('&key=' + encodeURIComponent(req.query.key)) : '') + '">' + parent.defaultMeshCores[i].length + '</a></td><td style="text-align:right"><a download href="/meshagents?dlccore=' + i + (req.query.key ? ('&key=' + encodeURIComponent(req.query.key)) : '') + '">' + parent.defaultMeshCoresDeflate[i].length + '</a></td><td>' + Buffer.from(parent.defaultMeshCoresHash[i], 'binary').toString('hex') + '</td></tr>';
                 }
                 response += '</table><a href="' + req.originalUrl.split('?')[0] + (req.query.key ? ('?key=' + encodeURIComponent(req.query.key)) : '') + '">Mesh Agents</a></body></html>';
                 res.send(response);
@@ -6693,9 +6873,6 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
         if (domain.agentTranslations != null) { meshsettings += 'translation=' + domain.agentTranslations + '\r\n'; }
 
         // Setup the response output
-        var archive = require('archiver')('zip', { level: 5 }); // Sets the compression method.
-        archive.on('error', function (err) { throw err; });
-
         // Customize the mesh agent file name
         var meshfilename = 'MeshAgent-' + mesh.name + '.zip';
         var meshexecutablename = 'meshagent';
@@ -6726,7 +6903,6 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
 
         // Set the agent download including the mesh name.
         setContentDispositionHeader(res, 'application/octet-stream', meshfilename, null, 'MeshAgent.zip');
-        archive.pipe(res);
 
         // Create a flat XAR macOS installer package. Bundle .mpkg installers are rejected by recent macOS versions.
         const macosInstallerOpts = {
@@ -6744,14 +6920,39 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
             macosInstallerOpts.backgroundPath = parent.path.join(parent.datapath, domain.agentcustomization.macosinstallerimage);
         }
 
-        require('./macosinstaller').createMacOSInstaller(macosInstallerOpts).then(function (installer) {
-            archive.append(installer.pkg, { name: meshpkgname });
-            archive.append(installer.uninstall, { name: 'Uninstall.command', mode: 493 });
-            archive.finalize();
-        }).catch(function (err) {
-            parent.debug('web', 'Failed to build macOS MeshAgent package: ' + err);
-            try { res.sendStatus(500); } catch (ex) { }
-        });
+		require('./macosinstaller').createMacOSInstaller(macosInstallerOpts).then(async function (installer) {
+			const { Writable } = require('node:stream');
+			const zip = require('@zip.js/zip.js');
+
+			const zipWriter = new zip.ZipWriter(Writable.toWeb(res), { level: 5 });
+
+			await zipWriter.add(
+				meshpkgname,
+				new zip.Uint8ArrayReader(installer.pkg)
+			);
+
+			await zipWriter.add(
+				'Uninstall.command',
+				(typeof installer.uninstall === 'string')
+					? new zip.TextReader(installer.uninstall)
+					: new zip.Uint8ArrayReader(installer.uninstall),
+				{
+					executable: true,
+					unixMode: 0o100755
+				}
+			);
+
+			await zipWriter.close();
+		}).catch(function (err) {
+			parent.debug('web', 'Failed to build macOS MeshAgent package: ' + err);
+			try {
+				if (!res.headersSent) {
+					res.sendStatus(500);
+				} else {
+					res.destroy(err);
+				}
+			} catch (ex) { }
+		});
     }
 
     // Return a .msh file from a given request, id is the device group identifier or encrypted cookie with the identifier.
@@ -7409,6 +7610,12 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                             return;
                         }
                         PerformWSSessionAuth(ws, req, true, function (ws1, req1, domain, user, cookie, authData) {
+                            // Device share guest cookies are for relay sessions only, not control.ashx
+                            if (isDeviceShareGuestCookie(cookie)) {
+                                try { ws.send(JSON.stringify({ action: 'close', cause: 'noauth', msg: 'noauth' })); } catch (ex) { }
+                                try { ws.close(); } catch (ex) { }
+                                return;
+                            }
                             if (user == null) { // User is not authenticated, perform inner server authentication
                                 if (req.headers['x-meshauth'] === '*') {
                                     PerformWSSessionInnerAuth(ws, req, domain, function (ws1, req1, domain, user) { obj.meshUserHandler.CreateMeshUser(obj, obj.db, ws1, req1, obj.args, domain, user, authData); }); // User is authenticated
@@ -7632,12 +7839,27 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                             var domain = getDomain(req);
                             if (domain.passport == null) { next(); return; }
                             if (req.session && req.session.userid) { next(); return; } // already logged in so dont authenticate just carry on
+                            if (typeof req.query.error == 'string') { // The identity provider refused the login, for example when the user has no application role assigned.
+                                parent.authLog('oidcCallback', `OIDC: LOGIN FAILED: Identity provider returned an error: ${req.query.error}${(typeof req.query.error_description == 'string') ? ' - ' + req.query.error_description : ''}`);
+                                req.session.loginmode = 1;
+                                req.session.messageid = 111; // Access denied.
+                                res.redirect(domain.url);
+                                return;
+                            }
                             if (req.session && req.session['oidc-' + domain.id]) { // we have a request to login so do authenticate
                                 domain.passport.authenticate(`oidc-${domain.id}`, { failureRedirect: domain.url, failureFlash: true })(req, res, next);
                             } else { // no idea so carry on
                                 next(); return;
                             }
-                        }, handleStrategyLogin);
+                        }, handleStrategyLogin, function (err, req, res, next) { // Show the login page instead of an internal error page when the login could not be completed.
+                            var domain = getDomain(req);
+                            parent.authLog('oidcCallback', `OIDC: LOGIN FAILED: ${(err != null) ? (err.message ? err.message : err) : 'Unknown error'}`);
+                            parent.debug('error', `OIDC: LOGIN FAILED: ${(err != null) ? (err.stack ? err.stack : err) : 'Unknown error'}`);
+                            if ((domain == null) || (res.headersSent === true)) { next(err); return; }
+                            req.session.loginmode = 1;
+                            req.session.messageid = 111; // Access denied.
+                            res.redirect(domain.url);
+                        });
                     }
 
                     // Generic SAML
@@ -8101,9 +8323,20 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                 var domain = getDomain(req);
                 // Serve theme pack files if domain has a theme pack configured
                 if (domain && domain.themepack) {
-                    var themeFilePath = obj.path.join(obj.parent.datapath, 'theme-pack', domain.themepack, 'public', req.path);
-                    // Prevent directory traversal
-                    if (themeFilePath.indexOf('..') >= 0) return next();
+                    // Keep theme pack names as a single folder under theme-pack
+                    if ((typeof domain.themepack !== 'string') || (domain.themepack.indexOf('..') >= 0) || (domain.themepack.indexOf('/') >= 0) || (domain.themepack.indexOf('\\') >= 0)) { return next(); }
+
+                    var themePublicRoot = obj.path.resolve(obj.parent.datapath, 'theme-pack', domain.themepack, 'public');
+                    var requestPath = (typeof req.path === 'string') ? req.path : '';
+                    while ((requestPath.length > 0) && ((requestPath.charAt(0) === '/') || (requestPath.charAt(0) === '\\'))) { requestPath = requestPath.slice(1); }
+
+                    // Resolve the requested file and keep it inside the theme public folder
+                    var themeFilePath = obj.path.resolve(themePublicRoot, requestPath);
+                    var themePublicRootCmp = isWindowsPlatform ? themePublicRoot.toLowerCase() : themePublicRoot;
+                    var themeFilePathCmp = isWindowsPlatform ? themeFilePath.toLowerCase() : themeFilePath;
+                    if ((themePublicRootCmp.length > 1) && themePublicRootCmp.endsWith(obj.path.sep)) { themePublicRootCmp = themePublicRootCmp.slice(0, -1); }
+                    if ((themeFilePathCmp.length > 1) && themeFilePathCmp.endsWith(obj.path.sep)) { themeFilePathCmp = themeFilePathCmp.slice(0, -1); }
+                    if ((themeFilePathCmp !== themePublicRootCmp) && (themeFilePathCmp.startsWith(themePublicRootCmp + obj.path.sep) === false)) { return next(); }
 
                     obj.fs.stat(themeFilePath, function (err, stats) {
                         if (err || !stats.isFile()) return next();
@@ -8666,7 +8899,7 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                             user = Object.assign(user, { 'groups': groups });
 							if(strategy.custom.authorities && strategy.custom.authorities.includes('roles')){
                                 // Check also for roles
-		                        user.groups = (user.groups || []).concat(user.roles);
+		                        user.groups = (user.groups || []).concat(user.roles || []);
 		                    }
 		                    parent.authLog('oidcCallback',`OIDC: USER GROUPS/ROLES: ${JSON.stringify(user)}`);
 		                    done(null, user);
@@ -8674,18 +8907,23 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                             let error = new Error('OIDC: GROUPS: No groups found due to error:', { cause: err });
                             parent.debug('error', `${JSON.stringify(error)}`);
                             parent.authLog('oidcCallback', error.message);
-                            user.groups = [];
+                            // Keep the roles from the token when they are requested, the group API is not the only source of authorities.
+                            user.groups = (strategy.custom.authorities && strategy.custom.authorities.includes('roles') && user.roles) ? user.roles : [];
                             done(null, user);
                         });
-                    
+
                     } else if (Array.isArray(strategy.custom.authorities) && strategy.custom.authorities.includes('roles')) {
                         // Only roles are requested
                         if (user.roles) {
                             user.groups = user.roles;
                         }
-                        parent.authLog('OIDC: USER ROLES:', user);
+                        parent.authLog('oidcCallback', `OIDC: USER ROLES: ${JSON.stringify(user)}`);
                         done(null, user);
-                    }  
+                    } else {
+                        // No group or role source is configured, continue with no authorities.
+                        parent.authLog('oidcCallback', `OIDC: No groups or roles requested for user: "${user.sid}"`);
+                        done(null, user);
+                    }
                 } else {
                     done(null, user);
                 }
@@ -8710,12 +8948,14 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                                     parent.authLog('getGroups', `ERROR: ${error.message} URL: ${url} OPTIONS: ${JSON.stringify(options)}`);
                                     console.error(error);
                                     reject(error);
+                                    return;
                                 }
                                 if (data.length == 0) {
                                     let error = new Error('OIDC: GROUPS: Getting groups from API failed, request returned no data in response.');
                                     parent.authLog('getGroups', `ERROR: ${error.message} URL: ${url} OPTIONS: ${JSON.stringify(options)}`);
                                     console.error(error);
                                     reject(error);
+                                    return;
                                 }
                                 try {
                                     if (Buffer.isBuffer(data[0])) {
@@ -8729,14 +8969,24 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                                     parent.authLog('getGroups', `ERROR: ${error.message} URL: ${url} OPTIONS: ${JSON.stringify(options)}`);
                                     console.error(error);
                                     reject(error);
+                                    return;
                                 }
                                 if (preset == 'azure') {
-                                    data = JSON.parse(data);
+                                    try {
+                                        data = JSON.parse(data);
+                                    } catch (err) {
+                                        let error = new Error('OIDC: GROUPS: Getting groups from API failed. Response is not valid JSON.', { cause: err });
+                                        parent.authLog('getGroups', `ERROR: ${error.message} URL: ${url} OPTIONS: ${JSON.stringify(options)}`);
+                                        console.error(error);
+                                        reject(error);
+                                        return;
+                                    }
                                     if (data.error) {
                                         let error = new Error('OIDC: GROUPS: Getting groups from API failed. Error joining response data.', { cause: data.error });
                                         parent.authLog('getGroups', `ERROR: ${error.message} URL: ${url} OPTIONS: ${JSON.stringify(options)}`);
                                         console.error(error);
                                         reject(error);
+                                        return;
                                     }
                                     data = data.value;
                                 }
@@ -8825,6 +9075,7 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
         ws.on('message', function (data) {
             var command;
             try { command = JSON.parse(data.toString('utf8')); } catch (e) { return; }
+            if (command == null) return;
             if (obj.common.validateString(command.action, 3, 32) == false) return; // Action must be a string between 3 and 32 chars
 
             switch (command.action) {
@@ -8982,6 +9233,12 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
         try { ws._socket.resume(); } catch (ex) { }
     }
 
+    // Device share guest cookies include these fields and are intended for relay sessions only.
+    // HTTP/HTTPS shares historically omitted cf; desktop/terminal/files shares include it.
+    function isDeviceShareGuestCookie(cookie) {
+        return ((cookie != null) && (cookie.nid != null) && (typeof cookie.r == 'number') && (typeof cookie.p == 'number') && (typeof cookie.gn == 'string'));
+    }
+
     // Authenticates a session and forwards
     function PerformWSSessionAuth(ws, req, noAuthOk, func) {
         // Check if the session expired
@@ -8989,8 +9246,27 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
             parent.debug('web', 'WSERROR: Session expired.'); try { ws.send(JSON.stringify({ action: 'close', cause: 'expired', msg: 'expired-1' })); ws.close(); } catch (e) { } return;
         }
 
-        // Check if this is a banned ip address
-        if (obj.checkAllowLogin(req) == false) { parent.debug('web', 'WSERROR: Banned connection.'); try { ws.send(JSON.stringify({ action: 'close', cause: 'banned', msg: 'banned-1' })); ws.close(); } catch (e) { } return; }
+        const blockingMode = parent.config.settings.maxinvalidlogin?.blocking || 'iprange';
+        
+        // Check if blocking mode is ip and this is a banned ip address
+        if (blockingMode !== 'username' && obj.checkAllowLogin(req) === false) { parent.debug('web', 'WSERROR: Banned connection.'); try { ws.send(JSON.stringify({ action: 'close', cause: 'banned', msg: 'banned-1' })); ws.close(); } catch (e) { } return; }
+        // Check if blocking mode is username and this is a banned username
+        if (blockingMode === 'username') {
+            let username = null;
+            if (req.query && req.query.user) {
+                username = req.query.user;
+                if (username.startsWith('~t:')) { tokenUser = username; }
+            } else if (req.headers && req.headers['x-meshauth']) {
+                try {
+                    username = Buffer.from(req.headers['x-meshauth'].split(',')[0], 'base64').toString();
+                } catch (e) {}
+            } else if (req.session) {
+                if (req.session.loginToken) { username = req.session.loginToken; }
+                if (req.session.userid) { username = req.session.userid.split('/')[2]; }
+            }
+            if(username && obj.checkAllowLogin(null, username) === false) { parent.debug('web', 'WSERROR: Locked user.'); try { ws.send(JSON.stringify({ action: 'close', cause: 'locked', msg: 'locked-1' })); ws.close(); } catch (e) { } return; }
+        }
+        
         try {
             // Hold this websocket until we are ready.
             ws._socket.pause();
@@ -9124,7 +9400,8 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                             // If not authenticated, close the websocket connection
                             parent.debug('web', 'ERR: Websocket bad user/pass auth');
                             //obj.parent.DispatchEvent(['*', 'server-users', 'user/' + domain.id + '/' + obj.args.user.toLowerCase()], obj, { action: 'authfail', userid: 'user/' + domain.id + '/' + obj.args.user.toLowerCase(), username: obj.args.user, domain: domain.id, msg: 'Invalid user login attempt from ' + req.clientIp });
-                            //obj.setbadLogin(req);
+                            //parent.debug('web', "Failed login for user:", req.query.user);
+                            obj.setbadLogin(req, req.query.user);
                             try { ws.send(JSON.stringify({ action: 'close', cause: 'noauth', msg: 'noauth-2a' })); ws.close(); } catch (e) { }
                         }
                     }
@@ -9243,6 +9520,10 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                             } else {
                                 req.session.userid = user._id;
                                 req.session.ip = req.clientIp;
+                                if ((loginOptions != null) && (loginOptions.tokenName != null) && (loginOptions.tokenUser != null)) {
+                                    req.session.tokenUser = loginOptions.tokenUser;
+                                    req.session.tokenName = loginOptions.tokenName;
+                                }
                                 setSessionRandom(req);
                                 func(ws, req, domain, user);
                             }
@@ -9255,6 +9536,8 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
                         } else {
                             // If not authenticated, close the websocket connection
                             parent.debug('web', 'ERR: Websocket bad user/pass auth');
+                            //parent.debug('web', "Failed login for user:", s[0]);
+                            obj.setbadLogin(req, s[0]);
                             try { ws.send(JSON.stringify({ action: 'close', cause: 'noauth', msg: 'noauth-2d' })); ws.close(); } catch (e) { }
                         }
                     }
@@ -10611,39 +10894,129 @@ module.exports.CreateWebServer = function (parent, db, args, certificates, doneF
         if (typeof parent.config.settings.maxinvalidlogin.time != 'number') { parent.config.settings.maxinvalidlogin.time = 10; }
         if (typeof parent.config.settings.maxinvalidlogin.count != 'number') { parent.config.settings.maxinvalidlogin.count = 10; }
         if ((typeof parent.config.settings.maxinvalidlogin.coolofftime != 'number') || (parent.config.settings.maxinvalidlogin.coolofftime < 1)) { parent.config.settings.maxinvalidlogin.coolofftime = null; }
-    }
-    obj.setbadLogin = function (ip) { // Set an IP address that just did a bad login request
-        if (parent.config.settings.maxinvalidlogin === false) return;
-        if (typeof ip == 'object') { ip = ip.clientIp; }
-        if (parent.config.settings.maxinvalidlogin != null) {
-            if (typeof parent.config.settings.maxinvalidlogin.exclude == 'string') {
-                const excludeSplit = parent.config.settings.maxinvalidlogin.exclude.split(',');
-                for (var i in excludeSplit) { if (require('ipcheck').match(ip, excludeSplit[i])) return; }
-            } else if (Array.isArray(parent.config.settings.maxinvalidlogin.exclude)) {
-                for (var i in parent.config.settings.maxinvalidlogin.exclude) { if (require('ipcheck').match(ip, parent.config.settings.maxinvalidlogin.exclude[i])) return; }
+        if (typeof parent.config.settings.maxinvalidlogin.blocking != 'string') {
+            parent.config.settings.maxinvalidlogin.blocking = 'iprange';
+        } else {
+            parent.config.settings.maxinvalidlogin.blocking = parent.config.settings.maxinvalidlogin.blocking.toLowerCase();
+            if (['iprange', 'ip', 'username'].indexOf(parent.config.settings.maxinvalidlogin.blocking) < 0) {
+                parent.config.settings.maxinvalidlogin.blocking = 'iprange';
             }
         }
-        var splitip = ip.split('.');
-        if (splitip.length == 4) { ip = (splitip[0] + '.' + splitip[1] + '.' + splitip[2] + '.*'); }
-        if (++obj.badLoginTableLastClean > 100) { obj.cleanBadLoginTable(); }
-        if (typeof obj.badLoginTable[ip] == 'number') { if (obj.badLoginTable[ip] < Date.now()) { delete obj.badLoginTable[ip]; } else { return; } }  // Check cooloff period
-        if (obj.badLoginTable[ip] == null) { obj.badLoginTable[ip] = [Date.now()]; } else { obj.badLoginTable[ip].push(Date.now()); }
-        if ((obj.badLoginTable[ip].length >= parent.config.settings.maxinvalidlogin.count) && (parent.config.settings.maxinvalidlogin.coolofftime != null)) {
-            obj.badLoginTable[ip] = Date.now() + (parent.config.settings.maxinvalidlogin.coolofftime * 60000); // Move to cooloff period
-        }
     }
-    obj.checkAllowLogin = function (ip) { // Check if an IP address is allowed to login
+    function getBadLoginKey(ip, username) {
+        if (typeof ip === 'object' && ip != null) { ip = ip.clientIp; }
+
+        const mode = parent.config.settings.maxinvalidlogin?.blocking || 'iprange';
+
+        if (mode === 'username') {
+            return (typeof username === 'string' && username.length > 0) ? username.toLowerCase() : null;
+        }
+
+        if (mode === 'ip') { return ip; }
+        if (mode === 'iprange') {
+            const splitip = ip.split('.');
+            if (splitip.length === 4) { // Check if IP v4
+                return `${splitip[0]}.${splitip[1]}.${splitip[2]}.*`;
+            }
+            return ip;
+        }
+        return null; // Return null if mode is 'username'
+    }
+    obj.isKeyAllowed = function (key) {
+        if (!parent.config.settings.maxinvalidlogin || !key) return true;
+
+        const entry = obj.badLoginTable[key];
+    
+        if (entry == null) return true;
+
+        const now = Date.now();
+
+        // Check cooloff period (number timestamp)
+        if (typeof entry === 'number') {
+            if (entry < now) {
+                delete obj.badLoginTable[key];
+                return true;
+            }
+            return false;
+        }
+
+        // Check sliding window timestamps (array)
+        const cutoffTime = now - (parent.config.settings.maxinvalidlogin.time * 60000);
+        while (entry.length > 0 && entry[0] < cutoffTime) {
+            entry.shift();
+        }
+
+        if (entry.length === 0) {
+            delete obj.badLoginTable[key];
+            return true;
+        }
+
+        return entry.length < parent.config.settings.maxinvalidlogin.count;
+    };
+    obj.setbadLogin = function (ip, username) {
+        if (!parent.config.settings.maxinvalidlogin) return;
+
+        const rawIp = (typeof ip === 'object' && ip != null) ? ip.clientIp : ip;
+
+        // Check IP exclusion list (only applicable if a valid IP is present)
+        if (typeof rawIp === 'string' && parent.config.settings.maxinvalidlogin.exclude) {
+            const excludes = Array.isArray(parent.config.settings.maxinvalidlogin.exclude)
+                ? parent.config.settings.maxinvalidlogin.exclude
+                : parent.config.settings.maxinvalidlogin.exclude.split(',');
+
+            const ipcheck = require('ipcheck');
+            for (const pattern of excludes) {
+                if (ipcheck.match(rawIp, pattern.trim())) return;
+            }
+        }
+
+        // Resolve key based on configuration ('ip', 'iprange', or 'username')
+        const key = getBadLoginKey(ip, username);
+        if (!key) return;
+
+        // Periodic cleanup trigger
+        if (++obj.badLoginTableLastClean > 100) { 
+            obj.cleanBadLoginTable(); 
+        }
+
+        const now = Date.now();
+
+        // Check cooloff period
+        if (typeof obj.badLoginTable[key] === 'number') {
+            if (obj.badLoginTable[key] < now) { 
+                delete obj.badLoginTable[key]; 
+            } else { 
+                return; 
+            }
+        }
+
+        // Record bad attempt timestamp
+        if (obj.badLoginTable[key] == null) {
+            obj.badLoginTable[key] = [now];
+        } else {
+            obj.badLoginTable[key].push(now);
+        }
+
+        // Enter cooloff period if threshold reached
+        const maxCount = parent.config.settings.maxinvalidlogin.count;
+        const cooloff = parent.config.settings.maxinvalidlogin.coolofftime;
+        if (cooloff != null && obj.badLoginTable[key].length >= maxCount) {
+            obj.badLoginTable[key] = now + (cooloff * 60000);
+        }
+    };
+    obj.checkAllowLogin = function (ip, username) { // Check if a login key is allowed to login
         if (parent.config.settings.maxinvalidlogin === false) return true;
-        if (typeof ip == 'object') { ip = ip.clientIp; }
-        var splitip = ip.split('.');
-        if (splitip.length == 4) { ip = (splitip[0] + '.' + splitip[1] + '.' + splitip[2] + '.*'); } // If this is IPv4, keep only the 3 first
-        var cutoffTime = Date.now() - (parent.config.settings.maxinvalidlogin.time * 60000); // Time in minutes
-        var ipTable = obj.badLoginTable[ip];
-        if (ipTable == null) return true;
-        if (typeof ipTable == 'number') { if (obj.badLoginTable[ip] < Date.now()) { delete obj.badLoginTable[ip]; } else { return false; } } // Check cooloff period
-        while ((ipTable.length > 0) && (ipTable[0] < cutoffTime)) { ipTable.shift(); }
-        if (ipTable.length == 0) { delete obj.badLoginTable[ip]; return true; }
-        return (ipTable.length < parent.config.settings.maxinvalidlogin.count); // No more than x bad logins in x minutes
+
+        const mode = parent.config.settings.maxinvalidlogin?.blocking || 'iprange';
+        if (mode === 'username') {
+            if (typeof username === 'string' && username.length > 0) {
+                return obj.isKeyAllowed(username.toLowerCase());
+            }
+            return true;
+        }
+
+        const ipKey = getBadLoginKey(ip);
+        return obj.isKeyAllowed(ipKey); // No more than x bad logins in x minutes
     }
     obj.cleanBadLoginTable = function () { // Clean up the IP address login blockage table, we do this occasionaly.
         if (parent.config.settings.maxinvalidlogin === false) return;

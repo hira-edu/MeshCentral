@@ -146,6 +146,24 @@ test('meshcore.js (linux): Files open is audited and answered', () => {
     assert.deepEqual(JSON.parse(JSON.stringify(failing.writes)), [{ action: 'fileaction', operation: 'open', reqid: 4, ok: false, error: 'Error: no desktop session' }]);
 });
 
+test('meshcore.js (linux): openFileOnDesktop runs gio as the console user with the session env (upstream #8103)', () => {
+    for (const gio of [true, false]) {
+        const launches = [];
+        const sandbox = { process: { platform: 'linux', env: { PATH: '/usr/bin' } }, mesh: {}, require(name) {
+            if (name === 'child_process') { return { execFile: (file, args, options) => { launches.push([file, args, options]); return {}; } }; }
+            if (name === 'user-sessions') { return { consoleUid: () => 1000, findEnv: (uid, key) => (uid === 1000 && key === 'DISPLAY') ? ':0' : null }; }
+            if (name === 'fs') { return { existsSync: (file) => gio && file === '/usr/bin/gio' }; }
+            throw new Error('unexpected require: ' + name);
+        } };
+        vm.runInNewContext(extractFunction(sources['meshcore.js'], 'function openFileOnDesktop('), sandbox);
+        sandbox.openFileOnDesktop('/home/a.txt');
+        assert.equal(launches.length, 1);
+        const [file, args, options] = JSON.parse(JSON.stringify(launches[0]));
+        assert.deepEqual([file, args], gio ? ['/usr/bin/gio', ['gio', 'open', '/home/a.txt']] : ['/usr/bin/xdg-open', ['xdg-open', '/home/a.txt']]);
+        assert.deepEqual(options, { uid: 1000, env: { PATH: '/usr/bin', DISPLAY: ':0' } });
+    }
+});
+
 test('meshcore.js: openFileOnDesktop reports why an open failed', () => {
     for (const [platform, mesh, child, expected] of [
         ['win32', { fileAction: () => ({ ok: false, error: 1155 }) }, null, /Native open failed: 1155/],
@@ -154,7 +172,9 @@ test('meshcore.js: openFileOnDesktop reports why an open failed', () => {
         ['freebsd', {}, null, /not supported on this platform/]]) {
         const sandbox = { process: { platform }, mesh, require(name) {
             if (name === 'child_process') { return { execFile: () => child }; }
-            if (name === 'user-sessions') { return { consoleUid: () => 1000 }; }
+            // findEnv: upstream #8103 (1.3.1) launches the Linux opener with the console user's session env.
+            if (name === 'user-sessions') { return { consoleUid: () => 1000, findEnv: () => null }; }
+            if (name === 'fs') { return { existsSync: () => false }; }
             throw new Error('unexpected require: ' + name);
         } };
         vm.runInNewContext(extractFunction(sources['meshcore.js'], 'function openFileOnDesktop('), sandbox);

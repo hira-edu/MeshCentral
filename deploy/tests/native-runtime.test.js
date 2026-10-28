@@ -470,7 +470,7 @@ test('a confirmed controller failure remains actionable from its reported state'
     assert.deepEqual(requests.map(request => request.operation), ['getStatus', 'load']);
 });
 
-// Minimal DOM with the insertion semantics of all five MeshCentral 1.2.5 viewers.
+// Minimal DOM with the insertion semantics of all five MeshCentral 1.3.1 viewers.
 function viewerFixture(kind, replyFields = status({ loadEnabled: false, running: false })) {
     const elements = [];
     const intervals = [];
@@ -659,8 +659,8 @@ const repoRoot = path.join(__dirname, '../..');
 test('the deployment installs the MeshCentral release the plugin view anchors were verified against', () => {
     const fork = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     const lock = JSON.parse(fs.readFileSync(path.join(deployRoot, 'package-lock.json'), 'utf8'));
-    assert.equal(fork.version, '1.2.5');
-    assert.equal(lock.packages['node_modules/meshcentral'].version, '1.2.5');
+    assert.equal(fork.version, '1.3.1');
+    assert.equal(lock.packages['node_modules/meshcentral'].version, '1.3.1');
 });
 
 test('deployment wiring loads the local plugin from the pinned MeshCentral data path', () => {
@@ -691,7 +691,7 @@ test('deployment wiring loads the local plugin from the pinned MeshCentral data 
 });
 
 test('the fork views carry the five anchors the plugin client attaches to', () => {
-    assert.equal(JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version, '1.2.5');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version, '1.3.1');
     for (const [file, tag, id] of [
         ['default', 'span', 'connectbutton1span'], ['default3', 'div', 'connectbutton1span'],
         ['default-mobile', 'input', 'connectbutton1'], ['sharing', 'span', 'connectbutton1span'],

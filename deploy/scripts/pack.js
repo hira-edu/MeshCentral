@@ -11,6 +11,8 @@
 // versions (module-versions.js), written before packing, checked in the tarball, removed afterwards.
 // The tarball depends only on the packaged files: the manifest is dated by the last commit that
 // changed them, npm writes fixed tar mtimes, and HEAD's own id is printed (commit) but never packed.
+// Agent binaries (D11/D12): the packaged ones must be exactly the fork builds pinned by size and SHA384 in
+// agents/agent-defaults.json, read with the package's own agentbuilds.js, before and after packing.
 // deploy/package.json depends on dist/meshcentral-<version>.tgz, and its lockfile pins the sha512.
 // Release packs run on Linux (D4); a pack made on Windows serves the local duplicate server.
 const childProcess = require('node:child_process');
@@ -27,7 +29,7 @@ const outDir = path.join(repoRoot, 'deploy', 'dist');
 // must be reviewed and added here.
 const TOP_LEVEL_FILES = new Set([
     'LICENSE', 'package.json', 'readme.md', 'sample-config.json', 'sample-config-advanced.json',
-    'agentcertificatehistory.js',
+    'agentbuilds.js', 'agentcertificatehistory.js', 'agenttypes.js',
     'amt-ider.js', 'amtevents.js', 'amtmanager.js', 'amtprovisioningserver.js', 'amtscanner.js', 'amtscript.js',
     'apprelays.js', 'authenticode.js', 'backup.js', 'certoperations.js', 'common.js', 'crowdsec.js', 'db.js',
     'exeHandler.js', 'firebase.js', 'interceptor.js', 'letsencrypt.js', 'macosinstaller.js', 'mcrec.js',
@@ -141,6 +143,30 @@ const dirty = git(['status', '--porcelain', '-z', '--untracked-files=no', '--', 
 for (const p of dirty) { problems.push('changed since HEAD: ' + p); }
 if (problems.length) { fail(problems.length + ' problem(s):\n  ' + problems.join('\n  ')); }
 
+// 1b. Agent binaries: every packaged agent binary is pinned, and every pin is packaged with its size and SHA384.
+const agentbuilds = require(path.join(repoRoot, 'agentbuilds.js'));
+const agentNames = agentbuilds.agentNames(require(path.join(repoRoot, 'agenttypes.js'))());
+const agentManifest = 'agents/' + agentbuilds.MANIFEST_NAME;
+let pins;
+try { pins = agentbuilds.parseManifest(JSON.parse(fs.readFileSync(path.join(repoRoot, agentManifest), 'utf8')), agentNames); }
+catch (ex) { fail(agentManifest + ': ' + ex.message); }
+function pinMismatch(name, data) {
+    const pin = pins.files.get(name);
+    if (data.length !== pin.size) { return data.length + ' bytes, pinned ' + pin.size; }
+    const digest = crypto.createHash('sha384').update(data).digest('hex');
+    return (digest === pin.sha384) ? null : 'SHA384 ' + digest + ', pinned ' + pin.sha384;
+}
+const packagedAgents = listed.filter(p => agentbuilds.isAgentBinaryPath(p, agentNames));
+const agentProblems = [];
+for (const p of packagedAgents) {
+    const name = p.slice('agents/'.length);
+    if (!pins.files.has(name)) { agentProblems.push('agent binary not pinned in ' + agentManifest + ': ' + p); continue; }
+    const why = pinMismatch(name, fs.readFileSync(path.join(repoRoot, p)));
+    if (why) { agentProblems.push('agent binary does not match its pin: ' + p + ' (' + why + ')'); }
+}
+for (const name of pins.files.keys()) { if (!packagedAgents.includes('agents/' + name)) { agentProblems.push('pinned agent binary not in the package: agents/' + name); } }
+if (agentProblems.length) { fail(agentProblems.length + ' agent binary problem(s):\n  ' + agentProblems.join('\n  ')); }
+
 // 2. The module version manifest, dated by the last commit that changed packaged content (not HEAD),
 // so commits outside the package leave the tarball unchanged. build() checks that its packaged-path
 // rule selects exactly the dry-run list.
@@ -172,6 +198,12 @@ if (JSON.stringify(packedModules) !== JSON.stringify(manifestModules)) {
         packedModules.filter(m => !manifestModules.includes(m)).concat(manifestModules.filter(m => !packedModules.includes(m))).join(', '));
 }
 for (const p of contents.keys()) { if (!expected.includes(p)) { mismatch.push('not in dry-run list: ' + p); } }
+// The packed bytes of every pinned agent binary are the pinned bytes.
+for (const name of pins.files.keys()) {
+    const p = 'agents/' + name;
+    const why = contents.has(p) ? pinMismatch(name, contents.get(p)) : 'missing';
+    if (why) { mismatch.push('packed agent binary does not match its pin: ' + p + ' (' + why + ')'); }
+}
 if (mismatch.length) { fs.unlinkSync(tarball); fail(mismatch.length + ' tarball problem(s):\n  ' + mismatch.slice(0, 50).join('\n  ')); }
 
 const bytes = fs.readFileSync(tarball);
@@ -188,6 +220,8 @@ const record = {
     // commit (HEAD) above is printed only.
     packagedCommit: versions.manifest.commit,
     modules: manifestModules.length,
+    agentBuild: pins.build,
+    agents: [...pins.files.values()].map(pin => ({ filename: pin.filename, size: pin.size, sha384: pin.sha384 })),
     node: process.version,
     npm: npm(['--version']).toString('utf8').trim(),
     platform: process.platform
@@ -196,4 +230,6 @@ console.log(record.tarball + ': ' + record.files + ' files, ' + record.size + ' 
 console.log('integrity ' + record.integrity);
 console.log('sha256    ' + record.sha256);
 console.log('modules   ' + record.modules + ' at ' + record.moduleVersion + ' (' + moduleVersions.MANIFEST + ', last packaged change ' + record.packagedCommit + ')');
+console.log('agents    ' + (pins.files.size ? pins.files.size + ' pinned fork binaries built from ' + pins.build.repository + ' ' + pins.build.commit
+    : 'none pinned in ' + agentManifest + ': the server serves no agent binary and agents/check-releases.js refuses this package'));
 if (process.argv.includes('--json')) { console.log(JSON.stringify(record, null, 2)); }

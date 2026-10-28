@@ -8,8 +8,8 @@
 //   translations  views/translations/* and the two agent translation JSON files (translate.js translateall)
 //   emails        emails/translations/* (translate.js translateall)
 //   views         views/*-min.handlebars and the public/scripts/*-min.js that translate.js minifyall makes
-//   viewer        public/scripts/agent-desktop-0.0.2-min.js (uglify-js) and agent-redir-ws-0.1.1-min.js
-//                 (translate.js minifyall; D25)
+//   viewer        public/scripts/agent-desktop-0.0.2-min.js and agent-redir-ws-0.1.1-min.js, both the
+//                 translate.js minifyall output, as in the npm package (D25, WEB-21)
 //   agents        agents/meshcore.min.js and modules_meshcore_min/ (uglify-js). Proposal only: compared
 //                 and reported, never written to the repository.
 //
@@ -45,14 +45,12 @@ const deployDir = path.join(repoRoot, 'deploy');
 const ALL = ['translations', 'emails', 'views', 'viewer', 'agents'];
 const DEFAULT = ['translations', 'emails', 'views', 'viewer'];
 const VIEWER_FILES = ['public/scripts/agent-desktop-0.0.2-min.js', 'public/scripts/agent-redir-ws-0.1.1-min.js'];
-// The committed viewer -min files carry production's CRLF bytes (Stage 1 import).
-const VIEWER_EOL = '\r\n';
 // translateall also writes minified email variants. Upstream does not ship them and meshmail.js
 // reads only <name>_<lang>.html and .txt, so they are not part of the generated set.
 const UNSHIPPED = [/^emails\/translations\/[^/]+-min_[^/]+\.html$/];
-// uglify-js for the viewer and agents steps: default compress and mangle. uglify-js 3.18+ treats input
-// as a strict-mode ES module unless module is false; these are classic scripts (and meshcore.js uses
-// sloppy-mode `delete <variable>`), so module is turned off. The viewer bytes are the same either way.
+// uglify-js for the agents step: default compress and mangle. uglify-js 3.18+ treats input as a
+// strict-mode ES module unless module is false; these are classic scripts (and meshcore.js uses
+// sloppy-mode `delete <variable>`), so module is turned off.
 const UGLIFY_OPTIONS = Object.freeze({ module: false, compress: {}, mangle: {} });
 // Outputs translate.js rewrites in place.
 const TRANSLATED_JSON = ['agents/agent-translations.json', 'agents/modules_meshcore/coretranslations.json'];
@@ -290,27 +288,25 @@ function generate(options, src, committedTree, tmp, tool) {
         const committed = [...owned].filter(rel => committedTree.exists(rel));
         results.views = { generated, committed };
     }
-    if (has('viewer')) results.viewer = { generated: buildViewer(tmp, tool), committed: VIEWER_FILES.filter(rel => committedTree.exists(rel)) };
+    if (has('viewer')) results.viewer = { generated: buildViewer(tmp), committed: VIEWER_FILES.filter(rel => committedTree.exists(rel)) };
     if (has('agents')) results.agents = buildAgents(options, tmp, tool, committedTree, log);
     return { results, log };
 }
 
-// agent-desktop-0.0.2-min.js: uglify-js with default compress and mangle, then CRLF.
-// agent-redir-ws-0.1.1-min.js (D25): upstream's own minifyall output of the source.
-function buildViewer(tmp, tool) {
-    const uglify = require(path.join(tool.nodeModules, 'uglify-js'));
-    const desktop = uglify.minify(fs.readFileSync(path.join(tmp, 'public/scripts/agent-desktop-0.0.2.js'), 'utf8'), UGLIFY_OPTIONS);
-    if (desktop.error) fail('uglify-js public/scripts/agent-desktop-0.0.2.js: ' + desktop.error.message);
-    const redir = path.join(tmp, VIEWER_FILES[1]);
-    if (!fs.existsSync(redir)) fail('minifyall did not write ' + VIEWER_FILES[1]);
+// Both viewer -min files are upstream's own minifyall output of their sources (D25 for the
+// redirector, WEB-21 for the desktop), so the fork uses the one minifier that makes the npm copies.
+function buildViewer(tmp) {
     const generated = new Map();
-    generated.set(VIEWER_FILES[0], Buffer.from(desktop.code + VIEWER_EOL, 'utf8'));
-    generated.set(VIEWER_FILES[1], fs.readFileSync(redir));
+    for (const rel of VIEWER_FILES) {
+        const abs = path.join(tmp, rel);
+        if (!fs.existsSync(abs)) fail('minifyall did not write ' + rel);
+        generated.set(rel, fs.readFileSync(abs));
+    }
     return generated;
 }
 
 // Proposal (C1/C9/S6a), never written to the repository: the pinned uglify-js (default compress and
-// mangle, the viewer's settings) on agents/meshcore.js and every agents/modules_meshcore/*.js, one
+// mangle) on agents/meshcore.js and every agents/modules_meshcore/*.js, one
 // <name>.min.js per module (no .js copies), JSON minified the way translate.js minifydir does it.
 // Not minifydir itself: it wraps the script in <script> for html-minifier-terser, which rewrites the
 // quotes of meshcore.js's '<?xml version="1.0" ...' literal and breaks the core.
