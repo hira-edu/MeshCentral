@@ -299,9 +299,8 @@ module.exports.nativeruntime = function (parent) {
     }
     return {
         exports: [],
-        ['hook_' + 'setupHttpHandlers']: setupHttp,
-        ['hook_' + 'processAgentData']: controller.receive,
-        close: controller.close
+        hook_setupHttpHandlers: setupHttp,
+        hook_processAgentData: controller.receive
     };
 };
 
