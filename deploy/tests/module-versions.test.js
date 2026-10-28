@@ -75,6 +75,10 @@ function packageFixture(t) {
         'package.json': JSON.stringify({ name: 'meshcentral', version: '0.0.0-test', files: ['*.js', 'agents'] }, null, 2) + '\n',
         'readme.md': 'fixture\n',
         'meshcentral.js': '// server\n',
+        // pack.js checks the packaged agent binaries against the pins with the package's own agentbuilds.js.
+        'agentbuilds.js': fs.readFileSync(path.join(repoRoot, 'agentbuilds.js')),
+        'agenttypes.js': fs.readFileSync(path.join(repoRoot, 'agenttypes.js')),
+        'agents/agent-defaults.json': JSON.stringify({ schema: 'meshcentral-fork-agents/1', build: null, files: [] }) + '\n',
         'agents/meshcore.js': '// core\n',
         'agents/modules_meshcore/alpha.js': 'module.exports = 1;\n',
         'agents/modules_meshcore/beta.js': 'module.exports = 2;\n',
@@ -143,7 +147,7 @@ test('pack.js: a deploy-only commit leaves the tarball unchanged; a packaged com
         return record;
     };
     const first = pack();
-    assert.strictEqual(first.files, 8, 'the 7 packaged files plus the generated manifest');
+    assert.strictEqual(first.files, 11, 'the 10 packaged files plus the generated manifest');
     fs.writeFileSync(path.join(dir, 'deploy/notes.md'), 'lockfile now pins ' + first.integrity + '\n');
     commitAll(dir, 'pin the tarball integrity', '2026-10-08T10:00:00Z');
     const second = pack();
