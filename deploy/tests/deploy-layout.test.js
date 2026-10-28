@@ -4,7 +4,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const deployRoot = path.join(__dirname, '..');
 
@@ -27,6 +29,39 @@ test('the local backup names only deployment files that exist', () => {
     // quietly capture less than it lists.
     const missing = backupRepoFiles().filter((entry) => !fs.existsSync(path.join(deployRoot, entry)));
     assert.deepEqual(missing, []);
+});
+
+// Runs the package.json postinstall script's node -e program in cwd.
+function runPostinstall(cwd) {
+    const script = JSON.parse(read('package.json')).scripts.postinstall;
+    const match = /^node -e "(.*)"$/.exec(script);
+    assert.ok(match, 'postinstall is a single node -e program: ' + script);
+    return spawnSync(process.execPath, ['-e', match[1].replace(/\\"/g, '"')], { cwd, encoding: 'utf8' });
+}
+
+test('postinstall creates the data folder and is repeatable', () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-deploy-postinstall-'));
+    try {
+        for (let run = 0; run < 2; run++) {
+            const result = runPostinstall(cwd);
+            assert.equal(result.status, 0, result.stderr);
+            assert.ok(fs.statSync(path.join(cwd, 'meshcentral-data')).isDirectory());
+        }
+    } finally {
+        fs.rmSync(cwd, { recursive: true, force: true });
+    }
+});
+
+test('postinstall fails when the data folder cannot be created', () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-deploy-postinstall-'));
+    try {
+        fs.writeFileSync(path.join(cwd, 'meshcentral-data'), 'not a folder');
+        const result = runPostinstall(cwd);
+        assert.notEqual(result.status, 0, 'a failed mkdir must fail the install');
+        assert.match(result.stderr, /EEXIST|ENOTDIR/);
+    } finally {
+        fs.rmSync(cwd, { recursive: true, force: true });
+    }
 });
 
 test('the wrapper carries none of the retired pre-fork deployment files', () => {

@@ -10,7 +10,7 @@
     "test": "node --test",
     "start": "node node_modules/meshcentral/meshcentral.js",
     "start:dev": "NODE_ENV=development node node_modules/meshcentral/meshcentral.js",
-    "postinstall": "node -e \"try{require('fs').mkdirSync('meshcentral-data',{recursive:true})}catch(e){}\""
+    "postinstall": "node -e \"require('fs').mkdirSync('meshcentral-data',{recursive:true})\""
   },
   "dependencies": {
     "@mongodb-js/saslprep": "1.3.1",
