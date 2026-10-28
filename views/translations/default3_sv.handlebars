@@ -312,6 +312,10 @@
                                         <i class="fa fa-window-minimize userDropdownMenuIcon"></i>
                                         <span>Växla sidfot</span>
                                     </div>
+                                    <div class="userDropdownMenuItem" data-action="browser-fullscreen" onclick="toggleBrowserFullscreen(); QV('userDropdownMenu', false); QV('uiSubmenu', false); resetChevronArrow();">
+                                        <i class="fa fa-expand userDropdownMenuIcon"></i>
+                                        <span>Browser Full Screen</span>
+                                    </div>
                                     <div id="userDropdownMenuDivider" class="userDropdownMobileOnly"></div>
                                 </div>
 
@@ -508,7 +512,7 @@
                         <input type="button" class="btn btn-secondary me-1 btn-sm" id="SelectAllButton" onclick="selectallButtonFunction();" value="Välj alla">
                         <input type="button" class="btn btn-primary me-1 btn-sm" id="GroupActionButton" disabled="disabled" value="Gruppåtgärd" onclick="groupActionFunction()">
                         <input type="button" class="btn btn-secondary me-1 btn-sm" id="ScrollToTopButton" onclick="onDevicesScroll(true);" value="Scroll To Top">
-                        <input type="text" id="SearchInput" class="form-control-sm me-1 btn-sm" placeholder="Filtrera" onchange="onDeviceSearchChanged(event)" onclick="onDeviceSearchChanged(event)" onkeyup="onDeviceSearchChanged(event)" onfocus="onSearchFocus(1)" onblur="onSearchFocus(0)" title="Filtrera enheter efter namn eller prefix: user: (u:) ip: group: (g:) tag: (t:) atag: (a:) os: amt: desc: wsc:ok/noav/noupdate/nofirewall/any connectivity: (c:) - Prefix ! för att utesluta, t.ex. !tag:abc">
+                        <input type="text" id="SearchInput" class="form-control-sm me-1 btn-sm" placeholder="Filtrera" onchange="onDeviceSearchChanged(event)" onclick="onDeviceSearchChanged(event)" onkeyup="onDeviceSearchChanged(event)" onfocus="onSearchFocus(1)" onblur="onSearchFocus(0)" title="Filter devices by name or prefix: user: (u:) ip: group: (g:) tag: (t:) atag: (a:) os: amt: desc: wsc:ok/noav/noupdate/nofirewall/any connectivity: (c:) - Prefix with ! to negate, e.g. !tag:abc - Separate terms with `,`, `or`, or `and`: `device1,device2` or `device1 or device2` = OR; `device1 and device2` = AND; prefix with `!` to exclude, e.g. `u:user1 and !g:group1`.">
                         <span id="SearchInputClearButton" style="display:none;position:relative">
                             <span class="fa-layers fa-fw" role="button" onclick="clearDeviceSearch()" style="position:absolute;left:-25px;top:-15px">
                                 <i class="fa-solid fa-circle" style="color:var(--bs-secondary-bg)"></i>
@@ -549,7 +553,7 @@
                         </span>
                         <input type="button" class="btn btn-secondary me-1 btn-sm" onclick="onDevicesScroll(true);" value="Scroll To Top">
                         <input type="button" class="btn btn-primary me-1 btn-sm" onclick="showMultiDesktopSettings()" value="inställningar">
-                        <input type="text" id="KvmSearchInput" class="form-control-sm me-1" placeholder="Filtrera" onchange="onDeviceSearchChanged(event)" onclick="onDeviceSearchChanged(event)" onkeyup="onDeviceSearchChanged(event)" onfocus="onSearchFocus(1)" onblur="onSearchFocus(0)" title="Filtrera enheter efter namn eller prefix: user: (u:) ip: group: (g:) tag: (t:) atag: (a:) os: amt: desc: wsc:ok/noav/noupdate/nofirewall/any connectivity: (c:) - Prefix ! för att utesluta, t.ex. !tag:abc">
+                        <input type="text" id="KvmSearchInput" class="form-control-sm me-1" placeholder="Filtrera" onchange="onDeviceSearchChanged(event)" onclick="onDeviceSearchChanged(event)" onkeyup="onDeviceSearchChanged(event)" onfocus="onSearchFocus(1)" onblur="onSearchFocus(0)" title="Filter devices by name or prefix: user: (u:) ip: group: (g:) tag: (t:) atag: (a:) os: amt: desc: wsc:ok/noav/noupdate/nofirewall/any connectivity: (c:) - Prefix with ! to negate, e.g. !tag:abc - Separate terms with `,`, `or`, or `and`: `device1,device2` or `device1 or device2` = OR; `device1 and device2` = AND; prefix with `!` to exclude, e.g. `u:user1 and !g:group1`.">
                         <span id="KvmSearchInputClearButton" style="display:none;position:relative">
                             <span class="fa-layers fa-fw" role="button" onclick="clearDeviceSearch()" style="position:absolute;left:-25px;top:-15px">
                                 <i class="fa-solid fa-circle" style="color:var(--bs-secondary-bg)"></i>
@@ -1993,6 +1997,7 @@
                                 </div>
                                 <div class="form-floating mb-2">
                                     <select id="d7framelimiter" class="form-select">
+                                        <option value="20">Väldigt snabb</option>
                                         <option selected="selected" value="50">Snabb</option>
                                         <option value="100">Medium</option>
                                         <option value="400">Långsam</option>
@@ -2157,7 +2162,7 @@
 
 
         <audio id="chimes"><source src="sounds/chimes.mp3" type="audio/mp3"></audio>
-        <iframe style="display:none" name="fileDownloadFrame"></iframe>
+        <iframe id="fileDownloadFrame" style="display:none" name="fileDownloadFrame"></iframe>
     </div>
     <script type="text/javascript">
         'use strict';
@@ -3061,7 +3066,8 @@
                 // Fetch list of meshes, nodes, files
                 meshserver.send({ action: 'usergroups' });
                 meshserver.send({ action: 'meshes' });
-                meshserver.send({ action: 'nodes', id: '{{currentNode}}', skip: (devicePagingState == null) ? 0 : devicePagingState.skip });
+                deviceServerFilter = getDeviceServerFilter();
+                meshserver.send({ action: 'nodes', id: '{{currentNode}}', skip: (devicePagingState == null) ? 0 : devicePagingState.skip, filter: deviceServerFilter });
                 meshserver.send({ action: 'loginTokens' });
                 if (pluginHandler != null) { meshserver.send({ action: 'plugins' }); }
                 if ('{{currentNode}}'.toLowerCase() == '') { meshserver.send({ action: 'files' }); }
@@ -3538,7 +3544,7 @@
                     try {
                         var softwareData = message.value;
                         if (JSON.parse(message.value).error) {
-                            QH('p18Status', '<span>' + "FEL:" + JSON.parse(message.value).error + '</span>');
+                            QH('p18Status', '<span>' + "FEL:" + EscapeHtml(JSON.parse(message.value).error) + '</span>');
                             QH('p18html', '<div style="text-align:center;padding:50px;color:gray"><i>' + "Klicka på Uppdatera för att läsa in installerad programvara..." + '</i></div>');
                             installedAppsLoading = false;
                             installedAppsLoadingType = 0;
@@ -3626,9 +3632,14 @@
                             } else if ((message.type === 'userSessions') && (currentNode != null) && (currentNode._id === message.nodeid) && (desktop == null)) {
                                 // Got list of user sessions
                                 var userSessions = [];
+                                var userSessionTag = parseInt(message.tag);
+                                if (isNaN(userSessionTag)) { userSessionTag = 0; }
                                 if (message.data != null) { for (var i in message.data) { if ((message.data[i].State == 'Active') || (message.data[i].State == 'Connected') || (message.data[i].StationName == 'Console') || (debugmode == 3)) { userSessions.push(message.data[i]); } } }
-                                if (userSessions.length === 0) { connectDesktop(null, 1, null, message.tag); } // No active sessions, do a normal connection.
-                                else if (userSessions.length === 1) { connectDesktop(null, 1, userSessions[0].SessionId, message.tag); } // One active session, connect to it
+                                if (userSessions.length === 0) { connectDesktop(null, 1, null, userSessionTag); } // No active sessions, do a normal connection.
+                                else if (userSessions.length === 1) {
+                                    var userSessionId = parseInt(userSessions[0].SessionId);
+                                    connectDesktop(null, 1, isNaN(userSessionId) ? null : userSessionId, userSessionTag);
+                                } // One active session, connect to it
                                 else {
                                     var x = '';
                                     var sortBy = "{{{userSessionsSort}}}";
@@ -3642,8 +3653,10 @@
                                         });
                                     }
                                     for (var i in userSessions) {
-                                        x += '<div style="text-align:left;cursor:pointer;background-color:gray;margin:5px;padding:5px;border-radius:5px" onclick=connectDesktop(event,1,' + userSessions[i].SessionId + ',' + message.tag + ')>' + userSessions[i].State + (userSessions[i].StationName ? (', ' + userSessions[i].StationName) : '');
-                                        if (userSessions[i].Username) { if (userSessions[i].Domain) { x += ' - ' + userSessions[i].Domain + '/' + userSessions[i].Username; } else { x += ' - ' + userSessions[i].Username; } }
+                                        var userSessionId = parseInt(userSessions[i].SessionId);
+                                        if (isNaN(userSessionId)) continue;
+                                        x += '<div style="text-align:left;cursor:pointer;background-color:gray;margin:5px;padding:5px;border-radius:5px" onclick=connectDesktop(event,1,' + userSessionId + ',' + userSessionTag + ')>' + EscapeHtml(userSessions[i].State) + (userSessions[i].StationName ? (', ' + EscapeHtml(userSessions[i].StationName)) : '');
+                                        if (userSessions[i].Username) { if (userSessions[i].Domain) { x += ' - ' + EscapeHtml(userSessions[i].Domain) + '/' + EscapeHtml(userSessions[i].Username); } else { x += ' - ' + EscapeHtml(userSessions[i].Username); } }
                                         x += '</div>';
                                     }
                                     QH('p11DeskSessionSelector', x);
@@ -3659,20 +3672,20 @@
                                         if (!message.value.cmd && message.value.path) { message.value.cmd = message.value.path }
                                         if (!message.value.processUser && message.value.userName) { message.value.processUser = message.value.userName.split("\\")[1]; }
                                         if (!message.value.processDomain && message.value.userName) { message.value.processDomain = message.value.userName.split("\\")[0]; }
-                                        if (message.value.processName) { x += '<div style=padding:4px><div style=padding-bottom:4px>' + "Process namn" + '</div><div style=word-wrap:break-word;padding-left:6px><b>' + message.value.processName + '</b></div></div>'; }
-                                        if (message.value.machineName) { x += addHtmlValue5("Maskinsnamn", message.value.machineName); }
-                                        if (message.value.cmd) { x += '<div style=padding:4px><div style=padding-bottom:4px>' + "Kommandorad" + '</div><div style=word-wrap:break-word;padding-left:6px><b>' + message.value.cmd + '</b></div></div>'; }
-                                        if (message.value.mainWindowTitle) { x += '<div style=padding:4px><div style=padding-bottom:4px>' + "Fönstrets titel" + '</div><div style=word-wrap:break-word;padding-left:6px><b>' + message.value.mainWindowTitle + '</b></div></div>'; }
-                                        if (message.value.processUser) { x += addHtmlValue5("Användare", message.value.processUser); }
-                                        if (message.value.processDomain) { x += addHtmlValue5("Domän", message.value.processDomain); }
-                                        if (message.value.startTime) { x += addHtmlValue5("Starttid", message.value.startTime); }
+                                        if (message.value.processName) { x += '<div style=padding:4px><div style=padding-bottom:4px>' + "Process namn" + '</div><div style=word-wrap:break-word;padding-left:6px><b>' + EscapeHtml(message.value.processName) + '</b></div></div>'; }
+                                        if (message.value.machineName) { x += addHtmlValue5("Maskinsnamn", EscapeHtml(message.value.machineName)); }
+                                        if (message.value.cmd) { x += '<div style=padding:4px><div style=padding-bottom:4px>' + "Kommandorad" + '</div><div style=word-wrap:break-word;padding-left:6px><b>' + EscapeHtml(message.value.cmd) + '</b></div></div>'; }
+                                        if (message.value.mainWindowTitle) { x += '<div style=padding:4px><div style=padding-bottom:4px>' + "Fönstrets titel" + '</div><div style=word-wrap:break-word;padding-left:6px><b>' + EscapeHtml(message.value.mainWindowTitle) + '</b></div></div>'; }
+                                        if (message.value.processUser) { x += addHtmlValue5("Användare", EscapeHtml(message.value.processUser)); }
+                                        if (message.value.processDomain) { x += addHtmlValue5("Domän", EscapeHtml(message.value.processDomain)); }
+                                        if (message.value.startTime) { x += addHtmlValue5("Starttid", EscapeHtml(message.value.startTime)); }
                                         x += '<hr />';
                                         if (message.value.PriorityBoostEnabled) { x += addHtmlValue5("Priority Boost", message.value.PriorityBoostEnabled ? "Aktiverad" : "Inaktiverad"); }
-                                        if (message.value.sessionId) { x += addHtmlValue5("Sessions-id", message.value.sessionId); }
-                                        if (message.value.handleCount) { x += addHtmlValue5("Handtagräkning", message.value.handleCount); }
-                                        if (message.value.privilegedProcessorTime) { x += addHtmlValue5("Privilegierad processortid", format("{0} sekunder", message.value.privilegedProcessorTime)); }
-                                        if (message.value.totalProcessorTime) { x += addHtmlValue5("Total processortid", format("{0} sekunder", message.value.totalProcessorTime)); }
-                                        if (message.value.userProcessorTime) { x += addHtmlValue5("Användarprocessortid", format("{0} sekunder", message.value.userProcessorTime)); }
+                                        if (message.value.sessionId) { x += addHtmlValue5("Sessions-id", EscapeHtml(message.value.sessionId)); }
+                                        if (message.value.handleCount) { x += addHtmlValue5("Handtagräkning", EscapeHtml(message.value.handleCount)); }
+                                        if (message.value.privilegedProcessorTime) { x += addHtmlValue5("Privilegierad processortid", EscapeHtml(format("{0} sekunder", message.value.privilegedProcessorTime))); }
+                                        if (message.value.totalProcessorTime) { x += addHtmlValue5("Total processortid", EscapeHtml(format("{0} sekunder", message.value.totalProcessorTime))); }
+                                        if (message.value.userProcessorTime) { x += addHtmlValue5("Användarprocessortid", EscapeHtml(format("{0} sekunder", message.value.userProcessorTime))); }
                                         if (message.value.nonpagedSystemMemorySize) { x += addHtmlValue5("Ej sidminne", getNiceSize2(message.value.nonpagedSystemMemorySize)); }
                                         if (message.value.pagedMemorySize) { x += addHtmlValue5("Sidminne", getNiceSize2(message.value.pagedMemorySize)); }
                                         if (message.value.privateMemorySize) { x += addHtmlValue5("Privat minne", getNiceSize2(message.value.privateMemorySize)); }
@@ -3719,13 +3732,14 @@
                             var splitip = currentNode.lastaddr.split(':');
                             if (splitip.length > 2) {
                                 // IPv6
-                                x += addHtmlValue2("Senaste adressen", currentNode.lastaddr + ' <i class="fa-fw fa-regular fa-clipboard fa-sm" role=button title="' + "Kopiera adressen till Urklipp" + '" onclick=copyTextToClip2("' + encodeURIComponentEx(currentNode.lastaddr) + '")></i>');
+                                var v6addr = splitip.slice(0, -1).join(':');
+                                x += addHtmlValue2("Senaste adressen", (isPrivateIP(v6addr) ? currentNode.lastaddr : '<a href="https://iplocation.com/?ip=' + encodeURIComponent(v6addr) + '" rel="noreferrer noopener" target="MeshIPLookup">' + currentNode.lastaddr + '</a>') + ' <i class="fa-fw fa-regular fa-clipboard fa-sm" role=button title="' + "Kopiera adressen till Urklipp" + '" onclick=copyTextToClip2("' + encodeURIComponentEx(currentNode.lastaddr) + '")></i>');
                             } else {
                                 // IPv4
                                 if (isPrivateIP(currentNode.lastaddr)) {
                                     x += addHtmlValue2("Senaste adressen", splitip[0] + ' <i class="fa-fw fa-regular fa-clipboard fa-sm" role=button title="' + "Kopiera adressen till Urklipp" + '" onclick=copyTextToClip2("' + encodeURIComponentEx(splitip[0]) + '")></i>');
                                 } else {
-                                    x += addHtmlValue2("Senaste adressen", '<a href="https://iplocation.com/?ip=' + splitip[0] + '" rel="noreferrer noopener" target="MeshIPLoopup">' + splitip[0] + '</a> <i class="fa-fw fa-regular fa-clipboard fa-sm" role=button title="' + "Kopiera adressen till Urklipp" + '" onclick=copyTextToClip2("' + encodeURIComponentEx(splitip[0]) + '")></i>');
+                                    x += addHtmlValue2("Senaste adressen", '<a href="https://iplocation.com/?ip=' + splitip[0] + '" rel="noreferrer noopener" target="MeshIPLookup">' + splitip[0] + '</a> <i class="fa-fw fa-regular fa-clipboard fa-sm" role=button title="' + "Kopiera adressen till Urklipp" + '" onclick=copyTextToClip2("' + encodeURIComponentEx(splitip[0]) + '")></i>');
                                 }
                             }
                         }
@@ -3782,6 +3796,10 @@
                     } else {
                         server_showRestoreDlgUpdate(message.data);
                     }
+                    break;
+                }
+                case 'serverbackupready': {
+                    server_backupReady(message);
                     break;
                 }
                 case 'serverversion': {
@@ -4870,9 +4888,9 @@
                 }
                 case 'downgradePluginVersions': {
                     var vSelect = '<select id="lastPluginVersion">';
-                    message.info.versionList.forEach(function (v) { vSelect += '<option value="' + v.zipball_url + '">' + v.name + '</option>'; });
+                    message.info.versionList.forEach(function (v) { vSelect += '<option value="' + EscapeHtml(v.zipball_url) + '">' + EscapeHtml(v.name) + '</option>'; });
                     vSelect += '</select>';
-                    setModalContent('xxAddAgent', "Pluginåtgärd", format("Välj version för att nedgradera plugin: {0}", message.info.name) + '<hr />' + vSelect + '<hr />' + "Observera att nedgradering inte rekommenderas. Vänligen gör det bara om en ny uppgradering har brutit något." + + '<input id="lastPluginAct" type="hidden" value="downgrade" /><input id="lastPluginId" type="hidden" value="' + message.info.id + '" />');
+                    setModalContent('xxAddAgent', "Pluginåtgärd", format("Välj version för att nedgradera plugin: {0}", EscapeHtml(message.info.name)) + '<hr />' + vSelect + '<hr />' + "Observera att nedgradering inte rekommenderas. Vänligen gör det bara om en ny uppgradering har brutit något." + '<input id="lastPluginAct" type="hidden" value="downgrade" /><input id="lastPluginId" type="hidden" value="' + EscapeHtml(message.info.id) + '" />');
                     showModal('xxAddAgentModal', 'idx_dlgOkButton', pluginActionEx);
                     break;
                 }
@@ -5906,7 +5924,20 @@
                 }
                 if (deviceViewSettings.devsCols.indexOf('links') >= 0) { r += '<td style=text-align:center;font-size:x-small>' + getShortRouterLinks(node); } // Links
                 if (deviceViewSettings.devsCols.indexOf('user') >= 0) { r += '<td style=text-align:center>' + getUserShortStr(node); } // User
-                if (deviceViewSettings.devsCols.indexOf('ip') >= 0) { var ip = ''; if (node.mtype == 3) { ip = node.host; } else if (node.ip) { ip = node.ip; } r += '<td style=text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis title="' + EscapeHtml(ip) + '">' + EscapeHtml(ip); } // IP address
+                if (deviceViewSettings.devsCols.indexOf('ip') >= 0) {
+                    var ip = '';
+                    if ((node.mtype == 1) || (node.mtype == 3)) { ip = node.host || ''; } else if (node.ip) { ip = node.ip; }
+                    var ipHtml = EscapeHtml(ip);
+                    var linkip = null;
+                    if (typeof ip == 'string') { if (/^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(ip)) { linkip = ip.split(':')[0]; } else if (/^[0-9a-f]*:[0-9a-f:]+$/i.test(ip) && (ip.indexOf(':') != ip.lastIndexOf(':'))) { linkip = ip; } }
+                    if ((linkip != null) && !isPrivateIP(linkip)) { ipHtml = '<a href="https://iplocation.com/?ip=' + encodeURIComponent(linkip) + '" rel="noreferrer noopener" target="MeshIPLookup">' + EscapeHtml(ip) + '</a>'; }
+                    var lanip = node.defaultRouteIp || node.defaultRouteIp6 || '';
+                    if ((lanip != '') && (lanip != ip)) {
+                        r += '<td style=text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis title="' + EscapeHtml(lanip + ' / ' + ip) + '">' + "LAN" + ' ' + EscapeHtml(lanip) + '<br />' + "WAN" + ' ' + ipHtml;
+                    } else {
+                        r += '<td style=text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis title="' + EscapeHtml(ip) + '">' + ipHtml;
+                    }
+                } // IP address
                 if (deviceViewSettings.devsCols.indexOf('conn') >= 0) { r += '<td style=text-align:center>' + states.join('&nbsp;+&nbsp;'); } // Connectivity
                 if (deviceViewSettings.devsCols.indexOf('amthost') >= 0) { r += '<td style=text-align:center>' + (((node.intelamt == null) || (node.intelamt.host == null)) ? '' : EscapeHtml(node.intelamt.host)); }
                 if (deviceViewSettings.devsCols.indexOf('amtstate') >= 0) {
@@ -6290,7 +6321,7 @@
                 } else if (contype == 1) {
                     // Setup the Mesh Agent remote desktop
                     desk = CreateAgentRedirect(meshserver, CreateAgentRemoteDesktop('kvmid_' + shortid), serverPublicNamePort, authCookie, authRelayCookie, domainUrl);
-                    desk.m.UseExtendedKeyFlag = (node.agent.id < 5); // Only use extended keys on Windows agents for now
+                    desk.m.UseExtendedKeyFlag = isWindowsNode(node);
                     desk.m.mouseCursorActive(xxcurrentView == 11);
                     desk.shortid = shortid;
                     desk.attemptWebRTC = attemptWebRTC;
@@ -6748,6 +6779,8 @@
         }
 
         var xxModal;
+        var xxModalShown = false;   // true once the current modal's Bootstrap show transition has completed
+        var xxModalHidePending = false; // a hide() was requested while the modal was still fading in
 
         // A dialog/modal opening over the active remote desktop swallows the in-flight key-up (the
         // ondockey* handlers stop forwarding once xxdialogMode is set), leaving that key held down on
@@ -6820,8 +6853,17 @@
                     QV(id, (id != 'idx_dlgDeleteButton' ? true : false));
                 });
                 xxModal = new bootstrap.Modal(document.getElementById(modalId));
+                xxModalShown = false; xxModalHidePending = false;
+                // mark shown so a hide deferred during the fade-in can fire
+                var shownModal = function (event) {
+                    xxModalShown = true;
+                    document.getElementById(modalId).removeEventListener('shown.bs.modal', shownModal);
+                    if (xxModalHidePending) { xxModalHidePending = false; if (xxModal) xxModal.hide(); }
+                }
+                document.getElementById(modalId).addEventListener('shown.bs.modal', shownModal);
                 var hiddenModal = function (event) {
                     if (xxModal) { xxModal.dispose(); xxModal = null; }
+                    xxModalShown = false; xxModalHidePending = false;
                     if (xxdialogMode != 0) { xxdialogMode = 0; }
                     document.getElementById(modalId).removeEventListener('hidden.bs.modal', hiddenModal);
                 }
@@ -6838,6 +6880,13 @@
                     if (xxModal) { xxModal.hide(); }
                 }
             };
+        }
+
+        // Bootstrap drops hide() during the fade-in, which left tiny-file uploads with a stuck-open dialog.
+        // Defer the hide until shown.bs.modal fires if the modal has not finished showing yet.
+        function hideModal() {
+            if (xxModal == null) return;
+            if (xxModalShown) { xxModal.hide(); } else { xxModalHidePending = true; }
         }
 
         function copyAgentIdValue(id) {
@@ -7478,10 +7527,20 @@
             }
             return r;
         }
-
-        function parseSearchOrInput(x) {
-            var s = x.split(' ' + "eller" + ' '), r = null;
-            for (var i in s) { var r2 = parseSearchAndInput(s[i]); if (r == null) { r = r2; } else { for (var j in r2) { if (r.indexOf(r2[j] >= 0)) { r.push(r2[j]); } } } }
+		
+		function parseSearchOrInput(x) {
+            if (x == '') { return parseSearchAndInput(x); } // Empty search, return all devices.
+            var parts = x.split(','), r = null; // Comma = OR, each part keeps its own prefix (u:, g:, t:, etc.)
+            for (var p in parts) {
+                var s = parts[p].split(' ' + "eller" + ' ');
+                for (var i in s) {
+                    var trimmed = s[i].trim();
+                    if (trimmed == '') { continue; } // Skip empty pieces from stray/extra commas
+                    var r2 = parseSearchAndInput(trimmed);
+                    if (r == null) { r = r2; } else { for (var j in r2) { if (r.indexOf(r2[j]) < 0) { r.push(r2[j]); } } }
+                }
+            }
+            if (r == null) { r = []; }
             return r;
         }
 
@@ -7620,8 +7679,30 @@
             return r;
         }
 
+        // When the server pages the device list (maxDeviceView), plain name filters are sent to the server so they
+        // search all devices and not only the current page. Prefixed (u:, ip:, tag:...) and composite filters stay local.
+        var deviceServerFilter = '', deviceServerFilterTimer = null;
+        function getDeviceServerFilter() {
+            var x = Q('SearchInput').value.toLowerCase().trim();
+            if ((x == '') || (/[:,!]/.test(x)) || (/\s(or|and)\s/.test(x))) return '';
+            return x;
+        }
+        function updateDeviceServerFilter() {
+            if ((serverinfo == null) || (serverinfo.maxdeviceview == null) || (meshserver == null)) return;
+            if (deviceServerFilterTimer != null) { clearTimeout(deviceServerFilterTimer); deviceServerFilterTimer = null; }
+            if (getDeviceServerFilter() == deviceServerFilter) return;
+            deviceServerFilterTimer = setTimeout(function () {
+                deviceServerFilterTimer = null;
+                var f = getDeviceServerFilter();
+                if (f == deviceServerFilter) return;
+                deviceServerFilter = f;
+                meshserver.send({ action: 'nodes', skip: 0, filter: f });
+            }, 400);
+        }
+
         function onSearchInputChanged() {
             var x = Q('SearchInput').value.toLowerCase().trim(); putstore('_search', Q('SearchInput').value);
+            updateDeviceServerFilter();
             x == '' ? QC('SearchInput').remove('search') : QC('SearchInput').add('search');
             //QS('SearchInput')['background-color'] = QS('KvmSearchInput')['background-color'] = (x == '') ? null : '#FDFFBE';
             QV('SearchInputClearButton', (x != ''));
@@ -7906,7 +7987,7 @@
             var filetreexx = p13sort_files(p13filetree.dir);
             var file = filetreexx[parseInt(contextelement.attributes.fileindex.nodeValue)];
             if (action == 1) { // Rename the file
-                setModalContent('xxAddAgent', "Döp om", '<input type=text id=p13renameinput maxlength=64 onkeyup=p13fileNameCheck(event) style=width:100% value="' + file.n + '" />');
+                setModalContent('xxAddAgent', "Döp om", '<input type=text id=p13renameinput maxlength=64 onkeyup=p13fileNameCheck(event) style=width:100% value="' + EscapeHtml(file.n) + '" />');
                 showModal('xxAddAgentModal', 'idx_dlgOkButton', () => p13renamefileEx(3, { action: 'rename', path: p13filetreelocation.join('/'), oldname: file.n }));
                 focusTextBox('p13renameinput');
                 p13fileNameCheck();
@@ -8418,7 +8499,7 @@
             var x = '<div style=margin-bottom:6px><label for=selectnode-search>' + "Sök" + '</label>&nbsp&nbsp<input type=text placeholder="' + "Enhetsnamn" + '" id="selectnode-search" onchange=onPlaceNodeInputChange() onkeyup=onPlaceNodeInputChange() autocomplete=off style=width:120px></div><div id=placenode style="height:254px;overflow-y:auto;width:100%;margin:12px 1px 4px 1px;"><div id=noNodesMapPlace style=text-align:center;width:100%;display:none>' + "Inga enheter hittades." + '</div>';
             for (var i in nodes) {
                 x += '<div class=noselect id=' + nodes[i]._id + '-rowid onclick=selectNodeToPlace(event,\'' + nodes[i]._id + '\') style=background-color:lightgray;margin-bottom:4px;border-radius:2px><input name=PlaceMapDeviceCheckbox id=' + nodes[i]._id + '-checkid type=checkbox class="form-check-input me-2" style=width:16px;display:inline />';
-                x += '<div class=j' + nodes[i].icon + ' style=width:16px;height:16px;margin-top:2px;margin-right:4px;display:inline-block></div><div style=width:16px;display:inline>' + nodes[i].name + '</div></div>';
+                x += '<div class=j' + nodes[i].icon + ' style=width:16px;height:16px;margin-top:2px;margin-right:4px;display:inline-block></div><div style=width:16px;display:inline>' + EscapeHtml(nodes[i].name) + '</div></div>';
             }
             setModalContent('xxAddAgent', "Välj en nod att placera", x + '</div>');
             showModal('xxAddAgentModal', 'idx_dlgOkButton', () => placeNodeEx(3, coords));
@@ -8768,7 +8849,7 @@
                     var str = '';
                     if (node.agent.id <= agentsStr.length) { str = agentsStr[node.agent.id]; } else { str = agentsStr[0]; }
                     if (node.agent.ver != 0) { str += ' v' + node.agent.ver; }
-                    if (node.agent.id == 14) { str = node.agent.core; }
+                    if (node.agent.id == 14) { str = EscapeHtml(node.agent.core); }
                     if ((node.agent.root === false) && ((node.conn & 1) != 0)) { str += ', ' + "Begränsad"; }
                     x += addDeviceAttribute("Mesh Agent", str);
                 }
@@ -8868,7 +8949,7 @@
                 // Pending Reboot
                 if (node.pr) {
                     var y = [];
-                    for (var i in node.pr){ y.push(node.pr[i]); }
+                    for (var i in node.pr){ y.push(EscapeHtml(node.pr[i])); }
                     if (y.length > 0) x += addDeviceAttribute("Omrstart väntar", y.join(', '));
                 }
 
@@ -8884,6 +8965,7 @@
                 if (node.av && node.av.length > 0) {
                     var y = [];
                     for (var i in node.av) {
+                        if (node.av[i] == null) continue;
                         if (node.av[i].product) {
                             var avx = EscapeHtml(node.av[i].product);
                             if (node.av[i].enabled !== true) { avx += ' - <span style=color:red>' + "Inaktiverad" + '</span>'; }
@@ -10255,7 +10337,7 @@
             var y = '<select id=p10newGroup class="form-select">', count = 0, altGroups = [];
             for (var i in meshes) { var meshrights = GetMeshRights(i); if ((meshes[i]._id != targetMeshId) && (meshrights & 4)) { altGroups.push(meshes[i]); } }
             altGroups.sort(nameSort);
-            for (var i in altGroups) { count++; y += '<option value=\'' + altGroups[i]._id + '\'>' + altGroups[i].name + '</option>'; }
+            for (var i in altGroups) { count++; y += '<option value=\'' + altGroups[i]._id + '\'>' + EscapeHtml(altGroups[i].name) + '</option>'; }
             y += '</select>';
 
             if (count > 0) {
@@ -10817,6 +10899,7 @@
                                     desktop.m.hold(true);
                                     webRtcDesktop.webRtcActive = true;
                                     webRtcDesktop.softdesktop = CreateKvmDataChannel(webRtcDesktop.webchannel, CreateAgentRemoteDesktop('Desk', Q('id_mainarea')), desktop.m);
+                                    webRtcDesktop.softdesktop.m.UseExtendedKeyFlag = isWindowsNode(desktopNode);
                                     webRtcDesktop.softdesktop.m.setRotation(desktop.m.rotation);
                                     webRtcDesktop.softdesktop.m.onScreenSizeChange = deskAdjust;
                                     webRtcDesktop.softdesktop.m.ImageType = webpSupport ? 4 : 1; // Send 4 if WebP is supported, otherwise send 1 for JPEG.
@@ -10872,7 +10955,7 @@
                 } else if ((contype == null) || (contype == 1) || ((contype == 3) && ((currentNode.agent.id > 4) && ((debugmode == null))))) {
                     // Setup the Mesh Agent remote desktop
                     desktop = CreateAgentRedirect(meshserver, CreateAgentRemoteDesktop('Desk'), serverPublicNamePort, authCookie, authRelayCookie, domainUrl);
-                    desktop.m.UseExtendedKeyFlag = (desktopNode.agent.id < 5); // Only use extended keys on Windows agents for now
+                    desktop.m.UseExtendedKeyFlag = isWindowsNode(desktopNode);
                     desktop.m.mouseCursorActive(xxcurrentView == 11);
                     desktop.debugmode = debugmode;
                     desktop.m.debugmode = debugmode;
@@ -11436,6 +11519,17 @@
             else if (elem.msRequestFullscreen) { elem.msRequestFullscreen(); }
             else if (elem.mozRequestFullScreen) { elem.mozRequestFullScreen(); }
             else if (elem.webkitRequestFullscreen) { elem.webkitRequestFullscreen(Element.ALLOW_KEYBOARD_INPUT); }
+        }
+
+        // Toggle browser fullscreen
+        function toggleBrowserFullscreen() {
+            if (browserfullscreen) {
+                exitBrowserFullscreen();
+                browserfullscreen = false;
+            } else {
+                enterBrowserFullscreen(Q('body'));
+                browserfullscreen = true;
+            }
         }
 
         // Exit browser fullscreen
@@ -12072,7 +12166,12 @@
             var p = [], processes = null;
             try { processes = JSON.parse(message.value); } catch (e) { }
             if (processes != null) {
-                for (var pid in processes) { p.push({ p: parseInt(pid), c: processes[pid].cmd, d: processes[pid].cmd.toLowerCase(), u: processes[pid].user }); }
+                for (var pid in processes) {
+                    if ((processes[pid] == null) || (typeof processes[pid] != 'object')) continue;
+                    var processId = parseInt(pid), processCommand = processes[pid].cmd;
+                    if (isNaN(processId) || (typeof processCommand != 'string')) continue;
+                    p.push({ p: processId, c: processCommand, d: processCommand.toLowerCase(), u: processes[pid].user });
+                }
                 if (deskTools.sort == 0) { p.sort(sortProcessPid); } else if (deskTools.sort == 1) { p.sort(sortProcessName); }
                 var x = '';
                 for (var i in p) {
@@ -12080,9 +12179,9 @@
                         var c = p[i].c;
                         x += '<div onclick=showProcessDetails(' + p[i].p + ') class="deskToolsBar d-flex">';
                         x += '<div class="pe-1 text-start" style=width:50px;>' + EscapeHtml(p[i].p) + '</div>';
-                        x += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + EscapeHtml(c) + '">' + c + '</div>';
+                        x += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' + EscapeHtml(c) + '">' + EscapeHtml(c) + '</div>';
                         x += '<div class="ms-auto">' + (p[i].u ? EscapeHtml(p[i].u) : '');
-                        x += '<i class="ps-1 fa-solid fa-trash-can" role="button" title="' + "Stoppa processen" + '" onclick=\'return stopProcess(' + EscapeHtml(p[i].p) + ',"' + EscapeHtml(p[i].c) + '")\'></i></div>';
+                        x += '<i class="ps-1 fa-solid fa-trash-can" role="button" title="' + "Stoppa processen" + '" onclick=\'return stopProcess(' + EscapeHtml(p[i].p) + ',' + EscapeHtml(JSON.stringify(p[i].c)) + ')\'></i></div>';
                         x += '</div>';
                     }
                 }
@@ -12106,12 +12205,15 @@
             deskTools.services = services;
             if (services != null) {
                 for (var i in services) {
-                    if (services[i].status) {
+                    if ((services[i] == null) || (typeof services[i] != 'object')) continue;
+                    var serviceIndex = parseInt(i);
+                    if (isNaN(serviceIndex)) continue;
+                    if (services[i].status && (typeof services[i].status.state == 'string')) {
                         // Windows
-                        s.push({ p: capitalizeFirstLetter(services[i].status.state.toLowerCase()), d: services[i].displayName, i: i });
-                    } else if (services[i].serviceType) {
+                        s.push({ p: capitalizeFirstLetter(services[i].status.state.toLowerCase()), d: services[i].displayName, i: serviceIndex });
+                    } else if ((typeof services[i].serviceType == 'string') && (typeof services[i].name == 'string')) {
                         // Linux (TODO: This the service status is not displayed, not sure start/stop/restart will work).
-                        s.push({ p: services[i].serviceType, d: services[i].name, i: i });
+                        s.push({ p: services[i].serviceType, d: services[i].name, i: serviceIndex });
                     }
                 }
                 if (deskTools.ssort == 0) { s.sort(sortProcessPid); } else if (deskTools.ssort == 1) { s.sort(sortProcessName); }
@@ -12123,7 +12225,7 @@
                         else if (ss == 'Running') { ss = "Löpning"; }
                         x += '<div onclick=showServiceWaitDialog(' + s[i].i + ') class=deskToolsBar>';
                         x += '<div style=width:70px;float:left;padding-right:5px>' + EscapeHtml(ss) + '</div>';
-                        x += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + c + '">' + EscapeHtml(c) + '</div>';
+                        x += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + EscapeHtml(c) + '">' + EscapeHtml(c) + '</div>';
                         x += '</div>';
                     }
                 }
@@ -12133,20 +12235,22 @@
 
         function showServiceDetailsDialog(data) {
             if (xxdialogMode && (xxdialogTag.indexOf('service_') != -1)) {
-                var index = xxdialogTag.replace('service_', '')
+                var index = parseInt(xxdialogTag.replace('service_', ''));
+                if (isNaN(index)) return;
                 // var org_service = deskTools.services[index];
-                var service = data.value ? JSON.parse(data.value) : deskTools.services[index];
-                if (data.value) service.displayName = deskTools.services[index].displayName;
-                if (service != null) {
+                var service = null;
+                try { service = data.value ? JSON.parse(data.value) : deskTools.services[index]; } catch (e) { }
+                if ((service != null) && (typeof service == 'object')) {
+                    if (data.value && deskTools.services && deskTools.services[index]) { service.displayName = deskTools.services[index].displayName; }
                     var x = '';
-                    if (service.name) { x += addHtmlValue("Namn", service.name); }
-                    if (service.displayName) { x += addHtmlValue("Visningsnamn", service.displayName); }
+                    if (service.name) { x += addHtmlValue("Namn", EscapeHtml(service.name)); }
+                    if (service.displayName) { x += addHtmlValue("Visningsnamn", EscapeHtml(service.displayName)); }
                     if (service.status) {
-                        var ss = capitalizeFirstLetter(service.status.state.toLowerCase());
+                        var ss = (typeof service.status.state == 'string') ? EscapeHtml(capitalizeFirstLetter(service.status.state.toLowerCase())) : '';
                         if (ss == 'Stopped') { ss = "Stannade"; } // TODO: Add all other states for translation
                         else if (ss == 'Running') { ss = "Löpning"; }
                         if (service.status.state) { x += addHtmlValue("stat", ss); }
-                        if (service.status.pid) { x += addHtmlValue("PID", service.status.pid); }
+                        if (service.status.pid) { x += addHtmlValue("PID", EscapeHtml(service.status.pid)); }
                         var serviceTypes = [];
                         if (service.status.isFileSystemDriver === true) { serviceTypes.push("FileSystemDriver"); }
                         if (service.status.isInteractive === true) { serviceTypes.push("Interaktiv"); }
@@ -12155,9 +12259,9 @@
                         if (service.status.isSharedProcess === true) { serviceTypes.push("Delad process"); }
                         if (serviceTypes.length > 0) { x += addHtmlValue("Typ", serviceTypes.join(', ')); }
                     }
-                    if (service.startType) { x += addHtmlValue("Start Type", service.startType); }
-                    if (service.user) { x += addHtmlValue("Användare", service.user); }
-                    if (service.installedBy) { x += addHtmlValue("Installed By", service.installedBy); }
+                    if (service.startType) { x += addHtmlValue("Start Type", EscapeHtml(service.startType)); }
+                    if (service.user) { x += addHtmlValue("Användare", EscapeHtml(service.user)); }
+                    if (service.installedBy) { x += addHtmlValue("Installed By", EscapeHtml(service.installedBy)); }
                     if (service.installedDate) { x += addHtmlValue("Installed Date", printDateTime(new Date(service.installedDate))); }
                     if (service.failureActions) {
                         if (service.failureActions.resetPeriod) {
@@ -12165,9 +12269,9 @@
                             x += addHtmlValue("Restart Fail Count After ", abc + ' Day' + (abc != 1 ? 's' : ''));
                         }
                         if (service.failureActions.actions) {
-                            if (service.failureActions.actions[0]) { x += addHtmlValue("First Failure", service.failureActions.actions[0].type); }
-                            if (service.failureActions.actions[1]) { x += addHtmlValue("Second Failure", service.failureActions.actions[1].type); }
-                            if (service.failureActions.actions[2]) { x += addHtmlValue("Subsequent Failures", service.failureActions.actions[2].type); }
+                            if (service.failureActions.actions[0]) { x += addHtmlValue("First Failure", EscapeHtml(service.failureActions.actions[0].type)); }
+                            if (service.failureActions.actions[1]) { x += addHtmlValue("Second Failure", EscapeHtml(service.failureActions.actions[1].type)); }
+                            if (service.failureActions.actions[2]) { x += addHtmlValue("Subsequent Failures", EscapeHtml(service.failureActions.actions[2].type)); }
                         }
                     }
                     x += '<br/><div style=float:right;margin-bottom:12px><input type=button value="' + "Stäng" + '" onclick=showServiceDetailsDialogEx(0,' + index + ')></div><div style=margin-bottom:12px><input type=button value="' + "Start" + '" onclick=showServiceDetailsDialogEx(1,' + index + ')><input type=button value="' + "Sluta" + '" onclick=showServiceDetailsDialogEx(2,' + index + ')><input type=button value="' + "Omstart" + '" onclick=showServiceDetailsDialogEx(3,' + index + ')></div>';
@@ -13301,11 +13405,15 @@
             }
         }
 
-        function CreateRemoteFiles(onFileUpdate) {
+        function CreateRemoteFiles(onFileUpdate, onBinaryData) {
             var obj = { protocol: 5 };
             obj.onFileUpdate = onFileUpdate;
+            obj.onBinaryData = onBinaryData;
             obj.xxStateChange = function (state) { }
             obj.ProcessData = function (data) { obj.onFileUpdate(data); }
+            if (onBinaryData) {
+                obj.ProcessBinaryData = function (data) { obj.onBinaryData(data); }
+            }
             return obj;
         }
 
@@ -13318,7 +13426,7 @@
             p13clearConsoleMsg();
             if (!files) {
                 // Setup a mesh agent files
-                files = CreateAgentRedirect(meshserver, CreateRemoteFiles(p13gotFiles), serverPublicNamePort, authCookie, authRelayCookie, domainUrl);
+                files = CreateAgentRedirect(meshserver, CreateRemoteFiles(p13gotFiles, p13gotFilesBinary), serverPublicNamePort, authCookie, authRelayCookie, domainUrl);
                 if (contype == 2) { files.urlname = 'sshfilesrelay.ashx'; } // If this is a SSH session, change the URL to the SSH application relay.
                 files.contype = contype;
                 files.options = { consent: consent }
@@ -14169,7 +14277,7 @@
                 if (f.t < 3) {
                     var right = '', title = '';
                     h = '<div class=filelist file=999>';
-                    h += '<input file=999 style=float:left name=fd class="fcb form-check-input m-1" type=checkbox onchange=p13setActions() value=\'' + f.nx + '\'>&nbsp;<span class=fsize>' + fdatestr + '</span><span style=float:right>' + EscapeHtml(fsize) + right + '</span>';
+                    h += '<input file=999 style=float:left name=fd class="fcb form-check-input m-1" type=checkbox onchange=p13setActions() value=\'' + EscapeHtml(f.nx) + '\'>&nbsp;<span class=fsize>' + fdatestr + '</span><span style=float:right>' + EscapeHtml(fsize) + right + '</span>';
                     h += '<span title="' + shortname + '"><div class="fileIcon' + (f.dt == 'REMOVABLE' ? 5 : (f.dt == 'CDROM' ? 6 : f.t)) + ' mt-1" onclick=p13folderset("' + encodeURIComponentEx(f.nx) + '")></div><a href=# style=cursor:pointer onclick=\'return p13folderset("' + encodeURIComponentEx(f.nx) + '")\'>';
                     var sysvol = (isWindowsNode(currentNode) && f.dt && (DeviceDetailsNodeId == currentNode._id) && DeviceDetailsHardware && DeviceDetailsHardware.windows && DeviceDetailsHardware.windows.volumes) ? DeviceDetailsHardware.windows.volumes[shortname.charAt(0).toUpperCase()] : null;
                     if (sysvol && sysvol.name) {
@@ -14191,8 +14299,8 @@
                             link = '<a onclick=downloadFile("devicefile.ashx?c=' + authCookie + '&m=' + currentNode.meshid.split('/')[2] + '&n=' + currentNode._id.split('/')[2] + '&f=' + encodeURIComponentEx(newlinkpath + '/' + name) + '","' + encodeURIComponentEx(name) + '") style=cursor:pointer>' + shortname + '</a>';
                         }
                     }
-                    h = '<div id=fileEntry cmenu=filesContextMenu fileIndex=' + i + ' class=filelist file=3>';
-                    h += '<input file=3 style=float:left name=fd class="fcb form-check-input m-1" type=checkbox onchange=p13setActions() value=\'' + f.nx + '\'>&nbsp;';
+                    h = '<div id=fileEntry cmenu=filesContextMenu fileIndex=' + parseInt(i) + ' class=filelist file=3>';
+                    h += '<input file=3 style=float:left name=fd class="fcb form-check-input m-1" type=checkbox onchange=p13setActions() value=\'' + EscapeHtml(f.nx) + '\'>&nbsp;';
                     h += '<span class=fsize>' + fdatestr + '</span>';
                     h += '<span style=float:right>' + EscapeHtml(fsize) + '</span>';
                     h += '<span title="' + shortname + '"><div class="fileIcon' + f.t + ' mt-1"></div>' + link + '</span>';
@@ -14352,7 +14460,17 @@
 
         function p13sort_files(files) {
             var r = [], sortselection = Q('p13sortdropdown').value;
-            for (var i in files) { files[i].nx = i; if (files[i].s == null) { files[i].s = 0; } if (files[i].n == null) { files[i].n = i; } files[i].ln = files[i].n.toLowerCase(); r.push(files[i]); }
+            for (var i in files) {
+                var file = files[i];
+                file.nx = i;
+                file.t = parseInt(file.t);
+                if (isNaN(file.t)) { file.t = 3; }
+                if (file.s == null) { file.s = 0; }
+                if (file.n == null) { file.n = i; }
+                file.n = String(file.n);
+                file.ln = file.n.toLowerCase();
+                r.push(file);
+            }
             p13sortorder = 1;
             if (sortselection > 3) { p13sortorder = -1; sortselection -= 3; }
             if (sortselection == 1) { r.sort(p13sort_filename); }
@@ -14464,7 +14582,7 @@
                     renamefile = p13filetree.dir[checkboxes[i].value].n;
                 }
             }
-            setModalContent('xxAddAgent', "Döp om", '<input type=text id=p13renameinput maxlength=64 onkeyup=p13fileNameCheck(event) style=width:100% value="' + renamefile + '" />');
+            setModalContent('xxAddAgent', "Döp om", '<input type=text id=p13renameinput maxlength=64 onkeyup=p13fileNameCheck(event) style=width:100% value="' + EscapeHtml(renamefile) + '" />');
             showModal('xxAddAgentModal', 'idx_dlgOkButton', () => p13renamefileEx(3, { action: 'rename', path: p13filetreelocation.join('/'), oldname: renamefile }));
             focusTextBox('p13renameinput');
             p13fileNameCheck();
@@ -14603,10 +14721,10 @@
         // Called by the html page to start a download, arguments are: path, file name and file size.
         function p13downloadfile(x, y, z, tag) {
             if (xxdialogMode || !files) return;
-            gdownloadFile = { path: decodeURIComponent(x), file: decodeURIComponent(y), size: z, tsize: 0, data: '', state: 0, id: Math.random(), tag: tag }
+            gdownloadFile = { path: decodeURIComponent(x), file: decodeURIComponent(y), size: z, tsize: 0, chunks: [], data: '', state: 0, id: Math.random(), tag: tag }
             //console.log('p13downloadFileCancel', gdownloadFile);
             files.sendText({ action: 'download', sub: 'start', id: gdownloadFile.id, path: gdownloadFile.path });
-            setModalContent('xxAddAgent', "Nedladdning fil", '<div>' + gdownloadFile.file + '</div><br /><progress id=d2progressBar style=width:100% value=0 max=' + z + ' />');
+            setModalContent('xxAddAgent', "Nedladdning fil", '<div>' + EscapeHtml(gdownloadFile.file) + '</div><br /><progress id=d2progressBar style=width:100% value=0 max=' + z + ' />');
             showModal('xxAddAgentModal', 'idx_dlgOkButton', () => p13downloadFileCancel());
         }
 
@@ -14624,6 +14742,46 @@
             else if (cmd.sub == 'cancel') { gdownloadFile = null; setDialogMode(0); }
         }
 
+        // Show a completed text download (gdownloadFile.data) in the editor dialog
+        function p13showDownloadInViewer() {
+            // View the file in the dialog box
+            setModalContent('xxAddAgent', EscapeHtml(gdownloadFile.file), 4, 'extra-large');
+            var file = gdownloadFile.file;
+            showModal('xxAddAgentModal', 'idx_dlgOkButton', () => p13editSaveBack(3, file));
+            const crlf = (gdownloadFile.data.match(/\r\n/g) || []).length;
+            const cr = (gdownloadFile.data.match(/\r(?!\n)/g) || []).length;
+            const lf = (gdownloadFile.data.match(/(?<!\r)\n/g) || []).length;
+            let type;
+            if (crlf > 0 && cr === 0 && lf === 0) {
+                type = 'crlf';
+            } else if (lf > 0 && crlf === 0 && cr === 0) {
+                type = 'lf';
+            } else if (cr > 0 && crlf === 0 && lf === 0) {
+                type = 'cr';
+            } else {
+                // Mixed - pick dominant
+                const dominant = Math.max(crlf, cr, lf);
+                if (dominant === crlf) type = 'crlf';
+                else if (dominant === lf) type = 'lf';
+                else type = 'cr';
+            }
+            if (type === 'crlf') {
+                d4EditLineBreakVal = 0; // Windows (CR LF)
+            } else if (type === 'lf') {
+                d4EditLineBreakVal = 1; // Linux (LF)
+            } else {
+                d4EditLineBreakVal = 2; // Mac (CR)
+            }
+            d4ToggleLineBreak(true);
+            QV('d4EncodingButton', true);
+            QV('d4LineBreakButton', true);
+            if (d4EditEncodingVal == 1) {
+                Q('d4editorarea').value = decode_utf8(gdownloadFile.data); // UTF8 Encoding
+            } else {
+                Q('d4editorarea').value = gdownloadFile.data; // RAW Encoding
+            }
+        }
+
         // Called by the transport when binary data is received
         function p13gotDownloadBinaryData(data) {
             if (!gdownloadFile || gdownloadFile.state == 0) return;
@@ -14634,42 +14792,7 @@
             }
             if ((ReadInt(data, 0) & 1) != 0) { // Check end flag
                 if (gdownloadFile.tag == 'viewer') {
-                    // View the file in the dialog box
-                    setModalContent('xxAddAgent', EscapeHtml(gdownloadFile.file), 4, 'extra-large');
-                    var file = gdownloadFile.file;
-                    showModal('xxAddAgentModal', 'idx_dlgOkButton', () => p13editSaveBack(3, file));
-                    const crlf = (gdownloadFile.data.match(/\r\n/g) || []).length;
-                    const cr = (gdownloadFile.data.match(/\r(?!\n)/g) || []).length;
-                    const lf = (gdownloadFile.data.match(/(?<!\r)\n/g) || []).length;
-                    let type;
-                    if (crlf > 0 && cr === 0 && lf === 0) {
-                        type = 'crlf';
-                    } else if (lf > 0 && crlf === 0 && cr === 0) {
-                        type = 'lf';
-                    } else if (cr > 0 && crlf === 0 && lf === 0) {
-                        type = 'cr';
-                    } else {
-                        // Mixed - pick dominant
-                        const dominant = Math.max(crlf, cr, lf);
-                        if (dominant === crlf) type = 'crlf';
-                        else if (dominant === lf) type = 'lf';
-                        else type = 'cr';
-                    }
-                    if (type === 'crlf') {
-                        d4EditLineBreakVal = 0; // Windows (CR LF)
-                    } else if (type === 'lf') {
-                        d4EditLineBreakVal = 1; // Linux (LF)
-                    } else {
-                        d4EditLineBreakVal = 2; // Mac (CR)
-                    }
-                    d4ToggleLineBreak(true);
-                    QV('d4EncodingButton', true);
-                    QV('d4LineBreakButton', true);
-                    if (d4EditEncodingVal == 1) {
-                        Q('d4editorarea').value = decode_utf8(gdownloadFile.data); // UTF8 Encoding
-                    } else {
-                        Q('d4editorarea').value = gdownloadFile.data; // RAW Encoding
-                    }
+                    p13showDownloadInViewer();
                     gdownloadFile = null;
                 } else {
                     // Save the file to disk
@@ -14783,7 +14906,7 @@
             uploadFile.xpath = p13filetreelocation.join('/');
             uploadFile.xfiles = files;
             uploadFile.xfilePtr = -1;
-            setModalContent('xxAddAgent', "Ladda upp fil", '<div id=p13dfileName>' + "Ansluter..." + '</div><br /><progress id=d2progressBar style=width:100% value=0 max=0 />');
+            setModalContent('xxAddAgent', "Ladda upp fil", '<div id=p13dfileName>' + "Ansluter..." + '</div><br /><progress id=d2progressBar style="display:block;width:100%;margin-bottom:5px" value=0 max=0></progress><div id=d2progressLabel style="text-align:center;margin-top:5px">0%</div>');
             showModal('xxAddAgentModal', 'idx_dlgCancelButton', () => p13uploadFileCancel(10));
             document.getElementById('idx_dlgOkButton').style.display = 'none'; // hide OK button
             p13uploadNextFile();
@@ -14808,10 +14931,14 @@
             uploadFile.xfilePtr++;
             if (uploadFile.xfiles.length > uploadFile.xfilePtr) {
                 uploadFile.xptr = 0;
+                uploadFile.blocksInFlight = 0;
+                uploadFile.uploadComplete = false;
+                uploadFile.uploaddoneSent = false;
                 var file = uploadFile.xfiles[uploadFile.xfilePtr];
                 QH('p13dfileName', EscapeHtml(file.name));
                 Q('d2progressBar').max = file.size;
                 Q('d2progressBar').value = 0;
+                Q('d2progressLabel').textContent = '0%';
                 if (file.xdata == null) {
                     uploadFile.xfile = file;
                     // If the remote file already exists and is smaller then our file, see if we can resume the trasfer
@@ -14845,13 +14972,75 @@
             p13folderup(9999); // Refresh the current folder
         }
 
+        // Binary data straight from the websocket (avoids the per-byte string conversion for downloads)
+        function p13gotFilesBinary(data) {
+            if (data.length > 0 && data[0] != 1) {
+                // Not a download block, hand it to the normal text path
+                var binStr = '';
+                if (data.length < 16000) {
+                    binStr = String.fromCharCode.apply(null, data);
+                } else {
+                    for (var i = 0; i < data.length; i++) { binStr += String.fromCharCode(data[i]); }
+                }
+                p13gotFiles(binStr);
+                return;
+            }
+            if (!gdownloadFile || gdownloadFile.state == 0) return;
+            if (data.length > 4) {
+                var payload = data.subarray(4);
+                gdownloadFile.tsize += payload.length;
+                if (gdownloadFile.tag == 'viewer') {
+                    var str = '';
+                    if (payload.length < 16000) {
+                        str = String.fromCharCode.apply(null, payload);
+                    } else {
+                        for (var i = 0; i < payload.length; i++) { str += String.fromCharCode(payload[i]); }
+                    }
+                    gdownloadFile.data += str;
+                } else {
+                    gdownloadFile.chunks.push(payload);
+                }
+                Q('d2progressBar').value = gdownloadFile.tsize;
+            }
+            var header = (data[0] << 24) + (data[1] << 16) + (data[2] << 8) + data[3];
+            if ((header & 1) != 0) { // End flag
+                if (gdownloadFile.tag == 'viewer') {
+                    p13showDownloadInViewer();
+                    gdownloadFile = null;
+                } else {
+                    var blob = new Blob(gdownloadFile.chunks, { type: 'application/octet-stream' });
+                    saveAs(blob, gdownloadFile.file); gdownloadFile = null; setDialogMode(0);
+                }
+            } else {
+                files.sendText({ action: 'download', sub: 'ack', id: gdownloadFile.id });
+            }
+        }
+
         // Receive upload ack from the mesh agent, use this to keep sending more data
         function p13gotUploadData(cmd) {
             if ((uploadFile == null) || (parseInt(uploadFile.xfilePtr) != parseInt(cmd.reqid))) { return; }
+            if (cmd.action == 'uploadack' && uploadFile.uploaddoneSent) { return; }
             switch (cmd.action) {
-                case 'uploadstart': { uploadFile.xdataPriming = 8; p13uploadNextPart(false); break; } // Send 8 more blocks of 16k to fill the websocket.
-                case 'uploadack': { p13uploadNextPart(false); break; }
-                case 'uploaddone': { if (uploadFile.xfiles.length > uploadFile.xfilePtr + 1) { p13uploadNextFile(); } else { p13uploadFileTransferDone(); } break; }
+                case 'uploadstart':
+                    uploadFile.blocksInFlight = 0;
+                    uploadFile.uploadComplete = false;
+                    p13uploadNextPart();
+                    break;
+                case 'uploadack':
+                    if (uploadFile.blocksInFlight > 0) { uploadFile.blocksInFlight--; }
+                    if (uploadFile.blocksInFlight == 0 && uploadFile.uploadComplete) {
+                        uploadFile.uploaddoneSent = true;
+                        files.sendText(JSON.stringify({ action: 'uploaddone', reqid: uploadFile.xfilePtr }));
+                    } else {
+                        p13uploadNextPart();
+                    }
+                    break;
+                case 'uploaddone':
+                    Q('d2progressBar').value = uploadFile.xfile ? uploadFile.xfile.size : uploadFile.xdata.byteLength;
+                    Q('d2progressLabel').textContent = "Uppladdningen är klar. Fjärrenheten sparar filen till disken...";
+                    p13folderup(9999); // Refresh file list after each file
+                    if (uploadFile.xfiles.length > uploadFile.xfilePtr + 1) { p13uploadNextFile(); } else { p13uploadFileTransferDone(); }
+                    break;
                 case 'uploaderror': { p13uploadFileCancel(); break; }
                 case 'uploadhash': {
                     var file = uploadFile.xfiles[uploadFile.xfilePtr];
@@ -14872,15 +15061,20 @@
             }
         }
 
-        // Push the next part of the file into the websocket. If dataPriming is true, push more data only if it's not the last block of the file.
-        function p13uploadNextPart(dataPriming) {
+        // Push the next part of the file into the websocket, keeping up to windowSize unacked blocks in flight.
+        function p13uploadNextPart() {
+            if (uploadFile == null) return;
+            if (uploadFile.xdata && uploadFile.xptr >= uploadFile.xdata.byteLength) return;
+            if (uploadFile.xfile && uploadFile.xptr >= uploadFile.xfile.size) return;
+            var windowSize = 8; // Max blocks sent but not yet acked
             if (uploadFile.xdata) {
                 var data = uploadFile.xdata, start = uploadFile.xptr;
                 if (start >= data.byteLength) {
                     files.sendText(JSON.stringify({ action: 'uploaddone', reqid: uploadFile.xfilePtr }));
+                    return;
                 } else {
                     var end = uploadFile.xptr + (attemptWebRTC ? 16384 : 65536);
-                    if (end > data.byteLength) { if (dataPriming == true) { return; } end = data.byteLength; }
+                    if (end > data.byteLength) { end = data.byteLength; }
                     var dataslice = new Uint8Array(data.slice(start, end))
                     if ((dataslice[0] == 123) || (dataslice[0] == 0)) {
                         var datapart = new Uint8Array(end - start + 1);
@@ -14889,14 +15083,20 @@
                     } else {
                         files.send(dataslice); // The data does not start with 0 or 123 "{" so it can't be confused for JSON.
                     }
+                    uploadFile.blocksInFlight++;
                     uploadFile.xptr = end;
-                    Q('d2progressBar').value = end;
+                    var total = data.byteLength;
+                    Q('d2progressBar').value = Math.min(end, total - 1);
+                    Q('d2progressLabel').textContent = Math.min(99, Math.round((Math.min(end, total - 1) / total) * 100)) + '%';
+                    if (uploadFile.xptr >= data.byteLength) {
+                        uploadFile.uploadComplete = true;
+                    } else if (uploadFile.blocksInFlight < windowSize) { p13uploadNextPart(); }
                 }
             } else if (uploadFile.xfile) {
                 if (uploadFile.xreader != null) return; // Data reading already in process
                 if (uploadFile.xptr >= uploadFile.xfile.size) return;
                 var end = uploadFile.xptr + (attemptWebRTC ? 16384 : 65536);
-                if (end > uploadFile.xfile.size) { if (dataPriming == true) { return; } end = uploadFile.xfile.size; }
+                if (end > uploadFile.xfile.size) { end = uploadFile.xfile.size; }
                 uploadFile.xreader = new FileReader();
                 uploadFile.xreader.onerror = function (err) { console.log(err); }
                 uploadFile.xreader.onload = function () {
@@ -14911,13 +15111,13 @@
                     } else {
                         files.send(dataslice); // The data does not start with 0 or 123 "{" so it can't be confused for JSON.
                     }
+                    uploadFile.blocksInFlight++;
                     uploadFile.xptr = end;
-                    Q('d2progressBar').value = end;
+                    Q('d2progressBar').value = Math.min(end, uploadFile.xfile.size - 1);
+                    Q('d2progressLabel').textContent = Math.min(99, Math.round((Math.min(end, uploadFile.xfile.size - 1) / uploadFile.xfile.size) * 100)) + '%';
                     if (uploadFile.xptr >= uploadFile.xfile.size) {
-                        files.sendText(JSON.stringify({ action: 'uploaddone', reqid: uploadFile.xfilePtr }));
-                    } else {
-                        if (uploadFile.xdataPriming > 0) { uploadFile.xdataPriming--; p13uploadNextPart(true); }
-                    }
+                        uploadFile.uploadComplete = true;
+                    } else if (uploadFile.blocksInFlight < windowSize) { p13uploadNextPart(); }
                 };
                 uploadFile.xreader.readAsArrayBuffer(uploadFile.xfile.slice(uploadFile.xptr, end));
             }
@@ -15159,7 +15359,7 @@
                     var str = '';
                     if (node.agent.id <= agentsStr.length) { str = agentsStr[node.agent.id]; } else { str = agentsStr[0]; }
                     if (node.agent.ver != 0) { str += ' v' + node.agent.ver; }
-                    if (node.agent.id == 14) { str = node.agent.core; }
+                    if (node.agent.id == 14) { str = EscapeHtml(node.agent.core); }
                     x += addDetailItem("Mesh Agent", str);
                 }
                 if (node._id) { x += addDetailItem("Node ID", EscapeHtml(node._id.split('/')[2]), true); }
@@ -15173,13 +15373,14 @@
                     var splitip = node.lastaddr.split(':');
                     if (splitip.length > 2) {
                         // IPv6
-                        x += addDetailItem("Senaste adressen", '<a href="https://iplocation.com/?ip=' + splitip.slice(0, -1).join(':') + '" rel="noreferrer noopener" target="MeshIPLoopup">' + splitip.slice(0, -1).join(':') + '</a>');
+                        var v6addr = splitip.slice(0, -1).join(':');
+                        x += addDetailItem("Senaste adressen", isPrivateIP(v6addr) ? EscapeHtml(v6addr) : ('<a href="https://iplocation.com/?ip=' + encodeURIComponent(v6addr) + '" rel="noreferrer noopener" target="MeshIPLookup">' + EscapeHtml(v6addr) + '</a>'));
                     } else {
                         // IPv4
                         if (isPrivateIP(node.lastaddr)) {
                             x += addDetailItem("Senaste adressen", splitip[0]);
                         } else {
-                            x += addDetailItem("Senaste adressen", '<a href="https://iplocation.com/?ip=' + splitip[0] + '" rel="noreferrer noopener" target="MeshIPLoopup">' + splitip[0] + '</a>');
+                            x += addDetailItem("Senaste adressen", '<a href="https://iplocation.com/?ip=' + splitip[0] + '" rel="noreferrer noopener" target="MeshIPLookup">' + splitip[0] + '</a>');
                         }
                     }
                 }
@@ -15289,7 +15490,7 @@
                     }
                     x += '</div></td></tr>';
                 }
-                if (hardware.network && hardware.network.dns) {
+                if (hardware.network && Array.isArray(hardware.network.dns)) {
                     x += '<tr><td><div class=style10 style=border-radius:5px;padding:8px>';
                     x += addDetailItem('<b>' + "DNS Servers" + '</b>', EscapeHtml(hardware.network.dns.join(",")));
                     x += '</div></td></tr>';
@@ -15335,6 +15536,7 @@
                 if (ident.board_version) { x += addDetailItem("Version", EscapeHtml(ident.board_version), s); }
                 if (ident.product_uuid) { x += addDetailItem("Identifierare", EscapeHtml(ident.product_uuid), s); }
                 if (ident.cpu_name) { x += addDetailItem("CPU", EscapeHtml(ident.cpu_name).split('(TM)').join('&trade;').split('(R)').join('&reg;'), s); }
+                if (Array.isArray(ident.gpu_name)) { ident.gpu_name = ident.gpu_name.filter(function (x) { return x != null; }); }
                 if (ident.gpu_name) { for (var i in ident.gpu_name) { x += addDetailItem("GPU", EscapeHtml(ident.gpu_name[i]).split('(TM)').join('&trade;').split('(R)').join('&reg;'), s); } }
                 if (x != '') { sections.push({ name: "Moderkort", html: x, img: 'motherboard64.png' }); }
 
@@ -15364,6 +15566,7 @@
                 x += '<table class="table table-hover" style=width:100%>';
                 for (var i in hardware.battery) {
                     var battery = hardware.battery[i];
+                    if (battery == null) continue;
                     x += '<tr><td><div class=style10 style=border-radius:5px;padding:8px>';
                     x += '<div style=margin-bottom:3px><b>' + EscapeHtml(battery.DeviceName ? battery.DeviceName : "Okänd") + '</b></div>';
                     if (battery.CycleCount) { x += addDetailItem("Cykelräkning", EscapeHtml(battery.CycleCount), s); }
@@ -15456,6 +15659,7 @@
             if (hardware.identifiers && hardware.identifiers.storage_devices) {
                 var x = '';
                 // Sort Storage
+                ident.storage_devices = ident.storage_devices.filter(function (x) { return x != null; });
                 ident.storage_devices.sort(function (a, b) { if (a.Caption > b.Caption) return 1; if (a.Caption < b.Caption) return -1; return 0; });
 
                 x += '<table style=width:100%>';
@@ -15491,7 +15695,7 @@
                 for (var i in hardware.windows.volumes) {
                     var m = hardware.windows.volumes[i];
                     x += '<tr><td><div class=style10 style=border-radius:5px;padding:8px>';
-                    x += '<div style=margin-bottom:3px><b>' + i + ':' + (((m.name == null) || (m.name == '')) ? '' : (' - ' + EscapeHtml(m.name))) + '</b></div>';
+                    x += '<div style=margin-bottom:3px><b>' + EscapeHtml(i) + ':' + (((m.name == null) || (m.name == '')) ? '' : (' - ' + EscapeHtml(m.name))) + '</b></div>';
                     if (m.size) {
                         var sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
                         var j = parseInt(Math.floor(Math.log(Math.abs(m.size)) / Math.log(1024)), 10);
@@ -15513,7 +15717,7 @@
                     if (m.protectionStatus || m.volumeStatus) { // volumeStatus=conversionStatus
                         var bitlockerState;
                         if (typeof(m.volumeStatus) === 'string') {  // string style db schema
-                            bitlockerState = m.volumeStatus;
+                            bitlockerState = EscapeHtml(m.volumeStatus);
                         } else {    // new code db schema
                             if (m.protectionStatus == 2) {
                                 bitlockerState = "Låst";
@@ -15540,6 +15744,7 @@
                 var x = '';
                 for (var i in hardware.linux.volumes) {
                     var m = hardware.linux.volumes[i];
+                    if (m == null) continue;
                     if (m.mount_point.startsWith('/var/lib/docker/overlay2')) continue;
                     x += '<tr><td><div class=style10 style=border-radius:5px;padding:8px>';
                     x += '<div style=margin-bottom:3px><b>' + EscapeHtml(m.mount_point) + '</b></div>';
@@ -15613,9 +15818,12 @@
 
         function deviceDetailsShowBitlockerInfo(drive, identifier, password) {
             if (xxdialogMode) return false;
-            var x = '<div><p>' + "Identifierare" + '</p><p style=user-select:text;font-weight:bold>' + (identifier ? decodeURIComponent(identifier) : "Okänd") + '</p>';
-            x += '<p>' + "Recovery Password" + '</p><p style=user-select:text;font-weight:bold>' + (password ? decodeURIComponent(password) : "Okänd") + '</p></div>';
-            setModalContent('xxAddAgent', decodeURIComponent(drive) + ': ' + "BitLocker Information", x);
+            var decodedDrive = drive ? decodeURIComponent(drive) : "Okänd";
+            var decodedIdentifier = identifier ? decodeURIComponent(identifier) : "Okänd";
+            var decodedPassword = password ? decodeURIComponent(password) : "Okänd";
+            var x = '<div><p>' + "Identifierare" + '</p><p style=user-select:text;font-weight:bold>' + EscapeHtml(decodedIdentifier) + '</p>';
+            x += '<p>' + "Recovery Password" + '</p><p style=user-select:text;font-weight:bold>' + EscapeHtml(decodedPassword) + '</p></div>';
+            setModalContent('xxAddAgent', EscapeHtml(decodedDrive) + ': ' + "BitLocker Information", x);
             showModal('xxAddAgentModal', 'idx_dlgOkButton');
         }
 
@@ -15703,19 +15911,23 @@
             var storeApps = installedAppsData.store || [];
             if (searchTerm) {
                 desktopApps = desktopApps.filter(function(app) {
-                    return (app.name && app.name.toLowerCase().indexOf(searchTerm) >= 0) ||
-                        (app.publisher && app.publisher.toLowerCase().indexOf(searchTerm) >= 0);
+                    return ((typeof app.name == 'string') && (app.name.toLowerCase().indexOf(searchTerm) >= 0)) ||
+                        ((typeof app.publisher == 'string') && (app.publisher.toLowerCase().indexOf(searchTerm) >= 0));
                 });
                 storeApps = storeApps.filter(function(app) {
-                    return (app.name && app.name.toLowerCase().indexOf(searchTerm) >= 0) ||
-                        (app.publisher && app.publisher.toLowerCase().indexOf(searchTerm) >= 0);
+                    return ((typeof app.name == 'string') && (app.name.toLowerCase().indexOf(searchTerm) >= 0)) ||
+                        ((typeof app.publisher == 'string') && (app.publisher.toLowerCase().indexOf(searchTerm) >= 0));
                 });
             }
             desktopApps.sort(function(a, b) { 
-                return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()); 
+                var aName = (typeof a.name == 'string') ? a.name.toLowerCase() : '';
+                var bName = (typeof b.name == 'string') ? b.name.toLowerCase() : '';
+                return aName.localeCompare(bName);
             });
             storeApps.sort(function(a, b) { 
-                return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()); 
+                var aName = (typeof a.name == 'string') ? a.name.toLowerCase() : '';
+                var bName = (typeof b.name == 'string') ? b.name.toLowerCase() : '';
+                return aName.localeCompare(bName);
             });
             var x = '';
             // ===== DESKTOP APPS TABLE (immer anzeigen) =====
@@ -17026,9 +17238,29 @@
             return false;
         }
         function backup_enterPassword() {
-            xxModal.hide();
-            meshserver.send({ action: 'serverbackuppassword', check: false, password: Q('dbackup_password').value, override: Q('doverrulepw').checked });
-            window.location.href = '{{{domainurl}}}backup.zip' + ((urlargs.key)?('?key=' + urlargs.key):'');
+            meshserver.send({ action: 'serverbackuppassword', check: false, prepare: true, password: Q('dbackup_password').value, override: Q('doverrulepw').checked });
+            // Keep the dialog open as a status box, with only the Cancel button to close it
+            setModalContent('xxAddAgent', "Ladda ner serverbackup", "Förbereder serversäkerhetskopia, detta kan ta några minuter. Nedladdningen startar när den är klar.");
+            QV('idx_dlgOkButton', false);
+            return false;
+        }
+        function server_backupReady(message) {
+            hideModal();
+            if (!message.ok) { backup_showMessage(EscapeHtml(message.msg ? message.msg : "Säkerhetskopieringsfel.")); return; }
+            // Navigating the page makes Firefox drop the control web socket and the reconnect reload cancels the download, and
+            // downloadFile() removes its frame after 10s, before a big backup is ready. Downloads never fire onload, errors do.
+            var f = Q('fileDownloadFrame');
+            f.onload = function () {
+                f.onload = null;
+                var x = ''; try { x = EscapeHtml(f.contentDocument.body.innerText); } catch (ex) { }
+                backup_showMessage(x);
+            };
+            f.src = '{{{domainurl}}}backup.zip' + ((urlargs.key)?('?key=' + urlargs.key):'');
+        }
+        function backup_showMessage(x) {
+            var show = function () { setModalContent('xxAddAgent', "Ladda ner serverbackup", x); showModal('xxAddAgentModal', 'idx_dlgOkButton'); };
+            // The status dialog may still be fading out, and Bootstrap ignores show() mid-transition
+            if (xxModal) { Q('xxAddAgentModal').addEventListener('hidden.bs.modal', show, { once: true }); } else { show(); }
         }
 
         function server_showRestoreDlg() {
@@ -17162,8 +17394,8 @@
 
             // Display IP-KVM information if needed
             if (currentMesh.mtype == 4) {
-                x += addHtmlValue("Värdnamn", currentMesh.kvm.host);
-                x += addHtmlValue("Användarnamn", currentMesh.kvm.user);
+                x += addHtmlValue("Värdnamn", EscapeHtml(currentMesh.kvm.host));
+                x += addHtmlValue("Användarnamn", EscapeHtml(currentMesh.kvm.user));
             }
 
             // Display device group creator
@@ -17237,7 +17469,7 @@
             // Display invitation codes
             if ((features & 0x01000000) && (currentMesh.mtype == 2)) {
                 var inviteCodeStr = '<i>' + "Ingen" + '</i>', icodes = false;
-                if (currentMesh.invite != null) { icodes = true; inviteCodeStr = currentMesh.invite.codes.join(', '); /* + ', ' + currentMesh.invite.flags;*/ }
+                if (currentMesh.invite != null) { icodes = true; inviteCodeStr = EscapeHtml(currentMesh.invite.codes.join(', ')); /* + ', ' + currentMesh.invite.flags;*/ }
                 x += addHtmlValue("Bjud in koder", addLinkConditional(inviteCodeStr, 'p20editmeshInviteCode()', (meshrights & 1) || (icodes)));
             }
 
@@ -18310,7 +18542,7 @@
                 // View codes only
                 var x = "Inbjudningskoder kan användas av alla för att ansluta enheter till den här enhetsgruppen med följande offentliga länk:" + '<br /><br />';
                 x += '<div style=width:100%;text-align:center><a rel="noreferrer noopener" target=_blank href="' + url + '">' + url + '</a></div><br />';
-                x += addHtmlValue("Bjud in koder", currentMesh.invite.codes.join(', '));
+                x += addHtmlValue("Bjud in koder", EscapeHtml(currentMesh.invite.codes.join(', ')));
                 x += addHtmlValue("Installationstyp", ["Bakgrund och interaktiv", "Endast interaktiv", "Endast bakgrund"][currentMesh.invite.flags & 3]);
                 setModalContent('xxAddAgent', "Bjud in koder", x);
                 showModal('xxAddAgentModal', 'idx_dlgOkButton');
@@ -19200,7 +19432,7 @@
                             msg = EscapeHtml(event.username) + guestname + ' &rarr; ' + msg;
                         }
                     }
-                    if (event.remoteaddr) { msg += ' (' + event.remoteaddr + ')'; }
+                    if (event.remoteaddr) { msg += ' (' + EscapeHtml(event.remoteaddr) + ')'; }
                     if (event.etype == 'relay' || event.action == 'relaylog') icon = 'fa-arrow-right-arrow-left';
                     x += '<tr onclick=showEventDetails(' + event.h + ',2)  onmouseover=eventMouseHover(this,1) onmouseout=eventMouseHover(this,0) role=button><td style=width:18px><i class="fa-fw fa-solid ' + icon + '"></i></td><td class=g1>&nbsp;</td><td class=style10>' + printTime(time) + ' - ' + msg + '</td></tr><tr></tr>';
                 }
@@ -20143,6 +20375,8 @@
                 document.getElementById('idx_dlgOkButton').onclick = function () {
                     p50groupActionFunctionDelExec(3);
                 };
+                // Keep the modal open; the rewired OK button must handle closing once the user confirms.
+                return false;
             }
         }
 
@@ -20591,7 +20825,7 @@
 
             // Show user attributes
             var x = '<div style=min-height:80px><table style=width:100%>';
-            if ((args.hide & 8) != 0) { x += '<br />' + addDeviceAttribute("Namn", user.name); } // If title bar is hidden, display the user name here
+            if ((args.hide & 8) != 0) { x += '<br />' + addDeviceAttribute("Namn", EscapeHtml(user.name)); } // If title bar is hidden, display the user name here
             var email = user.email ? EscapeHtml(user.email) : '<i>' + "Inte inställd" + '</i>', everify = '';
             var realname = user.realname ? EscapeHtml(user.realname) : '<i>' + "Inte inställd" + '</i>';
             if (serverinfo.emailcheck) { everify = ((user.emailVerified == true) ? '<b style=color:green;cursor:pointer title="' + "E-postadressen har verifierats" + '">&#x2713</b> ' : '<b style=color:red;cursor:pointer title="' + "E-postmeddelandet har inte verifierats" + '">&#x2717;</b> '); }
@@ -20619,7 +20853,7 @@
             }
 
             if ((features2 & 0x02000000) || (user.msghandle != null)) { // If user messaging is enabled on the server or user has a messaging handle
-                x += addDeviceAttribute("Messaging", '<span role=button onclick=p30editMessaging()><i class="fa-solid fa-comment fa-xs" title="' + "Messaging enabled" + '" style="margin-top:2px"></i> ' + (user.msghandle ? user.msghandle : ('<i>' + "Ingen" + '</i>')) + ' <i class="fa-solid fa-pencil fa-xs"></i></span>');
+                x += addDeviceAttribute("Messaging", '<span role=button onclick=p30editMessaging()><i class="fa-solid fa-comment fa-xs" title="' + "Messaging enabled" + '" style="margin-top:2px"></i> ' + (user.msghandle ? EscapeHtml(user.msghandle) : ('<i>' + "Ingen" + '</i>')) + ' <i class="fa-solid fa-pencil fa-xs"></i></span>');
             }
 
             // Display features
@@ -22219,7 +22453,7 @@
 
             // Show notification within the web page.
             if (n.time == null) { n.time = Date.now(); }
-            if (n.id == null) { n.id = Math.random(); }
+            if ((typeof n.id != 'number') || (isFinite(n.id) == false)) { n.id = Math.random(); }
             notifications.unshift(n);
             setNotificationCount(notifications.length);
             clickNotificationIcon(true);
@@ -22786,7 +23020,7 @@
             for (var i = 1; i < 24; i++) { QV('dialog' + i, i == x); } // Edit this line when more dialogs are added
             QV('dialog', x);
             if (c) { if (x == 2) { QH('id_dialogOptions', c); } else { QH('id_dialogMessage', c); } }
-            if (x == 0) { if (xxModal) xxModal.hide(); }
+            if (x == 0) { hideModal(); }
             MoreToggle(false);
         }
 
@@ -23187,7 +23421,7 @@
             } else {
                 var plugin = null;
                 for (var i in installedPluginList) { if (installedPluginList[i]._id == id) { plugin = installedPluginList[i]; } }
-                setModalContent('xxAddAgent', "Pluginåtgärd", format("Är du säker på att du vill {0} plugin: {1}", elem.value, plugin.name) + '<input id="lastPluginAct" type="hidden" value="' + elem.value + '" /><input id="lastPluginId" type="hidden" value="' + id + '" /><input id="lastPluginVersion" type="hidden" value="" />');
+                setModalContent('xxAddAgent', "Pluginåtgärd", format("Är du säker på att du vill {0} plugin: {1}", EscapeHtml(elem.value), EscapeHtml(plugin.name)) + '<input id="lastPluginAct" type="hidden" value="' + EscapeHtml(elem.value) + '" /><input id="lastPluginId" type="hidden" value="' + EscapeHtml(id) + '" /><input id="lastPluginVersion" type="hidden" value="" />');
                 showModal('xxAddAgentModal', 'idx_dlgOkButton', () => pluginActionEx());
             }
             elem.value = '';
@@ -24168,7 +24402,7 @@
         function addHtmlValue5(t, v) { return '<div style=padding:4px><div style=display:inline-block;float:right><b>' + v + '</b></div><div style=display:inline-block>' + t + '</div></div>'; }
         function focusTextBox(x) { setTimeout(function () { Q(x).selectionStart = Q(x).selectionEnd = 65535; Q(x).focus(); }, 0); }
         function validateEmail(v) { var emailReg = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/; return emailReg.test(v); } // New version
-        function isPrivateIP(a) { return (a.startsWith('10.') || a.startsWith('172.16.') || a.startsWith('192.168.')); }
+        function isPrivateIP(a) { if (a.indexOf(':') != a.lastIndexOf(':')) { return /^(::1?$|f[cd]|fe[89ab])/i.test(a); } return /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.)/.test(a); }
         function u2fSupported() { return (window.u2f && ((navigator.userAgent.indexOf('Chrome/') > 0) || (navigator.userAgent.indexOf('Firefox/') > 0) || (navigator.userAgent.indexOf('Opera/') > 0) || (navigator.userAgent.indexOf('Safari/') > 0))); }
         function findOne(arr1, arr2) { if ((arr1 == null) || (arr2 == null)) return false; return arr2.some(function (v) { return arr1.indexOf(v) >= 0; }); };
         function copyTextToClip(txt) { function selectElementText(e) { if (document.selection) { var range = document.body.createTextRange(); range.moveToElementText(e); range.select(); } else if (window.getSelection) { var range = document.createRange(); range.selectNode(e); window.getSelection().removeAllRanges(); window.getSelection().addRange(range); } } var e = document.createElement('DIV'); e.textContent = txt; document.body.appendChild(e); selectElementText(e); document.execCommand('copy'); e.remove(); }
@@ -24199,7 +24433,7 @@
             if (userid == userinfo._id) { return (userinfo.name + guestname); }
             if (nodes) { for (var a in nodes) { if (nodes[a].links) { for (var b in nodes[a].links) { if (nodes[a].links[b].name && b == userid) return (nodes[a].links[b].name + guestname); } } } }
             if (meshes) { for (var a in meshes) { if (meshes[a].links) { for (var b in meshes[a].links) { if (meshes[a].links[b].name && b == userid) return (meshes[a].links[b].name + guestname); } } } }
-            return (useridsplit[2] + guestname);
+            return (EscapeHtml(useridsplit[2]) + guestname);
         }
         function round(value, precision) { var multiplier = Math.pow(10, precision || 0); return Math.round(value * multiplier) / multiplier; }
         function safeNewWindow(url, target) { var newWindow = window.open(url, target, 'noopener,noreferrer'); if (newWindow) { newWindow.opener = null; } }

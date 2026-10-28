@@ -210,7 +210,7 @@
                                         <div tabindex="0" id="uiViewButton6" class="uiSelector" onclick="showNotes(false)" title="Persoonlijke notities" onkeypress="if (event.key == 'Enter') showNotes(false)"><div class="uiSelector6"></div></div>
                                         <div tabindex="0" id="uiViewButton4" class="uiSelector" onclick="toggleNightMode()" title="Wissel dag/nachtmodus" onkeypress="if (event.key == 'Enter') toggleNightMode()"><div class="uiSelector4"></div></div>
                                         <div tabindex="0" id="uiViewButton5" class="uiSelector" onclick="toggleFooterBarMode()" title="Schakel de voettekstbalk in" onkeypress="if (event.key == 'Enter') toggleFooterBarMode()"><div class="uiSelector5"></div></div>
-                                        <div class="uiSelector_end">&nbsp;</div>
+                                        <div tabindex="0" id="uiViewButton8" class="uiSelector" onclick="toggleBrowserFullscreen()" title="Browser Full Screen" onkeypress="if (event.key == 'Enter') toggleBrowserFullscreen()"><div class="viewSelector5"></div></div>
                                     </td>
                                 </tr>
                             </tbody></table>
@@ -330,7 +330,7 @@
                             <input type="button" id="SelectAllButton" onclick="selectallButtonFunction();" value="Selecteer alles">&nbsp;
                             <input type="button" id="GroupActionButton" disabled="disabled" value="Groepsactie" onclick="groupActionFunction()">&nbsp;
                             <input type="button" id="ScrollToTopButton" onclick="onDevicesScroll(true);" style="display:none;margin-right:4px" value="Scroll naar boven">
-                            <input id="SearchInput" type="input" autocomplete="off" placeholder="Filter" onchange="onDeviceSearchChanged(event)" onclick="onDeviceSearchChanged(event)" onkeyup="onDeviceSearchChanged(event)" onfocus="onSearchFocus(1)" onblur="onSearchFocus(0)" title="Filter apparaten op naam of prefix: user: (u:) ip: group: (g:) tag: (t:) atag: (a:) os: amt: desc: wsc:ok/noav/noupdate/nofirewall/any connectivity: (c:) - Prefix ! om uit te sluiten, bijv. !tag:abc">&nbsp;
+                            <input id="SearchInput" type="input" autocomplete="off" placeholder="Filter" onchange="onDeviceSearchChanged(event)" onclick="onDeviceSearchChanged(event)" onkeyup="onDeviceSearchChanged(event)" onfocus="onSearchFocus(1)" onblur="onSearchFocus(0)" title="Filter devices by name or prefix: user: (u:) ip: group: (g:) tag: (t:) atag: (a:) os: amt: desc: wsc:ok/noav/noupdate/nofirewall/any connectivity: (c:) - Prefix with ! to negate, e.g. !tag:abc - Separate terms with `,`, `or`, or `and`: `device1,device2` or `device1 or device2` = OR; `device1 and device2` = AND; prefix with `!` to exclude, e.g. `u:user1 and !g:group1`.">&nbsp;
                             <span id="SearchInputClearButton" style="display:none;position:relative"><img src="images/x16.png" type="button" onclick="clearDeviceSearch()" style="position:absolute;cursor:pointer;left:-18px;top:-8px" srcset="images/x32.png 2x"></span>
                             <select id="DevFilterSelect" onchange="onOnlineCheckBox(event)" title="Apparaat filter">
                                 <option value="0">Alles</option>
@@ -357,7 +357,7 @@
                             </span>
                             <input type="button" onclick="onDevicesScroll(true);" value="Scroll naar boven">&nbsp;
                             <input type="button" onclick="showMultiDesktopSettings()" value="Instellingen">&nbsp;
-                            <input id="KvmSearchInput" type="search" placeholder="Filter" onchange="onDeviceSearchChanged(event)" onclick="onDeviceSearchChanged(event)" onkeyup="onDeviceSearchChanged(event)" autocomplete="off" onfocus="onSearchFocus(1)" onblur="onSearchFocus(0)" title="Filter apparaten op naam of prefix: user: (u:) ip: group: (g:) tag: (t:) atag: (a:) os: amt: desc: wsc:ok/noav/noupdate/nofirewall/any connectivity: (c:) - Prefix ! om uit te sluiten, bijv. !tag:abc">&nbsp;
+                            <input id="KvmSearchInput" type="search" placeholder="Filter" onchange="onDeviceSearchChanged(event)" onclick="onDeviceSearchChanged(event)" onkeyup="onDeviceSearchChanged(event)" autocomplete="off" onfocus="onSearchFocus(1)" onblur="onSearchFocus(0)" title="Filter devices by name or prefix: user: (u:) ip: group: (g:) tag: (t:) atag: (a:) os: amt: desc: wsc:ok/noav/noupdate/nofirewall/any connectivity: (c:) - Prefix with ! to negate, e.g. !tag:abc - Separate terms with `,`, `or`, or `and`: `device1,device2` or `device1 or device2` = OR; `device1 and device2` = AND; prefix with `!` to exclude, e.g. `u:user1 and !g:group1`.">&nbsp;
                             <span id="KvmSearchInputClearButton" style="display:none;position:relative"><img src="images/x16.png" type="button" onclick="clearDeviceSearch()" style="position:absolute;cursor:pointer;left:-18px;top:-8px" srcset="images/x32.png 2x"></span>
                         </td>
                         <td id="devMapToolbar" class="style14" style="display:none">
@@ -1506,6 +1506,7 @@
                         <div>
                             <div>Frameverhouding</div>
                             <select id="d7framelimiter" dir="rtl">
+                                <option value="20">Erg snel</option>
                                 <option selected="selected" value="50">Snel</option>
                                 <option value="100">Gemiddeld</option>
                                 <option value="400">Traag</option>
@@ -1603,7 +1604,7 @@
         <form style="display:none" method="post" action="uploadfile.ashx" enctype="multipart/form-data" target="fileUploadFrame"><input id="p5fileDragName" name="name"><input id="p5fileDragAuthCookie" name="auth"><input id="p5fileDragSize" name="size"><input id="p5fileDragType" name="type"><input id="p5fileDragData" name="data"><input id="p5fileDragLink" name="link"><input type="submit" id="p5loginSubmit2" style="display:none"></form>
         <form style="display:none" method="post" action="uploadnodefile.ashx" enctype="multipart/form-data" target="fileUploadFrame"><input id="p13fileDragName" name="name"><input id="p13fileDragSize" name="size"><input id="p13fileDragType" name="type"><input id="p13fileDragData" name="data"><input id="p13fileDragLink" name="link"><input type="submit" id="p13loginSubmit2" style="display:none"></form>
         <audio id="chimes"><source src="sounds/chimes.mp3" type="audio/mp3"></audio>
-        <iframe style="display:none" name="fileDownloadFrame"></iframe>
+        <iframe id="fileDownloadFrame" style="display:none" name="fileDownloadFrame"></iframe>
     </div>
     <script type="text/javascript">
         'use strict';
@@ -2355,7 +2356,8 @@
                 // Fetch list of meshes, nodes, files
                 meshserver.send({ action: 'usergroups' });
                 meshserver.send({ action: 'meshes' });
-                meshserver.send({ action: 'nodes', id: '{{currentNode}}', skip: (devicePagingState == null) ? 0 : devicePagingState.skip });
+                deviceServerFilter = getDeviceServerFilter();
+                meshserver.send({ action: 'nodes', id: '{{currentNode}}', skip: (devicePagingState == null) ? 0 : devicePagingState.skip, filter: deviceServerFilter });
                 meshserver.send({ action: 'loginTokens' });
                 if (pluginHandler != null) { meshserver.send({ action: 'plugins' }); }
                 if ('{{currentNode}}'.toLowerCase() == '') { meshserver.send({ action: 'files' }); }
@@ -2827,7 +2829,7 @@
                     try {
                         var softwareData = message.value;
                         if (JSON.parse(message.value).error) {
-                            QH('p18Status', '<span>' + "FOUT:" + JSON.parse(message.value).error + '</span>');
+                            QH('p18Status', '<span>' + "FOUT:" + EscapeHtml(JSON.parse(message.value).error) + '</span>');
                             QH('p18html', '<div style="text-align:center;padding:50px"><i>' + "Klik op Vernieuwen om geïnstalleerde software te laden..." + '</i></div>');
                             installedAppsLoading = false;
                             installedAppsLoadingType = 0;
@@ -2915,9 +2917,14 @@
                             } else if ((message.type === 'userSessions') && (currentNode != null) && (currentNode._id === message.nodeid) && (desktop == null)) {
                                 // Got list of user sessions
                                 var userSessions = [];
+                                var userSessionTag = parseInt(message.tag);
+                                if (isNaN(userSessionTag)) { userSessionTag = 0; }
                                 if (message.data != null) { for (var i in message.data) { if ((message.data[i].State == 'Active') || (message.data[i].State == 'Connected') || (message.data[i].StationName == 'Console') || (debugmode == 3)) { userSessions.push(message.data[i]); } } }
-                                if (userSessions.length === 0) { connectDesktop(null, 1, null, message.tag); } // No active sessions, do a normal connection.
-                                else if (userSessions.length === 1) { connectDesktop(null, 1, userSessions[0].SessionId, message.tag); } // One active session, connect to it
+                                if (userSessions.length === 0) { connectDesktop(null, 1, null, userSessionTag); } // No active sessions, do a normal connection.
+                                else if (userSessions.length === 1) {
+                                    var userSessionId = parseInt(userSessions[0].SessionId);
+                                    connectDesktop(null, 1, isNaN(userSessionId) ? null : userSessionId, userSessionTag);
+                                } // One active session, connect to it
                                 else {
                                     var x = '';
                                     var sortBy = "{{{userSessionsSort}}}";
@@ -2931,8 +2938,10 @@
                                         });
                                     }
                                     for (var i in userSessions) {
-                                        x += '<div style="text-align:left;cursor:pointer;background-color:gray;margin:5px;padding:5px;border-radius:5px" onclick=connectDesktop(event,1,' + userSessions[i].SessionId + ',' + message.tag + ')>' + userSessions[i].State + (userSessions[i].StationName ? (', ' + userSessions[i].StationName) : '');
-                                        if (userSessions[i].Username) { if (userSessions[i].Domain) { x += ' - ' + userSessions[i].Domain + '/' + userSessions[i].Username; } else { x += ' - ' + userSessions[i].Username; } }
+                                        var userSessionId = parseInt(userSessions[i].SessionId);
+                                        if (isNaN(userSessionId)) continue;
+                                        x += '<div style="text-align:left;cursor:pointer;background-color:gray;margin:5px;padding:5px;border-radius:5px" onclick=connectDesktop(event,1,' + userSessionId + ',' + userSessionTag + ')>' + EscapeHtml(userSessions[i].State) + (userSessions[i].StationName ? (', ' + EscapeHtml(userSessions[i].StationName)) : '');
+                                        if (userSessions[i].Username) { if (userSessions[i].Domain) { x += ' - ' + EscapeHtml(userSessions[i].Domain) + '/' + EscapeHtml(userSessions[i].Username); } else { x += ' - ' + EscapeHtml(userSessions[i].Username); } }
                                         x += '</div>';
                                     }
                                     QH('p11DeskSessionSelector', x);
@@ -2948,20 +2957,20 @@
                                         if(!message.value.cmd && message.value.path){ message.value.cmd = message.value.path }
                                         if(!message.value.processUser && message.value.userName){ message.value.processUser = message.value.userName.split("\\")[1]; }
                                         if(!message.value.processDomain && message.value.userName){ message.value.processDomain = message.value.userName.split("\\")[0]; }                                    
-                                        if (message.value.processName) { x += '<div style=padding:4px><div style=padding-bottom:4px>' + "Proces naam" + '</div><div style=word-wrap:break-word;padding-left:6px><b>' + message.value.processName + '</b></div></div>'; }
-                                        if (message.value.machineName) { x += addHtmlValue5("Machine naam", message.value.machineName); }
-                                        if (message.value.cmd) { x += '<div style=padding:4px><div style=padding-bottom:4px>' + "Opdrachtregel" + '</div><div style=word-wrap:break-word;padding-left:6px><b>' + message.value.cmd + '</b></div></div>'; }
-                                        if (message.value.mainWindowTitle) { x += '<div style=padding:4px><div style=padding-bottom:4px>' + "Venstertitel" + '</div><div style=word-wrap:break-word;padding-left:6px><b>' + message.value.mainWindowTitle + '</b></div></div>'; }
-                                        if (message.value.processUser) { x += addHtmlValue5("Gebruiker", message.value.processUser); }
-                                        if (message.value.processDomain) { x += addHtmlValue5("Domein", message.value.processDomain); }
-                                        if (message.value.startTime) { x += addHtmlValue5("Start tijd", message.value.startTime); }
+                                        if (message.value.processName) { x += '<div style=padding:4px><div style=padding-bottom:4px>' + "Proces naam" + '</div><div style=word-wrap:break-word;padding-left:6px><b>' + EscapeHtml(message.value.processName) + '</b></div></div>'; }
+                                        if (message.value.machineName) { x += addHtmlValue5("Machine naam", EscapeHtml(message.value.machineName)); }
+                                        if (message.value.cmd) { x += '<div style=padding:4px><div style=padding-bottom:4px>' + "Opdrachtregel" + '</div><div style=word-wrap:break-word;padding-left:6px><b>' + EscapeHtml(message.value.cmd) + '</b></div></div>'; }
+                                        if (message.value.mainWindowTitle) { x += '<div style=padding:4px><div style=padding-bottom:4px>' + "Venstertitel" + '</div><div style=word-wrap:break-word;padding-left:6px><b>' + EscapeHtml(message.value.mainWindowTitle) + '</b></div></div>'; }
+                                        if (message.value.processUser) { x += addHtmlValue5("Gebruiker", EscapeHtml(message.value.processUser)); }
+                                        if (message.value.processDomain) { x += addHtmlValue5("Domein", EscapeHtml(message.value.processDomain)); }
+                                        if (message.value.startTime) { x += addHtmlValue5("Start tijd", EscapeHtml(message.value.startTime)); }
                                         x += '<hr />';
                                         if (message.value.PriorityBoostEnabled) { x += addHtmlValue5("Prioriteitsboost", message.value.PriorityBoostEnabled?"Ingeschakeld":"Uitgeschakeld"); }
-                                        if (message.value.sessionId) { x += addHtmlValue5("Sessie ID", message.value.sessionId); }
-                                        if (message.value.handleCount) { x += addHtmlValue5("Telling verwerken", message.value.handleCount); }
-                                        if (message.value.privilegedProcessorTime) { x += addHtmlValue5("Bevoorrechte processortijd", format("{0} seconden", message.value.privilegedProcessorTime)); }
-                                        if (message.value.totalProcessorTime) { x += addHtmlValue5("Totale processor tijd", format("{0} seconden", message.value.totalProcessorTime)); }
-                                        if (message.value.userProcessorTime) { x += addHtmlValue5("Processortijd gebruiker", format("{0} seconden", message.value.userProcessorTime)); }
+                                        if (message.value.sessionId) { x += addHtmlValue5("Sessie ID", EscapeHtml(message.value.sessionId)); }
+                                        if (message.value.handleCount) { x += addHtmlValue5("Telling verwerken", EscapeHtml(message.value.handleCount)); }
+                                        if (message.value.privilegedProcessorTime) { x += addHtmlValue5("Bevoorrechte processortijd", EscapeHtml(format("{0} seconden", message.value.privilegedProcessorTime))); }
+                                        if (message.value.totalProcessorTime) { x += addHtmlValue5("Totale processor tijd", EscapeHtml(format("{0} seconden", message.value.totalProcessorTime))); }
+                                        if (message.value.userProcessorTime) { x += addHtmlValue5("Processortijd gebruiker", EscapeHtml(format("{0} seconden", message.value.userProcessorTime))); }
                                         if (message.value.nonpagedSystemMemorySize) { x += addHtmlValue5("Niet gewisseld geheugen", getNiceSize2(message.value.nonpagedSystemMemorySize)); }
                                         if (message.value.pagedMemorySize) { x += addHtmlValue5("Gewisseld geheugen", getNiceSize2(message.value.pagedMemorySize)); }
                                         if (message.value.privateMemorySize) { x += addHtmlValue5("Prive geheugen", getNiceSize2(message.value.privateMemorySize)); }
@@ -3008,13 +3017,14 @@
                             var splitip = currentNode.lastaddr.split(':');
                             if (splitip.length > 2) {
                                 // IPv6
-                                x += addHtmlValue2("Laatste agentadres", currentNode.lastaddr + ' <img src="images/link4.png" title="' + "Kopieer adres naar het klembord" + '" style="cursor:pointer" onclick=copyTextToClip2("' + encodeURIComponentEx(currentNode.lastaddr) + '") width=10 height=10>');
+                                var v6addr = splitip.slice(0, -1).join(':');
+                                x += addHtmlValue2("Laatste agentadres", (isPrivateIP(v6addr) ? currentNode.lastaddr : '<a href="https://iplocation.com/?ip=' + encodeURIComponent(v6addr) + '" rel="noreferrer noopener" target="MeshIPLookup">' + currentNode.lastaddr + '</a>') + ' <img src="images/link4.png" title="' + "Kopieer adres naar het klembord" + '" style="cursor:pointer" onclick=copyTextToClip2("' + encodeURIComponentEx(currentNode.lastaddr) + '") width=10 height=10>');
                             } else {
                                 // IPv4
                                 if (isPrivateIP(currentNode.lastaddr)) {
                                     x += addHtmlValue2("Laatste agentadres", splitip[0] + ' <img src="images/link4.png" title="' + "Kopieer adres naar het klembord" + '" style="cursor:pointer" onclick=copyTextToClip2("' + encodeURIComponentEx(splitip[0]) + '") width=10 height=10>');
                                 } else {
-                                    x += addHtmlValue2("Laatste agentadres", '<a href="https://iplocation.com/?ip=' + splitip[0] + '" rel="noreferrer noopener" target="MeshIPLoopup">' + splitip[0] + '</a> <img src="images/link4.png" title="' + "Kopieer adres naar het klembord" + '" style="cursor:pointer" onclick=copyTextToClip2("' + encodeURIComponentEx(splitip[0]) + '") width=10 height=10>');
+                                    x += addHtmlValue2("Laatste agentadres", '<a href="https://iplocation.com/?ip=' + splitip[0] + '" rel="noreferrer noopener" target="MeshIPLookup">' + splitip[0] + '</a> <img src="images/link4.png" title="' + "Kopieer adres naar het klembord" + '" style="cursor:pointer" onclick=copyTextToClip2("' + encodeURIComponentEx(splitip[0]) + '") width=10 height=10>');
                                 }
                             }
                         }
@@ -3071,6 +3081,10 @@
                     } else {
                         server_showRestoreDlgUpdate(message.data);
                     }
+                    break;
+                }
+                case 'serverbackupready': {
+                    server_backupReady(message);
                     break;
                 }
                 case 'serverversion': {
@@ -4142,9 +4156,9 @@
                 }
                 case 'downgradePluginVersions': {
                     var vSelect = '<select id="lastPluginVersion">';
-                    message.info.versionList.forEach(function(v) { vSelect += '<option value="' + v.zipball_url + '">' + v.name + '</option>'; });
+                    message.info.versionList.forEach(function(v) { vSelect += '<option value="' + EscapeHtml(v.zipball_url) + '">' + EscapeHtml(v.name) + '</option>'; });
                     vSelect += '</select>';
-                    setDialogMode(2, "Plugin Actie", 3, pluginActionEx, format("Selecteer de versie om de plugin te downgraden: {0}", message.info.name) + '<hr />' + vSelect + '<hr />' + "Houd er rekening mee dat downgraden niet wordt aanbevolen. Doe dit alleen als een recente upgrade iets heeft gebroken." + + '<input id="lastPluginAct" type="hidden" value="downgrade" /><input id="lastPluginId" type="hidden" value="' + message.info.id + '" />');
+                    setDialogMode(2, "Plugin Actie", 3, pluginActionEx, format("Selecteer de versie om de plugin te downgraden: {0}", EscapeHtml(message.info.name)) + '<hr />' + vSelect + '<hr />' + "Houd er rekening mee dat downgraden niet wordt aanbevolen. Doe dit alleen als een recente upgrade iets heeft gebroken." + '<input id="lastPluginAct" type="hidden" value="downgrade" /><input id="lastPluginId" type="hidden" value="' + EscapeHtml(message.info.id) + '" />');
                     break;
                 }
                 case 'serverBackup': {
@@ -5167,7 +5181,20 @@
                 }
                 if (deviceViewSettings.devsCols.indexOf('links') >= 0) { r += '<td style=text-align:center;font-size:x-small>' + getShortRouterLinks(node); } // Links
                 if (deviceViewSettings.devsCols.indexOf('user') >= 0) { r += '<td style=text-align:center>' + getUserShortStr(node); } // User
-                if (deviceViewSettings.devsCols.indexOf('ip') >= 0) { var ip = ''; if (node.mtype == 3) { ip = node.host; } else if (node.ip) { ip = node.ip; } r += '<td style=text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis title="' + EscapeHtml(ip) + '">' + EscapeHtml(ip); } // IP address
+                if (deviceViewSettings.devsCols.indexOf('ip') >= 0) {
+                    var ip = '';
+                    if ((node.mtype == 1) || (node.mtype == 3)) { ip = node.host || ''; } else if (node.ip) { ip = node.ip; }
+                    var ipHtml = EscapeHtml(ip);
+                    var linkip = null;
+                    if (typeof ip == 'string') { if (/^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(ip)) { linkip = ip.split(':')[0]; } else if (/^[0-9a-f]*:[0-9a-f:]+$/i.test(ip) && (ip.indexOf(':') != ip.lastIndexOf(':'))) { linkip = ip; } }
+                    if ((linkip != null) && !isPrivateIP(linkip)) { ipHtml = '<a href="https://iplocation.com/?ip=' + encodeURIComponent(linkip) + '" rel="noreferrer noopener" target="MeshIPLookup">' + EscapeHtml(ip) + '</a>'; }
+                    var lanip = node.defaultRouteIp || node.defaultRouteIp6 || '';
+                    if ((lanip != '') && (lanip != ip)) {
+                        r += '<td style=text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis title="' + EscapeHtml(lanip + ' / ' + ip) + '">' + "LAN" + ' ' + EscapeHtml(lanip) + '<br />' + "WAN" + ' ' + ipHtml;
+                    } else {
+                        r += '<td style=text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis title="' + EscapeHtml(ip) + '">' + ipHtml;
+                    }
+                } // IP address
                 if (deviceViewSettings.devsCols.indexOf('conn') >= 0) { r += '<td style=text-align:center>' + states.join('&nbsp;+&nbsp;'); } // Connectivity
                 if (deviceViewSettings.devsCols.indexOf('amthost') >= 0) { r += '<td style=text-align:center>' + (((node.intelamt == null) || (node.intelamt.host == null)) ? '' : EscapeHtml(node.intelamt.host)); }
                 if (deviceViewSettings.devsCols.indexOf('amtstate') >= 0) {
@@ -5517,7 +5544,7 @@
                 } else if (contype == 1) {
                     // Setup the Mesh Agent remote desktop
                     desk = CreateAgentRedirect(meshserver, CreateAgentRemoteDesktop('kvmid_' + shortid), serverPublicNamePort, authCookie, authRelayCookie, domainUrl);
-                    desk.m.UseExtendedKeyFlag = (node.agent.id < 5); // Only use extended keys on Windows agents for now
+                    desk.m.UseExtendedKeyFlag = isWindowsNode(node);
                     desk.m.mouseCursorActive(xxcurrentView == 11);
                     desk.shortid = shortid;
                     desk.attemptWebRTC = attemptWebRTC;
@@ -6526,7 +6553,7 @@
         function onUserSearchFocus(x) { userSearchFocus = x; }
         function onConsoleFocus(x) { consoleFocus = x; }
 
-        function parseSearchAndInput(x) {
+       function parseSearchAndInput(x) {
             var s = x.split(' ' + "en" + ' '), r = null;
             for (var i in s) {
                 var r2 = getDevicesThatMatchFilter(s[i]);
@@ -6534,10 +6561,20 @@
             }
             return r;
         }
-
-        function parseSearchOrInput(x) {
-            var s = x.split(' ' + "of" + ' '), r = null;
-            for (var i in s) { var r2 = parseSearchAndInput(s[i]); if (r == null) { r = r2; } else { for (var j in r2) { if (r.indexOf(r2[j] >= 0)) { r.push(r2[j]); } } } }
+		
+		function parseSearchOrInput(x) {
+            if (x == '') { return parseSearchAndInput(x); } // Empty search, return all devices.
+            var parts = x.split(','), r = null; // Comma = OR, each part keeps its own prefix (u:, g:, t:, etc.)
+            for (var p in parts) {
+                var s = parts[p].split(' ' + "of" + ' ');
+                for (var i in s) {
+                    var trimmed = s[i].trim();
+                    if (trimmed == '') { continue; } // Skip empty pieces from stray/extra commas
+                    var r2 = parseSearchAndInput(trimmed);
+                    if (r == null) { r = r2; } else { for (var j in r2) { if (r.indexOf(r2[j]) < 0) { r.push(r2[j]); } } }
+                }
+            }
+            if (r == null) { r = []; }
             return r;
         }
 
@@ -6676,8 +6713,30 @@
             return r;
         }
 
+        // When the server pages the device list (maxDeviceView), plain name filters are sent to the server so they
+        // search all devices and not only the current page. Prefixed (u:, ip:, tag:...) and composite filters stay local.
+        var deviceServerFilter = '', deviceServerFilterTimer = null;
+        function getDeviceServerFilter() {
+            var x = Q('SearchInput').value.toLowerCase().trim();
+            if ((x == '') || (/[:,!]/.test(x)) || (/\s(or|and)\s/.test(x))) return '';
+            return x;
+        }
+        function updateDeviceServerFilter() {
+            if ((serverinfo == null) || (serverinfo.maxdeviceview == null) || (meshserver == null)) return;
+            if (deviceServerFilterTimer != null) { clearTimeout(deviceServerFilterTimer); deviceServerFilterTimer = null; }
+            if (getDeviceServerFilter() == deviceServerFilter) return;
+            deviceServerFilterTimer = setTimeout(function () {
+                deviceServerFilterTimer = null;
+                var f = getDeviceServerFilter();
+                if (f == deviceServerFilter) return;
+                deviceServerFilter = f;
+                meshserver.send({ action: 'nodes', skip: 0, filter: f });
+            }, 400);
+        }
+
         function onSearchInputChanged() {
             var x = Q('SearchInput').value.toLowerCase().trim(); putstore('_search', Q('SearchInput').value);
+            updateDeviceServerFilter();
             QS('SearchInput')['background-color'] = QS('KvmSearchInput')['background-color'] = (x == '')?null:'#FDFFBE';
             QV('SearchInputClearButton', (x != ''));
             QV('KvmSearchInputClearButton', (x != ''));
@@ -6968,7 +7027,7 @@
             var filetreexx = p13sort_files(p13filetree.dir);
             var file = filetreexx[parseInt(contextelement.attributes.fileindex.nodeValue)];
             if (action == 1) { // Rename the file
-                setDialogMode(2, "Hernoemen", 3, p13renamefileEx, '<input type=text id=p13renameinput maxlength=64 onkeyup=p13fileNameCheck(event) style=width:100% value="' + file.n + '" />', { action: 'rename', path: p13filetreelocation.join('/'), oldname: file.n});
+                setDialogMode(2, "Hernoemen", 3, p13renamefileEx, '<input type=text id=p13renameinput maxlength=64 onkeyup=p13fileNameCheck(event) style=width:100% value="' + EscapeHtml(file.n) + '" />', { action: 'rename', path: p13filetreelocation.join('/'), oldname: file.n});
                 focusTextBox('p13renameinput');
                 p13fileNameCheck();
             } else if (action == 2) { // Edit the file
@@ -7482,7 +7541,7 @@
             var x = '<div style=margin-bottom:6px><label for=selectnode-search>' + "Zoeken" + '</label>&nbsp&nbsp<input type=text placeholder="' + "Apparaat naam" + '" id="selectnode-search" onchange=onPlaceNodeInputChange() onkeyup=onPlaceNodeInputChange() autocomplete=off style=width:120px></div><div id=placenode style="height:254px;overflow-y:auto;width:100%;margin:12px 1px 4px 1px;"><div id=noNodesMapPlace style=text-align:center;width:100%;display:none>' + "Geen apparaten gevonden." + '</div>';
             for (var i in nodes) {
                 x += '<div class=noselect id=' + nodes[i]._id + '-rowid onclick=selectNodeToPlace(event,\''+ nodes[i]._id +'\') style=background-color:lightgray;margin-bottom:4px;border-radius:2px><input name=PlaceMapDeviceCheckbox id=' + nodes[i]._id + '-checkid type=checkbox style=width:16px;display:inline />';
-                x += '<div class=j' + nodes[i].icon + ' style=width:16px;height:16px;margin-top:2px;margin-right:4px;display:inline-block></div><div style=width:16px;display:inline>' + nodes[i].name + '</div></div>';
+                x += '<div class=j' + nodes[i].icon + ' style=width:16px;height:16px;margin-top:2px;margin-right:4px;display:inline-block></div><div style=width:16px;display:inline>' + EscapeHtml(nodes[i].name) + '</div></div>';
             }
             setDialogMode(2, "Selecteer een apparaat om te plaatsen", 3, placeNodeEx, x + '</div>', coords);
             onPlaceNodeInputChange();
@@ -7823,7 +7882,7 @@
                     var str = '';
                     if (node.agent.id <= agentsStr.length) { str = agentsStr[node.agent.id]; } else { str = agentsStr[0]; }
                     if (node.agent.ver != 0) { str += ' v' + node.agent.ver; }
-                    if (node.agent.id == 14) { str = node.agent.core; }
+                    if (node.agent.id == 14) { str = EscapeHtml(node.agent.core); }
                     if ((node.agent.root === false) && ((node.conn & 1) != 0)) { str += ', ' + "Beperkt"; }
                     x += addDeviceAttribute("Mesh Agent", str);
                 }
@@ -7923,7 +7982,7 @@
                 // Pending Reboot
                 if (node.pr) {
                     var y = [];
-                    for (var i in node.pr){ y.push(node.pr[i]); }
+                    for (var i in node.pr){ y.push(EscapeHtml(node.pr[i])); }
                     if (y.length > 0) x += addDeviceAttribute("Herstart wachtend", y.join(', '));
                 }
 
@@ -7939,6 +7998,7 @@
                 if (node.av && node.av.length > 0) {
                     var y = [];
                     for (var i in node.av) {
+                        if (node.av[i] == null) continue;
                         if (node.av[i].product) {
                             var avx = EscapeHtml(node.av[i].product);
                             if (node.av[i].enabled !== true) { avx += ' - <span style=color:red>' + "Uitgeschakeld" + '</span>'; }
@@ -9144,7 +9204,7 @@
             var y = '<select id=p10newGroup style=width:236px>', count = 0, altGroups = [];
             for (var i in meshes) { var meshrights = GetMeshRights(i); if ((meshes[i]._id != targetMeshId) && (meshrights & 4)) { altGroups.push(meshes[i]); } }
             altGroups.sort(nameSort);
-            for (var i in altGroups) { count++; y += '<option value=\'' + altGroups[i]._id + '\'>' + altGroups[i].name + '</option>'; }
+            for (var i in altGroups) { count++; y += '<option value=\'' + altGroups[i]._id + '\'>' + EscapeHtml(altGroups[i].name) + '</option>'; }
             y += '</select>';
 
             if (count > 0) {
@@ -9666,6 +9726,7 @@
                                     desktop.m.hold(true);
                                     webRtcDesktop.webRtcActive = true;
                                     webRtcDesktop.softdesktop = CreateKvmDataChannel(webRtcDesktop.webchannel, CreateAgentRemoteDesktop('Desk', Q('id_mainarea')), desktop.m);
+                                    webRtcDesktop.softdesktop.m.UseExtendedKeyFlag = isWindowsNode(desktopNode);
                                     webRtcDesktop.softdesktop.m.setRotation(desktop.m.rotation);
                                     webRtcDesktop.softdesktop.m.onScreenSizeChange = deskAdjust;
                                     webRtcDesktop.softdesktop.m.ImageType = webpSupport?4:1; // Send 4 if WebP is supported, otherwise send 1 for JPEG.
@@ -9721,7 +9782,7 @@
                 } else if ((contype == null) || (contype == 1) || ((contype == 3) && ((currentNode.agent.id > 4) && ((debugmode == null))))) {
                     // Setup the Mesh Agent remote desktop
                     desktop = CreateAgentRedirect(meshserver, CreateAgentRemoteDesktop('Desk'), serverPublicNamePort, authCookie, authRelayCookie, domainUrl);
-                    desktop.m.UseExtendedKeyFlag = (desktopNode.agent.id < 5); // Only use extended keys on Windows agents for now
+                    desktop.m.UseExtendedKeyFlag = isWindowsNode(desktopNode);
                     desktop.m.mouseCursorActive(xxcurrentView == 11);
                     desktop.debugmode = debugmode;
                     desktop.m.debugmode = debugmode;
@@ -10164,6 +10225,17 @@
             else if (elem.msRequestFullscreen) { elem.msRequestFullscreen(); }
             else if (elem.mozRequestFullScreen) { elem.mozRequestFullScreen(); }
             else if (elem.webkitRequestFullscreen) { elem.webkitRequestFullscreen(Element.ALLOW_KEYBOARD_INPUT); }
+        }
+
+        // Toggle browser fullscreen
+        function toggleBrowserFullscreen() {
+            if (browserfullscreen) {
+                exitBrowserFullscreen();
+                browserfullscreen = false;
+            } else {
+                enterBrowserFullscreen(Q('body'));
+                browserfullscreen = true;
+            }
         }
 
         // Exit browser fullscreen
@@ -10769,7 +10841,12 @@
             var p = [], processes = null;
             try { processes = JSON.parse(message.value); } catch (e) { }
             if (processes != null) {
-                for (var pid in processes) { p.push( { p:parseInt(pid), c:processes[pid].cmd, d:processes[pid].cmd.toLowerCase(), u: processes[pid].user } ); }
+                for (var pid in processes) {
+                    if ((processes[pid] == null) || (typeof processes[pid] != 'object')) continue;
+                    var processId = parseInt(pid), processCommand = processes[pid].cmd;
+                    if (isNaN(processId) || (typeof processCommand != 'string')) continue;
+                    p.push({ p: processId, c: processCommand, d: processCommand.toLowerCase(), u: processes[pid].user });
+                }
                 if (deskTools.sort == 0) { p.sort(sortProcessPid); } else if (deskTools.sort == 1) { p.sort(sortProcessName); }
                 var x = '';
                 for (var i in p) {
@@ -10777,9 +10854,9 @@
                         var c = p[i].c;
                         x += '<div onclick=showProcessDetails(' + p[i].p + ') class=deskToolsBar>';
                         x += '<div style=width:50px;float:left;text-align:right;padding-right:5px>' + EscapeHtml(p[i].p) + '</div>';
-                        x += '<a href=# style=float:right;padding-right:5px;cursor:pointer title="' + "Stop proces" + '" onclick=\'return stopProcess(' + EscapeHtml(p[i].p) + ',"' + EscapeHtml(p[i].c) + '")\'><img width=10 height=10 src="images/trash.png"></a>';
+                        x += '<a href=# style=float:right;padding-right:5px;cursor:pointer title="' + "Stop proces" + '" onclick=\'return stopProcess(' + EscapeHtml(p[i].p) + ',' + EscapeHtml(JSON.stringify(p[i].c)) + ')\'><img width=10 height=10 src="images/trash.png"></a>';
                         x += '<div style=float:right;padding-right:5px>' + (p[i].u ? EscapeHtml(p[i].u) : '') + '</div>';
-                        x += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:5px" title="' + EscapeHtml(c) + '">' + c + '</div>';
+                        x += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:5px" title="' + EscapeHtml(c) + '">' + EscapeHtml(c) + '</div>';
                         x += '</div>';
                     }
                 }
@@ -10801,12 +10878,15 @@
             deskTools.services = services;
             if (services != null) {
                 for (var i in services) {
-                    if (services[i].status) {
+                    if ((services[i] == null) || (typeof services[i] != 'object')) continue;
+                    var serviceIndex = parseInt(i);
+                    if (isNaN(serviceIndex)) continue;
+                    if (services[i].status && (typeof services[i].status.state == 'string')) {
                         // Windows
-                        s.push({ p: capitalizeFirstLetter(services[i].status.state.toLowerCase()), d: services[i].displayName, i: i });
-                    } else if (services[i].serviceType) {
+                        s.push({ p: capitalizeFirstLetter(services[i].status.state.toLowerCase()), d: services[i].displayName, i: serviceIndex });
+                    } else if ((typeof services[i].serviceType == 'string') && (typeof services[i].name == 'string')) {
                         // Linux (TODO: This the service status is not displayed, not sure start/stop/restart will work).
-                        s.push({ p: services[i].serviceType, d: services[i].name, i: i });
+                        s.push({ p: services[i].serviceType, d: services[i].name, i: serviceIndex });
                     }
                 }
                 if (deskTools.ssort == 0) { s.sort(sortProcessPid); } else if (deskTools.ssort == 1) { s.sort(sortProcessName); }
@@ -10818,7 +10898,7 @@
                         else if (ss == 'Running') { ss = "lopende"; }
                         x += '<div onclick=showServiceWaitDialog(' + s[i].i + ') class=deskToolsBar>';
                         x += '<div style=width:70px;float:left;padding-right:5px>' + EscapeHtml(ss) + '</div>';
-                        x += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + c + '">' + EscapeHtml(c) + '</div>';
+                        x += '<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + EscapeHtml(c) + '">' + EscapeHtml(c) + '</div>';
                         x += '</div>';
                     }
                 }
@@ -10828,20 +10908,22 @@
 
         function showServiceDetailsDialog(data) {
             if (xxdialogMode && (xxdialogTag.indexOf('service_') != -1)) {
-                var index = xxdialogTag.replace('service_','')
+                var index = parseInt(xxdialogTag.replace('service_', ''));
+                if (isNaN(index)) return;
                 // var org_service = deskTools.services[index];
-                var service = data.value ? JSON.parse(data.value) : deskTools.services[index];
-                if(data.value) service.displayName = deskTools.services[index].displayName;
-                if (service != null) {
+                var service = null;
+                try { service = data.value ? JSON.parse(data.value) : deskTools.services[index]; } catch (e) { }
+                if ((service != null) && (typeof service == 'object')) {
+                    if (data.value && deskTools.services && deskTools.services[index]) { service.displayName = deskTools.services[index].displayName; }
                     var x = '';
-                    if (service.name) { x += addHtmlValue("Naam", service.name); }
-                    if (service.displayName) { x += addHtmlValue("Schermnaam", service.displayName); }
+                    if (service.name) { x += addHtmlValue("Naam", EscapeHtml(service.name)); }
+                    if (service.displayName) { x += addHtmlValue("Schermnaam", EscapeHtml(service.displayName)); }
                     if (service.status) {
-                        var ss = capitalizeFirstLetter(service.status.state.toLowerCase());
+                        var ss = (typeof service.status.state == 'string') ? EscapeHtml(capitalizeFirstLetter(service.status.state.toLowerCase())) : '';
                         if (ss == 'Stopped') { ss = "Gestopt"; } // TODO: Add all other states for translation
                         else if (ss == 'Running') { ss = "lopende"; }
                         if (service.status.state) { x += addHtmlValue("Status", ss); }
-                        if (service.status.pid) { x += addHtmlValue("PID", service.status.pid); }
+                        if (service.status.pid) { x += addHtmlValue("PID", EscapeHtml(service.status.pid)); }
                         var serviceTypes = [];
                         if (service.status.isFileSystemDriver === true) { serviceTypes.push("Bestandssysteem stuurprogramma"); }
                         if (service.status.isInteractive === true) { serviceTypes.push("Interactief"); }
@@ -10850,18 +10932,18 @@
                         if (service.status.isSharedProcess === true) { serviceTypes.push("Gedeeld proces"); }
                         if (serviceTypes.length > 0) { x += addHtmlValue("Type", serviceTypes.join(', ')); }
                     }
-                    if (service.startType) { x += addHtmlValue("Start Type", service.startType); }
-                    if (service.user) { x += addHtmlValue("Gebruiker", service.user); }
-                    if (service.installedBy) { x += addHtmlValue("Geïnstalleerd door", service.installedBy); }
+                    if (service.startType) { x += addHtmlValue("Start Type", EscapeHtml(service.startType)); }
+                    if (service.user) { x += addHtmlValue("Gebruiker", EscapeHtml(service.user)); }
+                    if (service.installedBy) { x += addHtmlValue("Geïnstalleerd door", EscapeHtml(service.installedBy)); }
                     if (service.installedDate) { x += addHtmlValue("Installatie datum", printDateTime(new Date(service.installedDate))); }
                     if (service.failureActions) { 
                         if (service.failureActions.resetPeriod) { 
                             var abc = ((service.failureActions.resetPeriod < 86400 ? 0 : service.failureActions.resetPeriod) / (24 * 60 * 60));
                             x += addHtmlValue("Herstart foutteller na ", abc + ' Day' + (abc != 1 ? 's': '')); }
                         if (service.failureActions.actions) {
-                            if (service.failureActions.actions[0]) { x += addHtmlValue("Eerste fout",service.failureActions.actions[0].type); }
-                            if (service.failureActions.actions[1]) { x += addHtmlValue("Tweede fout",service.failureActions.actions[1].type); }
-                            if (service.failureActions.actions[2]) { x += addHtmlValue("Vervolgfouten",service.failureActions.actions[2].type); }
+                            if (service.failureActions.actions[0]) { x += addHtmlValue("Eerste fout", EscapeHtml(service.failureActions.actions[0].type)); }
+                            if (service.failureActions.actions[1]) { x += addHtmlValue("Tweede fout", EscapeHtml(service.failureActions.actions[1].type)); }
+                            if (service.failureActions.actions[2]) { x += addHtmlValue("Vervolgfouten", EscapeHtml(service.failureActions.actions[2].type)); }
                         }
                     }
                     x += '<br/><div style=float:right;margin-bottom:12px><input type=button value="' + "Sluiten" + '" onclick=showServiceDetailsDialogEx(0,' + index + ')></div><div style=margin-bottom:12px><input type=button value="' + "Start" + '" onclick=showServiceDetailsDialogEx(1,' + index + ')><input type=button value="' + "Stop" + '" onclick=showServiceDetailsDialogEx(2,' + index + ')><input type=button value="' + "Herstarten" + '" onclick=showServiceDetailsDialogEx(3,' + index + ')></div>';
@@ -11482,11 +11564,15 @@
             }
         }
 
-        function CreateRemoteFiles(onFileUpdate) {
+        function CreateRemoteFiles(onFileUpdate, onBinaryData) {
             var obj = { protocol: 5 };
             obj.onFileUpdate = onFileUpdate;
+            obj.onBinaryData = onBinaryData;
             obj.xxStateChange = function(state) { }
             obj.ProcessData = function(data) { obj.onFileUpdate(data); }
+            if (onBinaryData) {
+                obj.ProcessBinaryData = function(data) { obj.onBinaryData(data); }
+            }
             return obj;
         }
 
@@ -11499,7 +11585,7 @@
             p13clearConsoleMsg();
             if (!files) {
                 // Setup a mesh agent files
-                files = CreateAgentRedirect(meshserver, CreateRemoteFiles(p13gotFiles), serverPublicNamePort, authCookie, authRelayCookie, domainUrl);
+                files = CreateAgentRedirect(meshserver, CreateRemoteFiles(p13gotFiles, p13gotFilesBinary), serverPublicNamePort, authCookie, authRelayCookie, domainUrl);
                 if (contype == 2) { files.urlname = 'sshfilesrelay.ashx'; } // If this is a SSH session, change the URL to the SSH application relay.
                 files.contype = contype;
                 files.options = { consent: consent }
@@ -12314,7 +12400,7 @@
                 if (f.t < 3) {
                     var right = '', title = '';
                     h = '<div class=filelist file=999>';
-                    h += '<input file=999 style=float:left name=fd class=fcb type=checkbox onchange=p13setActions() value=\'' + f.nx + '\'>&nbsp;<span class=fsize>' + fdatestr + '</span><span style=float:right>' + EscapeHtml(fsize) + right + '</span>';
+                    h += '<input file=999 style=float:left name=fd class=fcb type=checkbox onchange=p13setActions() value=\'' + EscapeHtml(f.nx) + '\'>&nbsp;<span class=fsize>' + fdatestr + '</span><span style=float:right>' + EscapeHtml(fsize) + right + '</span>';
                     h += '<span title="' + shortname + '"><div class=fileIcon' + (f.dt == 'REMOVABLE' ? 5 : (f.dt == 'CDROM' ? 6 : f.t)) + ' onclick=p13folderset("' + encodeURIComponentEx(f.nx) + '")></div><a href=# style=cursor:pointer onclick=\'return p13folderset("' + encodeURIComponentEx(f.nx) + '")\'>';
                     var sysvol = (isWindowsNode(currentNode) && f.dt && (DeviceDetailsNodeId == currentNode._id) && DeviceDetailsHardware && DeviceDetailsHardware.windows && DeviceDetailsHardware.windows.volumes) ? DeviceDetailsHardware.windows.volumes[shortname.charAt(0).toUpperCase()] : null;
                     if (sysvol && sysvol.name) {
@@ -12336,7 +12422,7 @@
                             link = '<a onclick=downloadFile("devicefile.ashx?c=' + authCookie + '&m=' + currentNode.meshid.split('/')[2] + '&n=' + currentNode._id.split('/')[2] + '&f=' + encodeURIComponentEx(newlinkpath + '/' + name) + '","' + encodeURIComponentEx(name) + '") style=cursor:pointer>' + shortname + '</a>';
                         }
                     }
-                    h = '<div id=fileEntry cmenu=filesContextMenu fileIndex=' + i + ' class=filelist file=3><input file=3 style=float:left name=fd class=fcb type=checkbox onchange=p13setActions() value=\'' + f.nx + '\'>&nbsp;<span class=fsize>' + fdatestr + '</span><span style=float:right>' + EscapeHtml(fsize) + '</span><span title="' + shortname + '"><div class=fileIcon' + f.t + '></div>' + link + '</span></div>';
+                    h = '<div id=fileEntry cmenu=filesContextMenu fileIndex=' + parseInt(i) + ' class=filelist file=3><input file=3 style=float:left name=fd class=fcb type=checkbox onchange=p13setActions() value=\'' + EscapeHtml(f.nx) + '\'>&nbsp;<span class=fsize>' + fdatestr + '</span><span style=float:right>' + EscapeHtml(fsize) + '</span><span title="' + shortname + '"><div class=fileIcon' + f.t + '></div>' + link + '</span></div>';
                 }
 
                 if (f.t < 3) { html1 += h; } else { html2 += h; }
@@ -12436,7 +12522,17 @@
 
         function p13sort_files(files) {
             var r = [], sortselection = Q('p13sortdropdown').value;
-            for (var i in files) { files[i].nx = i; if (files[i].s == null) { files[i].s = 0; } if (files[i].n == null) { files[i].n = i; } files[i].ln = files[i].n.toLowerCase(); r.push(files[i]); }
+            for (var i in files) {
+                var file = files[i];
+                file.nx = i;
+                file.t = parseInt(file.t);
+                if (isNaN(file.t)) { file.t = 3; }
+                if (file.s == null) { file.s = 0; }
+                if (file.n == null) { file.n = i; }
+                file.n = String(file.n);
+                file.ln = file.n.toLowerCase();
+                r.push(file);
+            }
             p13sortorder = 1;
             if (sortselection > 3) { p13sortorder = -1; sortselection -= 3; }
             if (sortselection == 1) { r.sort(p13sort_filename); }
@@ -12514,7 +12610,7 @@
         function p13createfileEx() { files.sendText({ action: 'mkfile', reqid: 1, path: p13filetreelocation.join('/') + '/' + Q('p13renameinput').value }); p13folderup(999); }
         function p13deletefile() { var cc = p13getFileSelCount(), rec = (p13getFileSelDirCount() > 0) ? '<br /><br /><label><input type=checkbox id=p13recdeleteinput>' + "Recursieve verwijdering" + '</label><br>' : '<input type=checkbox id=p13recdeleteinput style=\'display:none\'>'; setDialogMode(2, "Verwijderen", 3, p13deletefileEx, (cc > 1) ? (format("Verwijder {0} gelecteerde items?", cc) + rec) : ("Verwijder geselecteerde item?" + rec)); }
         function p13deletefileEx() { var delfiles = [], checkboxes = document.getElementsByName('fd'); for (var i = 0; i < checkboxes.length; i++) { if (checkboxes[i].checked) { delfiles.push(p13filetree.dir[checkboxes[i].value].n); } } files.sendText({ action: 'rm', reqid: 1, path: p13filetreelocation.join('/'), delfiles: delfiles, rec: Q('p13recdeleteinput').checked }); p13folderup(999); }
-        function p13renamefile() { var renamefile, checkboxes = document.getElementsByName('fd'); for (var i = 0; i < checkboxes.length; i++) { if (checkboxes[i].checked) { renamefile = p13filetree.dir[checkboxes[i].value].n; } } setDialogMode(2, "Hernoemen", 3, p13renamefileEx, '<input type=text id=p13renameinput maxlength=64 onkeyup=p13fileNameCheck(event) style=width:100% value="' + renamefile + '" />', { action: 'rename', path: p13filetreelocation.join('/'), oldname: renamefile}); focusTextBox('p13renameinput'); p13fileNameCheck(); }
+        function p13renamefile() { var renamefile, checkboxes = document.getElementsByName('fd'); for (var i = 0; i < checkboxes.length; i++) { if (checkboxes[i].checked) { renamefile = p13filetree.dir[checkboxes[i].value].n; } } setDialogMode(2, "Hernoemen", 3, p13renamefileEx, '<input type=text id=p13renameinput maxlength=64 onkeyup=p13fileNameCheck(event) style=width:100% value="' + EscapeHtml(renamefile) + '" />', { action: 'rename', path: p13filetreelocation.join('/'), oldname: renamefile}); focusTextBox('p13renameinput'); p13fileNameCheck(); }
         function p13renamefileEx(b, t) { t.newname = Q('p13renameinput').value; files.sendText(t); p13folderup(999); }
         function p13fileNameCheck(e) { var x = isFilenameValid(Q('p13renameinput').value); QE('idx_dlgOkButton', x); if ((x == true) && (e != null) && (e.keyCode == 13)) { dialogclose(1); } }
         function p13uploadFile() { setDialogMode(2, "Upload bestand", 3, p13uploadFileEx, '<input type=file name=files id=p13uploadinput style=width:100% multiple=multiple onchange="updateUploadDialogOk(\'p13uploadinput\')" />'); updateUploadDialogOk('p13uploadinput'); }
@@ -12642,7 +12738,7 @@
         // Called by the html page to start a download, arguments are: path, file name and file size.
         function p13downloadfile(x, y, z, tag) {
             if (xxdialogMode || !files) return;
-            gdownloadFile = { path: decodeURIComponent(x), file: decodeURIComponent(y), size: z, tsize: 0, data: '', state: 0, id: Math.random(), tag: tag }
+            gdownloadFile = { path: decodeURIComponent(x), file: decodeURIComponent(y), size: z, tsize: 0, chunks: [], data: '', state: 0, id: Math.random(), tag: tag }
             //console.log('p13downloadFileCancel', gdownloadFile);
             files.sendText({ action: 'download', sub: 'start', id: gdownloadFile.id, path: gdownloadFile.path });
             setDialogMode(2, "Download bestand", 10, p13downloadFileCancel, '<div>' + EscapeHtml(gdownloadFile.file) + '</div><br /><progress id=d2progressBar style=width:100% value=0 max=' + z + ' />');
@@ -12819,7 +12915,7 @@
             uploadFile.xpath = p13filetreelocation.join('/');
             uploadFile.xfiles = files;
             uploadFile.xfilePtr = -1;
-            setDialogMode(2, "Upload bestand", 10, p13uploadFileCancel, '<div id=p13dfileName>' + "Verbinden..." + '</div><br /><progress id=d2progressBar style=width:100% value=0 max=0 />');
+            setDialogMode(2, "Upload bestand", 10, p13uploadFileCancel, '<div id=p13dfileName>' + "Verbinden..." + '</div><br /><progress id=d2progressBar style="display:block;width:100%;margin-bottom:5px" value=0 max=0></progress><div id=d2progressLabel style="text-align:center;margin-top:5px">0%</div>');
             p13uploadNextFile();
         }
 
@@ -12841,10 +12937,14 @@
             uploadFile.xfilePtr++;
             if (uploadFile.xfiles.length > uploadFile.xfilePtr) {
                 uploadFile.xptr = 0;
+                uploadFile.blocksInFlight = 0;
+                uploadFile.uploadComplete = false;
+                uploadFile.uploaddoneSent = false;
                 var file = uploadFile.xfiles[uploadFile.xfilePtr];
                 QH('p13dfileName', EscapeHtml(file.name));
                 Q('d2progressBar').max = file.size;
                 Q('d2progressBar').value = 0;
+                Q('d2progressLabel').textContent = '0%';
                 if (file.xdata == null) {
                     uploadFile.xfile = file;
                     // If the remote file already exists and is smaller then our file, see if we can resume the trasfer
@@ -12873,18 +12973,87 @@
 
         // Used to cancel the entire transfer.
         function p13uploadFileTransferDone() {
-            uploadFile = null; // No more files to upload, clean up.
-            setDialogMode(0); // Close the dialog box
-            p13folderup(9999); // Refresh the current folder
+            uploadFile = null;
+            setDialogMode(0);
+            p13folderup(9999);
+        }
+
+        function p13gotFilesBinary(data) {
+            if (data.length > 0 && data[0] != 1) {
+                var binStr = "";
+                if (data.length < 16000) {
+                    binStr = String.fromCharCode.apply(null, data);
+                } else {
+                    for (var i = 0; i < data.length; i++) { binStr += String.fromCharCode(data[i]); }
+                }
+                p13gotFiles(binStr);
+                return;
+            }
+            if (!gdownloadFile || gdownloadFile.state == 0) return;
+            if (data.length > 4) {
+                var payload = data.subarray(4);
+                gdownloadFile.tsize += payload.length;
+                if (gdownloadFile.tag == 'viewer') {
+                    var str = "";
+                    if (payload.length < 16000) {
+                        str = String.fromCharCode.apply(null, payload);
+                    } else {
+                        for (var i = 0; i < payload.length; i++) { str += String.fromCharCode(payload[i]); }
+                    }
+                    gdownloadFile.data += str;
+                } else {
+                    gdownloadFile.chunks.push(payload);
+                }
+                Q('d2progressBar').value = gdownloadFile.tsize;
+            }
+            var header = (data[0] << 24) + (data[1] << 16) + (data[2] << 8) + data[3];
+            if ((header & 1) != 0) {
+                if (gdownloadFile.tag == 'viewer') {
+                    setDialogMode(4, EscapeHtml(gdownloadFile.file), 3, p13editSaveBack, null, gdownloadFile.file);
+                    QV('d4EncodingButton', true);
+                    QV('d4LineBreakButton', true);
+                    QS('dialog').width = 'auto';
+                    QS('dialog').bottom = '80px';
+                    QS('dialog').top = QS('dialog').left = QS('dialog').right = '100px';
+                    Q('d4editorarea').value = gdownloadFile.data;
+                    gdownloadFile = null;
+                } else {
+                    var blob = new Blob(gdownloadFile.chunks, { type: 'application/octet-stream' });
+                    saveAs(blob, gdownloadFile.file); gdownloadFile = null; setDialogMode(0);
+                }
+            } else {
+                files.sendText({ action: 'download', sub: 'ack', id: gdownloadFile.id });
+            }
         }
 
         // Receive upload ack from the mesh agent, use this to keep sending more data
         function p13gotUploadData(cmd) {
             if ((uploadFile == null) || (parseInt(uploadFile.xfilePtr) != parseInt(cmd.reqid))) { return; }
+            var ts = new Date().toISOString();
+            if (cmd.action == 'uploadack' && uploadFile.uploaddoneSent) { return; }
             switch (cmd.action) {
-                case 'uploadstart': { uploadFile.xdataPriming = 8; p13uploadNextPart(false); break; } // Send 8 more blocks of 16k to fill the websocket.
-                case 'uploadack': { p13uploadNextPart(false); break; }
-                case 'uploaddone': { if (uploadFile.xfiles.length > uploadFile.xfilePtr + 1) { p13uploadNextFile(); } else { p13uploadFileTransferDone(); } break; }
+                case 'uploadstart':
+                    uploadFile.blocksInFlight = 0;
+                    uploadFile.uploadComplete = false;
+                    p13uploadNextPart();
+                    break;
+                case 'uploadack':
+                    if (uploadFile.uploaddoneSent) { break; }
+                    if (uploadFile.blocksInFlight > 0) { uploadFile.blocksInFlight--; }
+                    if (uploadFile.blocksInFlight == 0 && uploadFile.uploadComplete) {
+                        uploadFile.uploaddoneSent = true;
+                        files.sendText(JSON.stringify({ action: 'uploaddone', reqid: uploadFile.xfilePtr }));
+                    } else {
+                        p13uploadNextPart();
+                    }
+                    break;
+                case 'uploaddone':
+                    Q('d2progressBar').value = uploadFile.xfile ? uploadFile.xfile.size : uploadFile.xdata.byteLength;
+                    Q('d2progressLabel').textContent = "Uploaden voltooid. Extern apparaat slaat bestand op schijf op...";
+                    p13folderup(9999); // Refresh file list after each file
+                    if (uploadFile.xfiles.length > uploadFile.xfilePtr + 1) { p13uploadNextFile(); }
+                    else { p13uploadFileTransferDone(); }
+                    break;
                 case 'uploaderror': { p13uploadFileCancel(); break; }
                 case 'uploadhash': {
                     var file = uploadFile.xfiles[uploadFile.xfilePtr];
@@ -12906,30 +13075,43 @@
         }
 
         // Push the next part of the file into the websocket. If dataPriming is true, push more data only if it's not the last block of the file.
-        function p13uploadNextPart(dataPriming) {
+        function p13uploadNextPart() {
+            if (uploadFile == null) return;
+            if (uploadFile.xdata && uploadFile.xptr >= uploadFile.xdata.byteLength) return;
+            if (uploadFile.xfile && uploadFile.xptr >= uploadFile.xfile.size) return;
+            var windowSize = 8;
+            var chunkSize = attemptWebRTC ? 16384 : 65536;
             if (uploadFile.xdata) {
                 var data = uploadFile.xdata, start = uploadFile.xptr;
                 if (start >= data.byteLength) {
                     files.sendText(JSON.stringify({ action: 'uploaddone', reqid: uploadFile.xfilePtr }));
+                    return;
                 } else {
                     var end = uploadFile.xptr + (attemptWebRTC ? 16384 : 65536);
-                    if (end > data.byteLength) { if (dataPriming == true) { return; } end = data.byteLength; }
+                    if (end > data.byteLength) { end = data.byteLength; }
                     var dataslice = new Uint8Array(data.slice(start, end))
                     if ((dataslice[0] == 123) || (dataslice[0] == 0)) {
                         var datapart = new Uint8Array(end - start + 1);
                         datapart.set(dataslice, 1); // Add a zero char at the start of the send, this will indicate that it's not a JSON command.
                         files.send(datapart);
+                        uploadFile.blocksInFlight++;
                     } else {
                         files.send(dataslice); // The data does not start with 0 or 123 "{" so it can't be confused for JSON.
+                        uploadFile.blocksInFlight++;
                     }
                     uploadFile.xptr = end;
-                    Q('d2progressBar').value = end;
+                    var total = uploadFile.xfile ? uploadFile.xfile.size : data.byteLength;
+                    Q('d2progressBar').value = Math.min(end, total - 1);
+                    Q('d2progressLabel').textContent = Math.min(99, Math.round((Math.min(end, total - 1) / total) * 100)) + '%';
+                    if (uploadFile.xptr >= data.byteLength) {
+                        uploadFile.uploadComplete = true;
+                    } else if (uploadFile.blocksInFlight < windowSize) { p13uploadNextPart(); }
                 }
             } else if (uploadFile.xfile) {
-                if (uploadFile.xreader != null) return; // Data reading already in process
+                if (uploadFile.xreader != null) return;
                 if (uploadFile.xptr >= uploadFile.xfile.size) return;
                 var end = uploadFile.xptr + (attemptWebRTC ? 16384 : 65536);
-                if (end > uploadFile.xfile.size) { if (dataPriming == true) { return; } end = uploadFile.xfile.size; }
+                if (end > uploadFile.xfile.size) { end = uploadFile.xfile.size; }
                 uploadFile.xreader = new FileReader();
                 uploadFile.xreader.onerror = function (err) { console.log(err); }
                 uploadFile.xreader.onload = function () {
@@ -12941,15 +13123,18 @@
                         var datapart = new Uint8Array(data.byteLength + 1);
                         datapart.set(dataslice, 1); // Add a zero char at the start of the send, this will indicate that it's not a JSON command.
                         files.send(datapart);
+                        uploadFile.blocksInFlight++;
                     } else {
                         files.send(dataslice); // The data does not start with 0 or 123 "{" so it can't be confused for JSON.
+                        uploadFile.blocksInFlight++;
                     }
                     uploadFile.xptr = end;
-                    Q('d2progressBar').value = end;
+                    Q('d2progressBar').value = Math.min(end, uploadFile.xfile.size - 1);
+                    Q('d2progressLabel').textContent = Math.min(99, Math.round((Math.min(end, uploadFile.xfile.size - 1) / uploadFile.xfile.size) * 100)) + '%';
                     if (uploadFile.xptr >= uploadFile.xfile.size) {
-                        files.sendText(JSON.stringify({ action: 'uploaddone', reqid: uploadFile.xfilePtr }));
+                        uploadFile.uploadComplete = true;
                     } else {
-                        if (uploadFile.xdataPriming > 0) { uploadFile.xdataPriming--; p13uploadNextPart(true); }
+                        if (uploadFile.blocksInFlight < windowSize) { p13uploadNextPart(); }
                     }
                 };
                 uploadFile.xreader.readAsArrayBuffer(uploadFile.xfile.slice(uploadFile.xptr, end));
@@ -13193,7 +13378,7 @@
                     var str = '';
                     if (node.agent.id <= agentsStr.length) { str = agentsStr[node.agent.id]; } else { str = agentsStr[0]; }
                     if (node.agent.ver != 0) { str += ' v' + node.agent.ver; }
-                    if (node.agent.id == 14) { str = node.agent.core; }
+                    if (node.agent.id == 14) { str = EscapeHtml(node.agent.core); }
                     x += addDetailItem("Mesh Agent", str);
                 }
                 if (node._id) { x += addDetailItem("Node ID", EscapeHtml(node._id.split('/')[2])); }
@@ -13207,13 +13392,14 @@
                     var splitip = node.lastaddr.split(':');
                     if (splitip.length > 2) {
                         // IPv6
-                        x += addDetailItem("Laatste agentadres", '<a href="https://iplocation.com/?ip=' + splitip.slice(0, -1).join(':') + '" rel="noreferrer noopener" target="MeshIPLoopup">' + splitip.slice(0, -1).join(':') + '</a>');
+                        var v6addr = splitip.slice(0, -1).join(':');
+                        x += addDetailItem("Laatste agentadres", isPrivateIP(v6addr) ? EscapeHtml(v6addr) : ('<a href="https://iplocation.com/?ip=' + encodeURIComponent(v6addr) + '" rel="noreferrer noopener" target="MeshIPLookup">' + EscapeHtml(v6addr) + '</a>'));
                     } else {
                         // IPv4
                         if (isPrivateIP(node.lastaddr)) {
                             x += addDetailItem("Laatste agentadres", splitip[0]);
                         } else {
-                            x += addDetailItem("Laatste agentadres", '<a href="https://iplocation.com/?ip=' + splitip[0] + '" rel="noreferrer noopener" target="MeshIPLoopup">' + splitip[0] + '</a>');
+                            x += addDetailItem("Laatste agentadres", '<a href="https://iplocation.com/?ip=' + splitip[0] + '" rel="noreferrer noopener" target="MeshIPLookup">' + splitip[0] + '</a>');
                         }
                     }
                 }
@@ -13323,7 +13509,7 @@
                     }
                     x += '</div></td></tr>';
                 }
-                if (hardware.network && hardware.network.dns) {
+                if (hardware.network && Array.isArray(hardware.network.dns)) {
                     x += '<tr><td><div class=style10 style=border-radius:5px;padding:8px>';
                     x += addDetailItem('<b>' + "DNS Servers" + '</b>', EscapeHtml(hardware.network.dns.join(", ")));
                     x += '</div></td></tr>';
@@ -13371,6 +13557,7 @@
                 if (ident.board_version) { x += addDetailItem("Versie", EscapeHtml(ident.board_version), s); }
                 if (ident.product_uuid) { x += addDetailItem("Identifier", EscapeHtml(ident.product_uuid), s); }
                 if (ident.cpu_name) { x += addDetailItem("CPU", EscapeHtml(ident.cpu_name).split('(TM)').join('&trade;').split('(R)').join('&reg;'), s); }
+                if (Array.isArray(ident.gpu_name)) { ident.gpu_name = ident.gpu_name.filter(function (x) { return x != null; }); }
                 if (ident.gpu_name) {  for (var i in ident.gpu_name) { x += addDetailItem("GPU", EscapeHtml(ident.gpu_name[i]).split('(TM)').join('&trade;').split('(R)').join('&reg;'), s); } }
                 if (x != '') { sections.push({ name: "Moederbord", html: x, img: 'motherboard64.png'}); }
 
@@ -13401,6 +13588,7 @@
                 x += '<table style=width:100%>';
                 for (var i in hardware.battery) {
                     var battery = hardware.battery[i];
+                    if (battery == null) continue;
                     x += '<tr><td><div class=style10 style=border-radius:5px;padding:8px>';
                     x += '<div style=margin-bottom:3px><b>' + EscapeHtml(battery.DeviceName ? battery.DeviceName : "Onbekend") + '</b></div>';
                     if (battery.CycleCount) { x += addDetailItem("Cyclustelling", EscapeHtml(battery.CycleCount), s); }
@@ -13493,6 +13681,7 @@
             if (hardware.identifiers && hardware.identifiers.storage_devices) {
                 var x = '';
                 // Sort Storage
+                ident.storage_devices = ident.storage_devices.filter(function (x) { return x != null; });
                 ident.storage_devices.sort(function(a, b) { if (a.Caption > b.Caption) return 1; if (a.Caption < b.Caption) return -1; return 0; });
 
                 x += '<table style=width:100%>';
@@ -13528,7 +13717,7 @@
                 for (var i in hardware.windows.volumes) {
                     var m = hardware.windows.volumes[i];
                     x += '<tr><td><div class=style10 style=border-radius:5px;padding:8px>';
-                    x += '<div style=margin-bottom:3px><b>' + i + ':' + (((m.name == null) || (m.name == '')) ? '' : (' - ' + EscapeHtml(m.name))) + '</b></div>';
+                    x += '<div style=margin-bottom:3px><b>' + EscapeHtml(i) + ':' + (((m.name == null) || (m.name == '')) ? '' : (' - ' + EscapeHtml(m.name))) + '</b></div>';
                     if (m.size) {
                         var sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
                         var j = parseInt(Math.floor(Math.log(Math.abs(m.size)) / Math.log(1024)), 10);
@@ -13550,7 +13739,7 @@
                     if (m.protectionStatus || m.volumeStatus) { // volumeStatus=conversionStatus
                         var bitlockerState;
                         if (typeof(m.volumeStatus) === 'string') {  // string style db schema 
-                            bitlockerState = m.volumeStatus;
+                            bitlockerState = EscapeHtml(m.volumeStatus);
                         } else {    // new code db schema
                             if (m.protectionStatus == 2) {
                                 bitlockerState = "Vergrendeld";
@@ -13577,6 +13766,7 @@
                 var x = '';
                 for (var i in hardware.linux.volumes) {
                     var m = hardware.linux.volumes[i];
+                    if (m == null) continue;
                     if(m.mount_point.startsWith('/var/lib/docker/overlay2')) continue;
                     x += '<tr><td><div class=style10 style=border-radius:5px;padding:8px>';
                     x += '<div style=margin-bottom:3px><b>' + EscapeHtml(m.mount_point) + '</b></div>';
@@ -13650,9 +13840,12 @@
 
         function deviceDetailsShowBitlockerInfo(drive, identifier, password) {
             if (xxdialogMode) return false;
-            var x = '<div><p>' + "Identifier" + '</p><p style=user-select:text;font-weight:bold>' + (identifier ? decodeURIComponent(identifier) : "Onbekend") + '</p>';
-            x += '<p>' + "Herstelwachtwoord" + '</p><p style=user-select:text;font-weight:bold>' + (password ? decodeURIComponent(password) : "Onbekend") + '</p></div>';
-            setDialogMode(2, decodeURIComponent(drive) + ': ' + "BitLocker informatie", 1, null, x, '');
+            var decodedDrive = drive ? decodeURIComponent(drive) : "Onbekend";
+            var decodedIdentifier = identifier ? decodeURIComponent(identifier) : "Onbekend";
+            var decodedPassword = password ? decodeURIComponent(password) : "Onbekend";
+            var x = '<div><p>' + "Identifier" + '</p><p style=user-select:text;font-weight:bold>' + EscapeHtml(decodedIdentifier) + '</p>';
+            x += '<p>' + "Herstelwachtwoord" + '</p><p style=user-select:text;font-weight:bold>' + EscapeHtml(decodedPassword) + '</p></div>';
+            setDialogMode(2, EscapeHtml(decodedDrive) + ': ' + "BitLocker informatie", 1, null, x, '');
         }
 
         // ============================================
@@ -13739,19 +13932,23 @@
             var storeApps = installedAppsData.store || [];
             if (searchTerm) {
                 desktopApps = desktopApps.filter(function(app) {
-                    return (app.name && app.name.toLowerCase().indexOf(searchTerm) >= 0) ||
-                        (app.publisher && app.publisher.toLowerCase().indexOf(searchTerm) >= 0);
+                    return ((typeof app.name == 'string') && (app.name.toLowerCase().indexOf(searchTerm) >= 0)) ||
+                        ((typeof app.publisher == 'string') && (app.publisher.toLowerCase().indexOf(searchTerm) >= 0));
                 });
                 storeApps = storeApps.filter(function(app) {
-                    return (app.name && app.name.toLowerCase().indexOf(searchTerm) >= 0) ||
-                        (app.publisher && app.publisher.toLowerCase().indexOf(searchTerm) >= 0);
+                    return ((typeof app.name == 'string') && (app.name.toLowerCase().indexOf(searchTerm) >= 0)) ||
+                        ((typeof app.publisher == 'string') && (app.publisher.toLowerCase().indexOf(searchTerm) >= 0));
                 });
             }
             desktopApps.sort(function(a, b) { 
-                return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()); 
+                var aName = (typeof a.name == 'string') ? a.name.toLowerCase() : '';
+                var bName = (typeof b.name == 'string') ? b.name.toLowerCase() : '';
+                return aName.localeCompare(bName);
             });
             storeApps.sort(function(a, b) { 
-                return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()); 
+                var aName = (typeof a.name == 'string') ? a.name.toLowerCase() : '';
+                var bName = (typeof b.name == 'string') ? b.name.toLowerCase() : '';
+                return aName.localeCompare(bName);
             });
             var x = '';
             // ===== DESKTOP APPS TABELLE (immer anzeigen) =====
@@ -14846,8 +15043,20 @@
             return false;
         }
         function backup_enterPassword() {
-            meshserver.send({ action: 'serverbackuppassword', check: false, password: Q('dbackup_password').value, override: Q('doverrulepw').checked });
-            window.location.href = '{{{domainurl}}}backup.zip' + ((urlargs.key)?('?key=' + urlargs.key):'');
+            meshserver.send({ action: 'serverbackuppassword', check: false, prepare: true, password: Q('dbackup_password').value, override: Q('doverrulepw').checked });
+            setDialogMode(1, "Download server back-up", 2, null, "Serverback-up wordt voorbereid, dit kan enkele minuten duren. De download start zodra deze klaar is.", 'ServerBackup');
+        }
+        function server_backupReady(message) {
+            if ((xxdialogMode == 1) && (xxdialogTag == 'ServerBackup')) { setDialogMode(0); }
+            if (!message.ok) {
+                if (!xxdialogMode) { messagebox("Download server back-up", EscapeHtml(message.msg ? message.msg : "Back-upfout.")); }
+                return;
+            }
+            // Navigating the page makes Firefox drop the control web socket and the reconnect reload cancels the download, and
+            // downloadFile() removes its frame after 10s, before a big backup is ready. Downloads never fire onload, errors do.
+            var f = Q('fileDownloadFrame');
+            f.onload = function () { f.onload = null; var x = ''; try { x = EscapeHtml(f.contentDocument.body.innerText); } catch (ex) { } messagebox("Download server back-up", x); };
+            f.src = '{{{domainurl}}}backup.zip' + ((urlargs.key)?('?key=' + urlargs.key):'');
         }
 
         function server_showRestoreDlg(){
@@ -14955,8 +15164,8 @@
 
             // Display IP-KVM information if needed
             if (currentMesh.mtype == 4) {
-                x += addHtmlValue("Hostnaam", currentMesh.kvm.host);
-                x += addHtmlValue("Gebruikersnaam", currentMesh.kvm.user);
+                x += addHtmlValue("Hostnaam", EscapeHtml(currentMesh.kvm.host));
+                x += addHtmlValue("Gebruikersnaam", EscapeHtml(currentMesh.kvm.user));
             }
 
             // Display device group creator
@@ -15031,7 +15240,7 @@
             // Display invitation codes
             if ((features & 0x01000000) && (currentMesh.mtype == 2)) {
                 var inviteCodeStr = '<i>' + "Geen" + '</i>', icodes = false;
-                if (currentMesh.invite != null) { icodes = true; inviteCodeStr = currentMesh.invite.codes.join(', '); /* + ', ' + currentMesh.invite.flags;*/ }
+                if (currentMesh.invite != null) { icodes = true; inviteCodeStr = EscapeHtml(currentMesh.invite.codes.join(', ')); /* + ', ' + currentMesh.invite.flags;*/ }
                 x += addHtmlValue("Uitnodigingscode", addLinkConditional(inviteCodeStr, 'p20editmeshInviteCode()', (meshrights & 1) || (icodes)));
             }
 
@@ -16031,7 +16240,7 @@
                 // View codes only
                 var x = "Uitnodigingscodes kunnen door iedereen worden gebruikt om apparaten toe te voegen aan deze apparaatgroep via de volgende openbare link:" + '<br /><br />';
                 x += '<div style=width:100%;text-align:center><a rel="noreferrer noopener" target=_blank href="' + url + '">' + url + '</a></div><br />';
-                x += addHtmlValue("Uitnodigingscode", currentMesh.invite.codes.join(', '));
+                x += addHtmlValue("Uitnodigingscode", EscapeHtml(currentMesh.invite.codes.join(', ')));
                 x += addHtmlValue("Installatie type", ["Achtergrond en interactief", "Alleen interactief", "Alleen achtergrond"][currentMesh.invite.flags & 3]);
                 setDialogMode(2, "Uitnodigingscode", 1, null, x);
             }
@@ -16862,7 +17071,7 @@
                             msg = EscapeHtml(event.username) + guestname + ' &rarr; ' + msg;
                         }
                     }
-                    if (event.remoteaddr) { msg += ' (' + event.remoteaddr + ')'; }
+                    if (event.remoteaddr) { msg += ' (' + EscapeHtml(event.remoteaddr) + ')'; }
                     if (event.etype == 'relay' || event.action == 'relaylog') icon = 'relayIcon16';
                     x += '<tr onclick=showEventDetails(' + event.h + ',2)  onmouseover=eventMouseHover(this,1) onmouseout=eventMouseHover(this,0) style=cursor:pointer><td style=width:18px><div class=' + icon + '></div></td><td class=g1>&nbsp;</td><td class=style10>' + printTime(time) + ' - ' + msg + '</td><td class=g2>&nbsp;</td></tr><tr style=height:2px></tr>';
                 }
@@ -18186,7 +18395,7 @@
 
             // Show user attributes
             var x = '<div style=min-height:80px><table style=width:100%>';
-            if ((args.hide & 8) != 0) { x += '<br />' + addDeviceAttribute("Naam", user.name); } // If title bar is hidden, display the user name here
+            if ((args.hide & 8) != 0) { x += '<br />' + addDeviceAttribute("Naam", EscapeHtml(user.name)); } // If title bar is hidden, display the user name here
             var email = user.email?EscapeHtml(user.email):'<i>' + "Niet ingesteld" + '</i>', everify = '';
             var realname = user.realname?EscapeHtml(user.realname):'<i>' + "Niet ingesteld" + '</i>';
             if (serverinfo.emailcheck) { everify = ((user.emailVerified == true) ? '<b style=color:green;cursor:pointer title="' + "Email is geverifieerd" + '">&#x2713</b> ' : '<b style=color:red;cursor:pointer title="' + "E-mail is niet geverifieerd" + '">&#x2717;</b> '); }
@@ -18214,7 +18423,7 @@
             }
 
             if ((features2 & 0x02000000) || (user.msghandle != null)) { // If user messaging is enabled on the server or user has a messaging handle
-                x += addDeviceAttribute("Berichten", '<span style=cursor:pointer onclick=p30editMessaging()><img src="images/messaging12.png" height=12 width=12 title="' + "Berichten ingeschakeld" + '" style="margin-top:2px" /> ' + (user.msghandle?user.msghandle:('<i>' + "Geen" + '</i>')) + ' <img class=hoverButton style=cursor:pointer src="images/link5.png" /></span>');
+                x += addDeviceAttribute("Berichten", '<span style=cursor:pointer onclick=p30editMessaging()><img src="images/messaging12.png" height=12 width=12 title="' + "Berichten ingeschakeld" + '" style="margin-top:2px" /> ' + (user.msghandle?EscapeHtml(user.msghandle):('<i>' + "Geen" + '</i>')) + ' <img class=hoverButton style=cursor:pointer src="images/link5.png" /></span>');
             }
 
             // Display features
@@ -19593,7 +19802,7 @@
 
             // Show notification within the web page.
             if (n.time == null) { n.time = Date.now(); }
-            if (n.id == null) { n.id = Math.random(); }
+            if ((typeof n.id != 'number') || (isFinite(n.id) == false)) { n.id = Math.random(); }
             notifications.unshift(n);
             setNotificationCount(notifications.length);
             clickNotificationIcon(true);
@@ -20526,7 +20735,7 @@
             } else {
                 var plugin = null;
                 for (var i in installedPluginList) { if (installedPluginList[i]._id == id) { plugin = installedPluginList[i]; } }
-                setDialogMode(2, "Plugin Actie", 3, pluginActionEx, format("Weet u zeker dat u de plug-in {0} wilt gebruiken: {1}", elem.value, plugin.name) + '<input id="lastPluginAct" type="hidden" value="' + elem.value + '" /><input id="lastPluginId" type="hidden" value="' + id + '" /><input id="lastPluginVersion" type="hidden" value="" />');
+                setDialogMode(2, "Plugin Actie", 3, pluginActionEx, format("Weet u zeker dat u de plug-in {0} wilt gebruiken: {1}", EscapeHtml(elem.value), EscapeHtml(plugin.name)) + '<input id="lastPluginAct" type="hidden" value="' + EscapeHtml(elem.value) + '" /><input id="lastPluginId" type="hidden" value="' + EscapeHtml(id) + '" /><input id="lastPluginVersion" type="hidden" value="" />');
             }
             elem.value = '';
         }
@@ -21432,7 +21641,7 @@
         function addHtmlValue5(t, v) { return '<div style=padding:4px><div style=display:inline-block;float:right><b>' + v + '</b></div><div style=display:inline-block>' + t + '</div></div>'; }
         function focusTextBox(x) { setTimeout(function(){ Q(x).selectionStart = Q(x).selectionEnd = 65535; Q(x).focus(); }, 0); }
         function validateEmail(v) { var emailReg = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/; return emailReg.test(v); } // New version
-        function isPrivateIP(a) { return (a.startsWith('10.') || a.startsWith('172.16.') || a.startsWith('192.168.')); }
+        function isPrivateIP(a) { if (a.indexOf(':') != a.lastIndexOf(':')) { return /^(::1?$|f[cd]|fe[89ab])/i.test(a); } return /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.)/.test(a); }
         function u2fSupported() { return (window.u2f && ((navigator.userAgent.indexOf('Chrome/') > 0) || (navigator.userAgent.indexOf('Firefox/') > 0) || (navigator.userAgent.indexOf('Opera/') > 0) || (navigator.userAgent.indexOf('Safari/') > 0))); }
         function findOne(arr1, arr2) { if ((arr1 == null) || (arr2 == null)) return false; return arr2.some(function (v) { return arr1.indexOf(v) >= 0; }); };
         function copyTextToClip(txt) { function selectElementText(e) { if (document.selection) { var range = document.body.createTextRange(); range.moveToElementText(e); range.select(); } else if (window.getSelection) { var range = document.createRange(); range.selectNode(e); window.getSelection().removeAllRanges(); window.getSelection().addRange(range); } } var e = document.createElement('DIV'); e.textContent = txt; document.body.appendChild(e); selectElementText(e); document.execCommand('copy'); e.remove(); }
@@ -21459,7 +21668,7 @@
             if (userid == userinfo._id) { return (userinfo.name + guestname); }
             if (nodes) { for (var a in nodes) { if (nodes[a].links) { for (var b in nodes[a].links) { if (nodes[a].links[b].name && b == userid) return (nodes[a].links[b].name + guestname); } } } }
             if (meshes) { for (var a in meshes) { if (meshes[a].links) { for (var b in meshes[a].links) { if (meshes[a].links[b].name && b == userid) return (meshes[a].links[b].name + guestname); } } } }
-            return (useridsplit[2] + guestname);
+            return (EscapeHtml(useridsplit[2]) + guestname);
         }
         function round(value, precision) { var multiplier = Math.pow(10, precision || 0); return Math.round(value * multiplier) / multiplier; }
         function safeNewWindow(url, target) { var newWindow = window.open(url, target, 'noopener,noreferrer'); if (newWindow) { newWindow.opener = null; } }
