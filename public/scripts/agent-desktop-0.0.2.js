@@ -112,7 +112,16 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         obj.KeyboardState = 0;
         obj.displays = null;
         obj.selectedDisplay = null;
+        obj.releaseTouches();
+    }
+
+    // Lift every native-touch contact the remote has seen go down (a queued contact whose down was
+    // never sent is dropped), so no contact stays down across a stream reset.
+    obj.releaseTouches = function () {
+        for (var k in obj.TouchArray) { if (obj.TouchArray[k].f == 1) { delete obj.TouchArray[k]; } else { obj.TouchArray[k].f = 2; } }
+        if (Object.keys(obj.TouchArray).length > 0) { obj.SendTouchMsg2(256, 0); }
         obj.TouchArray = {};
+        if (obj.touchtimer != null) { clearInterval(obj.touchtimer); obj.touchtimer = null; }
     }
 
     obj.resetSessionState = function (reason) {
