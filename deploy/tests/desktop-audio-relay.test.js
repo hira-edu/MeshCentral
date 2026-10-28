@@ -1,9 +1,8 @@
 'use strict';
 
-// Guards the fork's meshrelay.js override. It must stay meshcentral@1.2.1's meshrelay.js with one
-// change: guest share links that grant desktop also admit desktop audio (relay protocol 20). If the
-// npm package is upgraded, re-copy the new release's meshrelay.js, re-apply the line, and update the
-// pinned version and hash below together.
+// Guards the fork's meshrelay.js. It must stay meshcentral@1.2.5's meshrelay.js (the npm bytes) with
+// only the reviewed fork changes below. If the package is upgraded, take the new release's
+// meshrelay.js, re-apply each reviewed change, and update the pinned version and hash together.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -11,21 +10,28 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const UPSTREAM_VERSION = '1.2.1';
-const UPSTREAM_SHA256 = 'a74ad89fb88cc1f5ddf82bb2780555512d5f63d36dcd00c11da7d615e2b771c9';
-const STOCK_LINE = 'if (cookie.p & 2) { usages.push(2); } // Desktop';
-const PATCHED_LINE = 'if (cookie.p & 2) { usages.push(2); usages.push(20); } // Desktop, and desktop audio (relay protocol 20) which inherits the desktop share';
+const UPSTREAM_VERSION = '1.2.5';
+const UPSTREAM_SHA256 = '21cae91e1ccb74f29b408d3b78778e3377b22c8496b00bd402ed9470e095206c';
+// Each reviewed fork change as [upstream text, fork text]; each fork text must appear exactly once.
+const REVIEWED_CHANGES = [
+    // Guest share links that grant desktop also admit desktop audio (relay protocol 20), 2747ad90d.
+    ['if (cookie.p & 2) { usages.push(2); } // Desktop',
+        'if (cookie.p & 2) { usages.push(2); usages.push(20); } // Desktop, and desktop audio (relay protocol 20) which inherits the desktop share']
+];
 
 const relayPath = path.join(__dirname, '../../meshrelay.js');
 const relay = fs.readFileSync(relayPath);
 
-test('the override is the pinned upstream release plus the single desktop-audio line', () => {
-    const text = relay.toString('latin1');
-    assert.equal(text.split(PATCHED_LINE).length - 1, 1, 'the desktop-audio line appears exactly once');
-    assert.equal(text.indexOf(STOCK_LINE), -1, 'the stock desktop line is replaced, not duplicated');
-    const restored = Buffer.from(text.replace(PATCHED_LINE, STOCK_LINE), 'latin1');
-    assert.equal(crypto.createHash('sha256').update(restored).digest('hex'), UPSTREAM_SHA256,
-        'reverting the one line must give meshcentral@' + UPSTREAM_VERSION + "'s meshrelay.js byte for byte");
+test('the override is the pinned upstream release plus only the reviewed fork changes', () => {
+    let text = relay.toString('latin1');
+    for (const [stock, patched] of REVIEWED_CHANGES) {
+        assert.equal(text.split(patched).length - 1, 1, 'the fork change appears exactly once: ' + patched);
+        assert.equal(text.split(stock).length - 1, patched.split(stock).length - 1,
+            'the upstream text appears only inside the fork change, not duplicated: ' + stock);
+        text = text.replace(patched, stock);
+    }
+    assert.equal(crypto.createHash('sha256').update(Buffer.from(text, 'latin1')).digest('hex'), UPSTREAM_SHA256,
+        'reverting the reviewed changes must give meshcentral@' + UPSTREAM_VERSION + "'s meshrelay.js byte for byte");
 });
 
 test('the override matches the meshcentral version this deployment installs', () => {
