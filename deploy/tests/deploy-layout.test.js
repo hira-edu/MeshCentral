@@ -29,6 +29,12 @@ test('the local backup names only deployment files that exist', () => {
     assert.deepEqual(missing, []);
 });
 
+test('the wrapper carries none of the retired pre-fork deployment files', () => {
+    // docker-compose.yml ran upstream 1.2.1 with mounts production never used (T31).
+    const retired = ['docker-compose.yml'];
+    assert.deepEqual(retired.filter((entry) => fs.existsSync(path.join(deployRoot, entry))), []);
+});
+
 test('the operations index lists exactly the documents in its folder', () => {
     const dir = path.join(deployRoot, 'docs', 'operations');
     const onDisk = fs.readdirSync(dir).filter((n) => n.endsWith('.md') && n !== 'README.md').sort();

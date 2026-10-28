@@ -34,7 +34,6 @@ function Read-JsonMap {
 $repoFiles = @(
     '.gitignore',
     'package.json',
-    'docker-compose.yml',
     'infra\caddy\README.md',
     'infra\caddy\Caddyfile.live',
     'infra\nginx\meshcentral.conf',

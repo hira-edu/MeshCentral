@@ -689,12 +689,6 @@ test('deployment wiring loads the local plugin from the pinned MeshCentral data 
     assert.match(agentServer, /case 'nativeRuntimeResult':/);
     assert.match(agentServer, /callHook\('hook_processAgentData', command, obj, parent\)/);
 
-    const compose = fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
-    assert.match(compose, /image:\s*ghcr\.io\/ylianst\/meshcentral:1\.2\.1/);
-    assert.doesNotMatch(compose, /:latest(?:\s|$)/);
-    assert.match(compose, / \.\.\/plugins:\/opt\/meshcentral\/meshcentral-data\/plugins:ro/);
-    assert.match(compose, / \.\/meshcentral-web\/public:\/opt\/meshcentral\/meshcentral-data\/public:ro/);
-
     const shell = fs.readFileSync(path.join(root, 'scripts', 'setup-local.sh'), 'utf8');
     assert.match(shell, /for plugin in nativeruntime; do/);
     assert.match(shell, /cp -R "\.\.\/plugins\/\$plugin\/\." "meshcentral-data\/plugins\/\$plugin\/"/);
