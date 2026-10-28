@@ -87,8 +87,8 @@ function readRecord(db, id) {
 function decodeRuntimeCookie(server, value) {
     let token = server.decodeCookie(value, server.loginCookieEncryptionKey, 60);
     if (token) return token;
-    // MeshCentral 1.2.1 does not renew authCookie on non-expiring guest-share
-    // pages. Only a guest token gets the long verification window; authorize()
+    // MeshCentral does not renew authCookie on non-expiring guest-share pages
+    // (views/sharing.handlebars embeds it once). Only a guest token gets the long verification window; authorize()
     // still checks its IP, domain, node, share record, window and revocation.
     token = server.decodeCookie(value, server.loginCookieEncryptionKey, UNBOUNDED_GUEST_COOKIE_MINUTES);
     return token && typeof token.pid === 'string' ? token : null;
