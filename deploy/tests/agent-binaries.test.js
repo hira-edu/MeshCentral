@@ -378,3 +378,77 @@ test('pack.js packs a manifest that pins nothing and says the release gate refus
     assert.deepStrictEqual(record.agents, []);
     assert.strictEqual(record.agentBuild, null);
 });
+
+// OD1 option B: the pinned builds are not in git; pack.js --agents stages them from the release output.
+function buildFolder(t, names, tweak) {
+    const dir = tempDir(t, 'agent-builds-');
+    for (const name of names) { write(path.join(dir, name), binary(name)); }
+    if (tweak) { tweak(dir); }
+    return dir;
+}
+function runPackWith(dir, args) { return childProcess.spawnSync(process.execPath, [path.join(dir, 'deploy/scripts/pack.js'), '--json'].concat(args), { cwd: dir, encoding: 'utf8' }); }
+function leftovers(dir) { return SERVICES.filter(name => fs.existsSync(path.join(dir, 'agents', name))); }
+
+test('pack.js --agents packs the pinned builds from the release folder and removes the copies', (t) => {
+    const dir = packFixture(t, SERVICES, []);
+    const result = runPackWith(dir, ['--agents', buildFolder(t, SERVICES)]);
+    assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+    const record = JSON.parse(result.stdout.slice(result.stdout.indexOf('{')));
+    assert.deepStrictEqual(record.agents.map(a => a.filename), SERVICES);
+    assert.match(result.stdout, /agents {4}3 pinned fork binaries built from hira-edu\/MeshAgent a{40}, staged from /);
+    const names = tarballNames(path.join(dir, record.tarball));
+    for (const name of SERVICES) { assert.ok(names.includes('package/agents/' + name), name); }
+    assert.deepStrictEqual(leftovers(dir), []);
+    assert.strictEqual(git(dir, ['status', '--porcelain']).trim(), '');
+});
+
+test('pack.js --agents is reproducible: two packs from the same builds give the same tarball', (t) => {
+    const staged = packFixture(t, SERVICES, []);
+    const first = runPackWith(staged, ['--agents', buildFolder(t, SERVICES)]);
+    const second = runPackWith(staged, ['--agents', buildFolder(t, SERVICES)]);
+    assert.strictEqual(first.status, 0, first.stderr);
+    assert.strictEqual(second.status, 0, second.stderr);
+    const integrity = r => JSON.parse(r.stdout.slice(r.stdout.indexOf('{'))).integrity;
+    assert.strictEqual(integrity(first), integrity(second));
+});
+
+test('pack.js --agents refuses a build that does not match its pin and stages nothing', (t) => {
+    const dir = packFixture(t, SERVICES, []);
+    const builds = buildFolder(t, SERVICES, folder => fs.appendFileSync(path.join(folder, 'MeshService64.exe'), 'rebuilt'));
+    const result = runPackWith(dir, ['--agents', builds]);
+    assert.strictEqual(result.status, 1);
+    assert.match(result.stderr, /MeshService64\.exe does not match its pin \(\d+ bytes, pinned \d+\)/);
+    assert.deepStrictEqual(leftovers(dir), []);
+    assert.deepStrictEqual(fs.readdirSync(path.join(dir, 'deploy')).filter(name => name === 'dist'), []);
+});
+
+test('pack.js --agents refuses a missing build, a leftover copy, a tracked build and an empty manifest', (t) => {
+    const missing = runPackWith(packFixture(t, SERVICES, []), ['--agents', buildFolder(t, SERVICES.slice(1))]);
+    assert.strictEqual(missing.status, 1);
+    assert.match(missing.stderr, /cannot read .*MeshService\.exe/);
+
+    const leftover = packFixture(t, SERVICES, []);
+    write(path.join(leftover, 'agents/MeshService.exe'), binary('MeshService.exe'));
+    const left = runPackWith(leftover, ['--agents', buildFolder(t, SERVICES)]);
+    assert.strictEqual(left.status, 1);
+    assert.match(left.stderr, /agents\/MeshService\.exe already exists/);
+    assert.ok(fs.existsSync(path.join(leftover, 'agents/MeshService.exe')), 'a leftover is reported, never deleted');
+
+    const tracked = runPackWith(packFixture(t, SERVICES, SERVICES), ['--agents', buildFolder(t, SERVICES)]);
+    assert.strictEqual(tracked.status, 1);
+    assert.match(tracked.stderr, /agents\/MeshService\.exe is tracked by git/);
+
+    const empty = runPackWith(packFixture(t, [], []), ['--agents', buildFolder(t, SERVICES)]);
+    assert.strictEqual(empty.status, 1);
+    assert.match(empty.stderr, /--agents given, but agents\/agent-defaults\.json pins no agent binary/);
+
+    const noDir = runPackWith(packFixture(t, SERVICES, []), ['--agents']);
+    assert.strictEqual(noDir.status, 1);
+    assert.match(noDir.stderr, /--agents needs the folder/);
+});
+
+test('pack.js without --agents refuses pins whose builds are not in the package', (t) => {
+    const result = runPack(packFixture(t, SERVICES, []));
+    assert.strictEqual(result.status, 1);
+    assert.match(result.stderr, /pinned agent binary not in the package: agents\/MeshService\.exe/);
+});

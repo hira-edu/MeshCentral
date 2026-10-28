@@ -3,6 +3,8 @@
 //
 //   node deploy/scripts/pack.js          pack, verify, print
 //   node deploy/scripts/pack.js --json   also print the record as JSON
+//   node deploy/scripts/pack.js --agents <dir>
+//                                        stage the pinned fork agent builds from <dir> (OD1 option B)
 //
 // The tarball must be a function of the commit: every packed file must be tracked by git and
 // unchanged from HEAD, and the packed bytes are compared with HEAD's blobs after packing.
@@ -13,6 +15,9 @@
 // changed them, npm writes fixed tar mtimes, and HEAD's own id is printed (commit) but never packed.
 // Agent binaries (D11/D12): the packaged ones must be exactly the fork builds pinned by size and SHA384 in
 // agents/agent-defaults.json, read with the package's own agentbuilds.js, before and after packing.
+// The binaries are not tracked by git: --agents <dir> copies each pinned file from <dir> (the verified MeshAgent
+// release output) into agents/ only when its size and SHA384 match the pin, packs, and removes the copies.
+// The tarball is then a function of the commit plus the pinned bytes. A pin without --agents is refused.
 // deploy/package.json depends on dist/meshcentral-<version>.tgz, and its lockfile pins the sha512.
 // Release packs run on Linux (D4); a pack made on Windows serves the local duplicate server.
 const childProcess = require('node:child_process');
@@ -122,28 +127,20 @@ function readTarball(file) {
 const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
 if (pkg.name !== 'meshcentral' || !Array.isArray(pkg.files)) { fail('repository root package.json is not the meshcentral package with a files list'); }
 
+let agentsDir = null;
+const agentsArg = process.argv.indexOf('--agents');
+if (agentsArg !== -1) {
+    agentsDir = process.argv[agentsArg + 1];
+    if (!agentsDir || agentsDir.startsWith('--')) { fail('--agents needs the folder holding the pinned fork agent builds'); }
+    agentsDir = path.resolve(agentsDir);
+}
+
 // A leftover module version manifest means an earlier run was killed or someone wrote it by hand;
 // refuse rather than guess which bytes are meant.
 const manifestPath = path.join(repoRoot, moduleVersions.MANIFEST);
 if (fs.existsSync(manifestPath)) { fail(moduleVersions.MANIFEST + ' already exists; remove it (pack.js generates it)'); }
 
-// 1. What npm would pack, checked before anything is written.
-const dryRun = npmPack(['--dry-run']);
-const listed = dryRun.files.map(f => f.path);
-const problems = [];
-for (const p of listed) {
-    if (REFUSED.some(re => re.test(p))) { problems.push('refused file: ' + p); }
-    if (!p.includes('/') && !TOP_LEVEL_FILES.has(p)) { problems.push('unlisted top-level file: ' + p); }
-}
-const blobs = headBlobs();
-const untracked = listed.filter(p => !blobs.has(p));
-for (const p of untracked) { problems.push('not tracked by git: ' + p); }
-const dirty = git(['status', '--porcelain', '-z', '--untracked-files=no', '--', '.']).toString('utf8').split('\0').filter(Boolean)
-    .map(line => line.slice(3)).filter(p => listed.includes(p));
-for (const p of dirty) { problems.push('changed since HEAD: ' + p); }
-if (problems.length) { fail(problems.length + ' problem(s):\n  ' + problems.join('\n  ')); }
-
-// 1b. Agent binaries: every packaged agent binary is pinned, and every pin is packaged with its size and SHA384.
+// 0. Agent binary pins, read with the package's own agentbuilds.js.
 const agentbuilds = require(path.join(repoRoot, 'agentbuilds.js'));
 const agentNames = agentbuilds.agentNames(require(path.join(repoRoot, 'agenttypes.js'))());
 const agentManifest = 'agents/' + agentbuilds.MANIFEST_NAME;
@@ -156,6 +153,50 @@ function pinMismatch(name, data) {
     const digest = crypto.createHash('sha384').update(data).digest('hex');
     return (digest === pin.sha384) ? null : 'SHA384 ' + digest + ', pinned ' + pin.sha384;
 }
+
+// 0b. Stage the pinned builds from --agents. Each one is verified before it is copied; a file already in
+// agents/ under a pinned name (tracked, or left over from a killed run) is refused rather than overwritten.
+const staged = new Set();
+process.on('exit', () => { for (const p of staged) { fs.rmSync(path.join(repoRoot, p), { force: true }); } });
+if (agentsDir) {
+    if (pins.files.size === 0) { fail('--agents given, but ' + agentManifest + ' pins no agent binary'); }
+    const headPaths = headBlobs();
+    const stageProblems = [];
+    for (const name of pins.files.keys()) {
+        const p = 'agents/' + name, target = path.join(repoRoot, p), source = path.join(agentsDir, name);
+        if (headPaths.has(p)) { stageProblems.push(p + ' is tracked by git; pinned builds come only from --agents'); continue; }
+        if (fs.existsSync(target)) { stageProblems.push(p + ' already exists; remove it (pack.js stages the pinned builds)'); continue; }
+        let data;
+        try {
+            if (!fs.lstatSync(source).isFile()) { stageProblems.push(source + ' is not a regular file'); continue; }
+            data = fs.readFileSync(source);
+        } catch (ex) { stageProblems.push('cannot read ' + source + ': ' + ex.message); continue; }
+        const why = pinMismatch(name, data);
+        if (why) { stageProblems.push(source + ' does not match its pin (' + why + ')'); continue; }
+        fs.writeFileSync(target, data, { flag: 'wx' });
+        staged.add(p);
+    }
+    if (stageProblems.length) { fail(stageProblems.length + ' agent staging problem(s):\n  ' + stageProblems.join('\n  ')); }
+}
+
+// 1. What npm would pack, checked before anything else is written.
+const dryRun = npmPack(['--dry-run']);
+const listed = dryRun.files.map(f => f.path);
+const problems = [];
+for (const p of listed) {
+    if (REFUSED.some(re => re.test(p))) { problems.push('refused file: ' + p); }
+    if (!p.includes('/') && !TOP_LEVEL_FILES.has(p)) { problems.push('unlisted top-level file: ' + p); }
+}
+const blobs = headBlobs();
+const untracked = listed.filter(p => !blobs.has(p) && !staged.has(p));
+for (const p of untracked) { problems.push('not tracked by git: ' + p); }
+const dirty = git(['status', '--porcelain', '-z', '--untracked-files=no', '--', '.']).toString('utf8').split('\0').filter(Boolean)
+    .map(line => line.slice(3)).filter(p => listed.includes(p));
+for (const p of dirty) { problems.push('changed since HEAD: ' + p); }
+for (const p of staged) { if (!listed.includes(p)) { problems.push('staged agent build not packed by npm: ' + p); } }
+if (problems.length) { fail(problems.length + ' problem(s):\n  ' + problems.join('\n  ')); }
+
+// 1b. Agent binaries: every packaged agent binary is pinned, and every pin is packaged with its size and SHA384.
 const packagedAgents = listed.filter(p => agentbuilds.isAgentBinaryPath(p, agentNames));
 const agentProblems = [];
 for (const p of packagedAgents) {
@@ -171,7 +212,7 @@ if (agentProblems.length) { fail(agentProblems.length + ' agent binary problem(s
 // so commits outside the package leave the tarball unchanged. build() checks that its packaged-path
 // rule selects exactly the dry-run list.
 let versions;
-try { versions = moduleVersions.build(repoRoot, listed); } catch (ex) { fail('module versions: ' + ex.message); }
+try { versions = moduleVersions.build(repoRoot, listed.filter(p => !staged.has(p))); } catch (ex) { fail('module versions: ' + ex.message); }
 fs.writeFileSync(manifestPath, versions.bytes);
 process.on('exit', () => { fs.rmSync(manifestPath, { force: true }); });
 const expected = listed.concat([moduleVersions.MANIFEST]);
@@ -181,12 +222,14 @@ fs.mkdirSync(outDir, { recursive: true });
 const packed = npmPack(['--pack-destination', outDir]);
 const tarball = path.join(outDir, packed.filename);
 
-// 4. The tarball holds exactly the dry-run list, byte-equal to HEAD, plus the generated manifest.
+// 4. The tarball holds exactly the dry-run list, byte-equal to HEAD (staged agent builds: equal to their
+// pins, checked below), plus the generated manifest.
 const contents = readTarball(tarball);
 const mismatch = [];
 for (const p of expected) {
     if (!contents.has(p)) { mismatch.push('missing from tarball: ' + p); }
     else if (p === moduleVersions.MANIFEST) { if (!contents.get(p).equals(versions.bytes)) { mismatch.push('differs from the generated manifest: ' + p); } }
+    else if (staged.has(p)) { continue; }
     else if (blobSha(contents.get(p)) !== blobs.get(p)) { mismatch.push('differs from HEAD: ' + p); }
 }
 // Every packed agent core module has exactly one manifest entry, and every entry is packed.
@@ -231,5 +274,6 @@ console.log('integrity ' + record.integrity);
 console.log('sha256    ' + record.sha256);
 console.log('modules   ' + record.modules + ' at ' + record.moduleVersion + ' (' + moduleVersions.MANIFEST + ', last packaged change ' + record.packagedCommit + ')');
 console.log('agents    ' + (pins.files.size ? pins.files.size + ' pinned fork binaries built from ' + pins.build.repository + ' ' + pins.build.commit
+    + (agentsDir ? ', staged from ' + agentsDir : '')
     : 'none pinned in ' + agentManifest + ': the server serves no agent binary and agents/check-releases.js refuses this package'));
 if (process.argv.includes('--json')) { console.log(JSON.stringify(record, null, 2)); }
