@@ -1921,12 +1921,12 @@ function CreateMeshCentralServer(config, args) {
         // holds until this first signing pass and table load have finished.
         obj.agentTablesReady = new Promise(function (resolve) { obj.agentTablesLoaded = resolve; });
         obj.agentDefaults = require('./agentbuilds').CreateAgentDefaults(obj);
-        // Never block server startup on default agent downloads. An offline or slow-network server must come up
-        // promptly and run from cached, bundled or manually uploaded builds; downloads finish in the background.
-        const agentDefaultsReady = obj.agentDefaults.prepare();
-        agentDefaultsReady.then(function () { for (const error of obj.agentDefaults.status().errors) { addServerWarning(error); } }, function () { });
-        try { await Promise.race([agentDefaultsReady, new Promise(function (r) { setTimeout(r, 6000); })]); } catch (ex) { }
-        if (obj.agentDefaults.status().busy) { console.log('Default agent downloads are still running. Starting without them; they load when they finish.'); }
+        // The fork serves only the agent binaries pinned in agents/agent-defaults.json and never downloads any.
+        // prepare() only hashes local files, so wait for it; a missing or mismatched pin stops the server, like
+        // the module-version manifest does.
+        try { await obj.agentDefaults.prepare(); } catch (ex) { console.error('ERROR: fork agent binaries: ' + ((ex && ex.message) || ex)); process.exit(1); return; }
+        const agentDefaultsErrors = obj.agentDefaults.status().errors;
+        if (agentDefaultsErrors.length > 0) { for (const error of agentDefaultsErrors) { console.error('ERROR: fork agent binaries: ' + error); } process.exit(1); return; }
         obj.agentDefaults.start();
 
         // Load the list of MeshCentral tools
@@ -3712,10 +3712,6 @@ function CreateMeshCentralServer(config, args) {
         const agentTable = {};
         function done() { objx.meshAgentBinaries = agentTable; if (func != null) func(); }
 
-        // Load agent information file. This includes the data & time of the agent.
-        var agentInfo = [];
-        try { agentInfo = JSON.parse(obj.fs.readFileSync(obj.path.join(__dirname, 'agents', 'hashagents.json'), 'utf8')); } catch (ex) { }
-
         var archcount = 0;
         for (var archid in obj.meshAgentsArchitectureNumbers) {
             var agentpath;
@@ -3752,7 +3748,6 @@ function CreateMeshCentralServer(config, args) {
             if (release && domain.id === '' && agentpath !== override) agentTable[archid].release = release;
             agentTable[archid].url = 'http://' + obj.certificates.CommonName + ':' + ((typeof obj.args.aliasport == 'number') ? obj.args.aliasport : obj.args.port) + '/meshagents?id=' + archid;
             agentTable[archid].size = stats.size;
-            if ((agentInfo[archid] != null) && (agentInfo[archid].mtime != null)) { agentTable[archid].mtime = new Date(agentInfo[archid].mtime); } // Set agent time if available
 
             // If this is a windows binary, pull binary information
             if (obj.meshAgentsArchitectureNumbers[archid].platform == 'win32') {

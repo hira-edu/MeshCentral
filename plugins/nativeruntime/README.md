@@ -1,6 +1,6 @@
 # Native runtime viewer control
 
-This MeshCentral plugin, part of the MeshCentral fork (based on 1.2.5), provides elevated process lifecycle management
+This MeshCentral plugin, part of the MeshCentral fork (based on 1.3.1), provides elevated process lifecycle management
 and runtime controls for desktop viewers through one stateful Activate/Unload control.
 It follows RDP Connect in the classic and modern full desktop viewers and follows
 Connect in mobile and guest-share viewers, where RDP Connect is not present. The
