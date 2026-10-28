@@ -4,6 +4,16 @@
 [Ii]mages-spare/
 [Dd]aemon/
 [Aa]gent/
+# Fork: local state from the pre-Stage-1 wrapper layout and from running the server at the
+# repo root. These can hold production keys, database dumps and recordings; never commit them.
+/meshcentral-data/
+/meshcentral-files/
+/meshcentral-backups/
+/meshcentral-recordings/
+/meshcentral-web/
+/meshcentral-coredumps/
+/server-backups/
+/node_modules.pre-fork-*/
 # Fork: the published generated set (translations, -min views and scripts, minified cores
 # and modules) is committed (decision D3), so it is not ignored here. *.pdb stays ignored.
 meshcentral.db
