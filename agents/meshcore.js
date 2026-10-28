@@ -17,10 +17,15 @@ function nativeFileAction(socket, cmd) {
         }
     }
     result.action = 'fileaction'; result.operation = cmd.action; result.reqid = cmd.reqid;
-    try { socket.write(Buffer.from(JSON.stringify(result))); } catch (ex) { }
-    var message = 'Native file ' + cmd.action + ': ' + cmd.path + ' ' + JSON.stringify(result);
-    try { sendConsoleText(message, request.sessionid); } catch (ex) { }
-    if (typeof MeshServerLogEx == 'function') { MeshServerLogEx(20, [cmd.path], message, request); }
+    // Audit each action as itself: 20 is the server's "Opening: {0}", 45 its "Delete: \"{0}\"".
+    // Execute has no translated server message, so its event carries the text alone.
+    var outcome = ' ' + JSON.stringify(result);
+    if (cmd.action == 'delete') { MeshServerLogEx(45, [cmd.path], 'Delete' + (cmd.rec === true ? ' recursive' : '') + ': "' + cmd.path + '"' + outcome, request); }
+    else if (cmd.action == 'execute') { MeshServerLog('Execute' + (cmd.privileged === true ? ' privileged' : '') + ': "' + cmd.path + '"' + outcome, request); }
+    else { MeshServerLogEx(20, [cmd.path], 'Opening: ' + cmd.path + outcome, request); }
+    try { socket.write(Buffer.from(JSON.stringify(result))); }
+    catch (ex) { sendConsoleText('Native file ' + cmd.action + ' fileaction reply failed: ' + ex, request.sessionid); }
+    sendConsoleText('Native file ' + cmd.action + ': ' + cmd.path + outcome, request.sessionid);
     return result;
 }
 
