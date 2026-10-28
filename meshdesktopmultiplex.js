@@ -433,8 +433,10 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             // Write the last record of the recording file
             var rf = obj.recordingFile;
             delete obj.recordingFile;
-            recordingEntry(rf.fd, 3, 0, 'MeshCentralMCREC', function (fd, filename) {
-                parent.parent.fs.close(fd);
+            recordingEntry(rf, 3, 0, 'MeshCentralMCREC', function (err) {
+                if (err != null) return; // The recording was stopped and its file closed when the write failed
+                parent.parent.fs.close(rf.fd);
+                var filename = rf.filename;
 
                 // Now that the recording file is closed, check if we need to index this file.
                 if (domain.sessionrecording.index && domain.sessionrecording.index !== false) { parent.parent.certificateOperations.acceleratorPerformOperation('indexMcRec', filename); }
@@ -448,7 +450,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 parent.parent.DispatchEvent(['*', 'recording', obj.nodeid, obj.meshid], obj, event);
 
                 cleanUpRecordings();
-            }, rf.filename);
+            });
         }
 
         // Log end of multiplex session
@@ -1087,9 +1089,11 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             parent.parent.debug('relay', 'Relay: Started recording to file: ' + recFullFilename);
             var metadata = { magic: 'MeshCentralRelaySession', ver: 1, nodeid: obj.nodeid, meshid: obj.meshid, time: new Date().toLocaleString(), protocol: 2, devicename: obj.name, devicegroup: obj.meshname };
             var firstBlock = JSON.stringify(metadata);
-            recordingEntry(fd, 1, 0, firstBlock, function () {
+            const rf = { fd: fd, filename: recFullFilename };
+            recordingEntry(rf, 1, 0, firstBlock, function (err) {
+                if (err != null) { func(false); return; } // The header write failed, the recording was stopped and its file closed
                 if (obj.viewers == null) { try { parent.parent.fs.close(fd); } catch (ex) { } func(false); return; } // Session ended during the header write
-                obj.recordingFile = { fd: fd, filename: recFullFilename };
+                obj.recordingFile = rf;
                 obj.recordingFileWriting = false;
                 func(true);
             });
@@ -1123,7 +1127,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         try {
             if (obj.recordingFile != null) {
                 // Queue data for the recording file
-                recordingEntry(obj.recordingFile.fd, 2, (isAgent ? 0 : 2), data, null);
+                recordingEntry(obj.recordingFile, 2, (isAgent ? 0 : 2), data, null);
 
                 // Flow control, pause the agent if the recording file can't keep up
                 if (obj.recordingQueue.length > 64) { obj.recordingFileWriting = true; updateAgentFlowControl(); }
@@ -1133,8 +1137,9 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         } catch (ex) { console.log(ex); }
     }
 
-    // Record a new entry in a recording log. Entries are queued and written one at a time to keep them in order.
-    function recordingEntry(fd, type, flags, data, func, tag) {
+    // Record a new entry in a recording file. Entries are queued and written one at a time to keep them in order.
+    // func(err) is called once the entry is written, or with the error if the recording was stopped.
+    function recordingEntry(rf, type, flags, data, func) {
         try {
             if (typeof data == 'string') {
                 // String write
@@ -1144,7 +1149,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 header.writeInt32BE(blockData.length, 4); // Size
                 header.writeIntBE(new Date(), 10, 6); // Time
                 var block = Buffer.concat([header, blockData]);
-                obj.recordingQueue.push({ fd: fd, block: block, offset: 0, func: func, tag: tag });
+                obj.recordingQueue.push({ rf: rf, block: block, offset: 0, func: func });
                 obj.recordingFileSize += block.length;
             } else {
                 // Binary write
@@ -1154,10 +1159,10 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
                 header.writeInt32BE(data.length, 4); // Size
                 header.writeIntBE(new Date(), 10, 6); // Time
                 var block = Buffer.concat([header, data]);
-                obj.recordingQueue.push({ fd: fd, block: block, offset: 0, func: func, tag: tag });
+                obj.recordingQueue.push({ rf: rf, block: block, offset: 0, func: func });
                 obj.recordingFileSize += block.length;
             }
-        } catch (ex) { console.log(ex); if (func) { func(fd, tag); } return; }
+        } catch (ex) { abortRecording(rf, ex); if (func) { func(ex); } return; }
         writeNextRecordingEntry();
     }
 
@@ -1167,26 +1172,45 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         obj.recordingEntryWriting = true;
         const entry = obj.recordingQueue[0];
         try {
-            parent.parent.fs.write(entry.fd, entry.block, entry.offset, entry.block.length - entry.offset, onRecordingEntryWritten);
+            parent.parent.fs.write(entry.rf.fd, entry.block, entry.offset, entry.block.length - entry.offset, onRecordingEntryWritten);
         } catch (ex) {
-            console.log(ex);
             onRecordingEntryWritten(ex, 0);
         }
         function onRecordingEntryWritten(err, written) {
             obj.recordingEntryWriting = false;
-            if ((err == null) && (typeof written == 'number') && (written > 0) && ((entry.offset + written) < entry.block.length)) {
+            if ((err == null) && !(written > 0)) { err = new Error('no bytes written'); }
+            if (err != null) {
+                abortRecording(entry.rf, err);
+            } else if ((entry.offset + written) < entry.block.length) {
                 // Partial write, write the rest of this entry
                 entry.offset += written;
             } else {
-                if (err != null) { parent.parent.debug('relay', 'DesktopRelay: Recording write error: ' + err); }
                 obj.recordingQueue.shift();
-                if (entry.func) { entry.func(entry.fd, entry.tag); }
+                if (entry.func) { entry.func(null); }
 
                 // Flow control, resume the agent once the recording queue is drained
                 if ((obj.recordingFileWriting == true) && (obj.recordingQueue.length == 0)) { obj.recordingFileWriting = false; updateAgentFlowControl(); }
             }
             writeNextRecordingEntry();
         }
+    }
+
+    // A recording file could not be written. Stop recording this session instead of leaving gaps in the file:
+    // drop every block still queued for it, close it, and raise an event so the failure is on record.
+    function abortRecording(rf, err) {
+        if (rf.aborted === true) return;
+        rf.aborted = true;
+        const dropped = obj.recordingQueue.filter(function (entry) { return entry.rf === rf; });
+        obj.recordingQueue = obj.recordingQueue.filter(function (entry) { return entry.rf !== rf; });
+        if (obj.recordingFile === rf) { obj.recordingFile = null; }
+        parent.parent.fs.close(rf.fd, function (closeErr) { if (closeErr != null) { console.log('DesktopRelay: Unable to close recording file ' + rf.filename + ': ' + closeErr); } });
+        console.log('DesktopRelay: Stopped recording ' + rf.filename + ' after a write error: ' + err);
+        const event = { etype: 'relay', action: 'relaylog', domain: domain.id, nodeid: obj.nodeid, meshid: obj.meshid, msg: 'Stopped recording desktop multiplex session "' + obj.id + '" after a write error: ' + err, filename: parent.parent.path.basename(rf.filename), protocol: 2, userids: obj.userIds, multiplex: true };
+        parent.parent.DispatchEvent(['*', 'recording', obj.nodeid, obj.meshid], obj, event);
+
+        // A backed up recording queue no longer holds the agent.
+        if (obj.recordingFileWriting == true) { obj.recordingFileWriting = false; updateAgentFlowControl(); }
+        for (const entry of dropped) { if (entry.func) { entry.func(err); } }
     }
 
     // If there is a recording quota, remove any old recordings if needed
