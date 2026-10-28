@@ -13,6 +13,7 @@
 /*jshint esversion: 6 */
 "use strict";
 
+const readImageSize = require('./mcrec.js').readImageSize;
 
 /*
 --- KVM Commands ---
@@ -923,9 +924,8 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             case 3: // Tile, check dimentions and store
                 if ((data.length < 10) || (obj.lastData == null)) break;
                 var x = data.readUInt16BE(4), y = data.readUInt16BE(6);
-                var dimensions = null;
-                try { dimensions = require('image-size').imageSize(data.slice(8)); } catch (ex) { }
-                if ((dimensions == null) || (typeof dimensions.width != 'number') || (typeof dimensions.height != 'number')) { parent.parent.debug('relay', 'DesktopRelay: Dropping unreadable tile node=' + obj.nodeid); break; }
+                var dimensions = readImageSize(data.slice(8)); // JPEG or PNG only, the bytes come from the agent
+                if (dimensions == null) { parent.parent.debug('relay', 'DesktopRelay: Dropping unreadable tile node=' + obj.nodeid); break; }
                 var sx = (x / 16), sy = (y / 16), sw = (dimensions.width / 16), sh = (dimensions.height / 16);
 
                 // Count only the tile slots that are inside the screen, slots past the edge would wrap to the next row.
