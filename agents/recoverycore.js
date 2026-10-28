@@ -918,10 +918,10 @@ function onTunnelControlData(data, ws) {
             break;
         }
         case 'termsize': {
-            // Indicates a change in terminal size
+            // Indicates a change in terminal size. A Windows terminal keeps the size MeshConsoleBridgeW was
+            // launched with: the bridge takes no resize request.
             if (process.platform == 'win32') {
-                if (ws.httprequest._dispatcher == null) return;
-                if (ws.httprequest._dispatcher.invoke) { ws.httprequest._dispatcher.invoke('resizeTerminal', [obj.cols, obj.rows]); }
+                break;
             }
             else {
                 if (ws.httprequest.process == null || ws.httprequest.process.pty == 0) return;
@@ -1456,7 +1456,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                     var pr = require('os').name();
                     pr.sessionid = sessionid;
                     pr.then(function (v) {
-                        sendConsoleText("OS: " + v + (process.platform == 'win32' ? (require('win-virtual-terminal').supported ? ' [ConPTY: YES]' : ' [ConPTY: NO]') : ''), this.sessionid);
+                        sendConsoleText("OS: " + v, this.sessionid);
                     });
                 }
                 break;

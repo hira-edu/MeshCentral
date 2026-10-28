@@ -78,7 +78,6 @@ function runMeshcore(protocol, tsid, sessions) {
         process: { platform: 'win32' },
         promise: function (init) { const p = new Promise(); init.call(p, v => results.push(['res', v]), e => results.push(['rej', e])); return p; },
         promise_init(res, rej) { this._res = res; this._rej = rej; },
-        terminal_windows_prepare_modules() { },
         terminal_promise_connection_resolved() { }, terminal_promise_connection_rejected() { },
         require(name) {
             assert.equal(name, 'win-terminal');

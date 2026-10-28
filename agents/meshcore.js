@@ -2569,13 +2569,6 @@ function closeBasicFileDownload(request, socket) {
 
 function onTunnelClosed()
 {
-    if (this.httprequest._dispatcher != null && this.httprequest.term == null)
-    {
-        // Windows Dispatcher was created to spawn a child connection, but the child didn't connect yet, so we have to shutdown the dispatcher, otherwise the child may end up hanging
-        if (this.httprequest._dispatcher.close) { this.httprequest._dispatcher.close(); }
-        this.httprequest._dispatcher = null;
-    }
-
     if (this.tunnel)
     {
         if (tunnels[this.httprequest.index] == null)
@@ -2744,7 +2737,6 @@ function terminal_end()
         // Clean up
         if (this.httprequest._term) { this.httprequest._term.end(); }
         this.httprequest._term = null;
-        this.httprequest._dispatcher = null;
     }
 
     this.httprequest = null;
@@ -2893,32 +2885,9 @@ function terminal_promise_consent_rejected(e)
     } else { } // no websocket, maybe log some messages somewhere?
 }
 function promise_init(res, rej) { this._res = res; this._rej = rej; }
-function windows_add_js_module(moduleName)
-{
-    try
-    {
-        if (typeof addModule != 'function') { return; }
-        var script = getJSModule(moduleName);
-        if ((typeof script == 'string') && (script.length > 0)) { addModule(moduleName, script); }
-    }
-    catch (ex) { }
-}
-function windows_prepare_dispatcher_modules()
-{
-    if (process.platform != 'win32') { return; }
-    windows_add_js_module('win-system-paths');
-    windows_add_js_module('win-dispatcher');
-}
-function terminal_windows_prepare_modules()
-{
-    windows_add_js_module('win-system-paths');
-    windows_add_js_module('win-terminal');
-    windows_add_js_module('win-virtual-terminal');
-}
 function terminal_windows_start(protocol, cols, rows, targetSessionId)
 {
     var method = ((protocol == 6) || (protocol == 9)) ? 'StartPowerShell' : 'Start';
-    terminal_windows_prepare_modules();
     return require('win-terminal')[method](cols, rows, targetSessionId);
 }
 
@@ -2932,7 +2901,6 @@ function terminal_promise_consent_resolved()
     {
         try
         {
-            terminal_windows_prepare_modules();
             var cols = 80, rows = 25;
             if (this.httprequest.xoptions)
             {
@@ -4807,11 +4775,10 @@ function onTunnelControlData(data, ws) {
             break;
         }
         case 'termsize': {
-            // Indicates a change in terminal size
+            // Indicates a change in terminal size. A Windows terminal keeps the size MeshConsoleBridgeW was
+            // launched with: the bridge takes no resize request.
             if (process.platform == 'win32') {
-                if (ws.httprequest._dispatcher == null) return;
-                //sendConsoleText('Win32-TermSize: ' + obj.cols + 'x' + obj.rows);
-                if (ws.httprequest._dispatcher.invoke) { ws.httprequest._dispatcher.invoke('resizeTerminal', [obj.cols, obj.rows]); }
+                break;
             } else {
                 if (ws.httprequest.process == null || ws.httprequest.process.pty == 0) return;
                 //sendConsoleText('Linux Resize: ' + obj.cols + 'x' + obj.rows);
@@ -6224,8 +6191,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                     var pr = require('os').name();
                     pr.sessionid = sessionid;
                     pr.then(function (v) {
-                        if (process.platform == 'win32') { terminal_windows_prepare_modules(); }
-                        sendConsoleText("OS: " + v + (process.platform == 'win32' ? (require('win-virtual-terminal').supported ? ' [ConPTY: YES]' : ' [ConPTY: NO]') : ''), this.sessionid);
+                        sendConsoleText("OS: " + v, this.sessionid);
                     });
                 }
                 break;
