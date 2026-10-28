@@ -2287,10 +2287,11 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
         // that cannot run it hands the package to its legacy updater, which overwrites the
         // service EXE with a binary that is not an SCM host and leaves the device offline.
         // Never push to it, not even in test mode; it stays online on its current version.
-        // 0x400 marks lifecycle update support; every agent sending 0x200 (corrected ZIP
-        // decoder) already has it, so 0x200 is accepted for agents released before 0x400.
+        // 0x400 marks lifecycle update support and is required. 0x200 (corrected ZIP decoder)
+        // is not enough: the agent always sends 0x200 and clears 0x400 when this process cannot
+        // run the lifecycle host (not a service, or built without the runtime).
         // Without agentInfo the capabilities are unknown, so the package is withheld.
-        if (isWindowsServiceAgentArchitecture(agentExeInfo.id) && ((obj.agentInfo == null) || ((obj.agentInfo.capabilities & 0x600) == 0))) {
+        if (isWindowsServiceAgentArchitecture(agentExeInfo.id) && ((obj.agentInfo == null) || ((obj.agentInfo.capabilities & 0x400) == 0))) {
             if (obj.nodeid != null) { parent.parent.debug('agentupdate', "Native update withheld, agent lacks lifecycle update capability, NodeID=0x" + obj.nodeid.substring(0, 16) + ", capabilities=" + ((obj.agentInfo == null) ? "unknown" : ("0x" + (obj.agentInfo.capabilities >>> 0).toString(16)))); }
             return 0;
         }
