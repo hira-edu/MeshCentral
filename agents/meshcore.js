@@ -3328,8 +3328,10 @@ function desktop_audio_notify(ws, tsid, on)
 }
 function desktop_audio_updateBar(tsid)
 {
-    // The privacy bar cannot be edited in place; as with a user list change it is closed and recreated,
-    // and only when its audio state actually changed. No bar on the desktop session means no bar here.
+    // The privacy bar cannot be edited in place; as with a user list change it is replaced, and only when
+    // its audio state actually changed. No bar on the desktop session means no bar here. The new bar is
+    // shown before the old one closes, so the session never runs without one; when no new bar can be
+    // shown, the desktop session ends.
     var desktop = desktop_audio_findDesktop(tsid, null);
     if ((desktop == null) || (desktop.desktop.kvm.connectionBar == null)) { return; }
     var kvm = desktop.desktop.kvm, bar = kvm.connectionBar;
@@ -3337,26 +3339,36 @@ function desktop_audio_updateBar(tsid)
     if ((bar.audio === true) == listening) { return; }
     var text = desktop.privacybartext.replace(/\{0\}/g, kvm.rusers.join(', ')).replace(/\{1\}/g, kvm.users.join(', '));
     if (listening) { text += ' - ' + currentTranslation['privacyBarAudio']; }
-    bar.removeAllListeners('close');
-    bar.close();
-    kvm.connectionBar = null;
+    var created = null;
     try
     {
         // Use the desktop tunnel's own session: require('MeshAgent')._tsid is overwritten by every later tunnel.
-        kvm.connectionBar = require('notifybar-desktop')(text.replace(/'/g, "\\'\\"), desktop.desktop.tunnel.tsid, color_options);
-        MeshServerLogEx(31, null, "Remote Desktop Connection Bar Activated/Updated (" + desktop.remoteaddr + ")", desktop);
+        created = require('notifybar-desktop')(text.replace(/'/g, "\\'\\"), desktop.desktop.tunnel.tsid, color_options);
     }
     catch (ex)
     {
-        MeshServerLogEx(32, null, "Remote Desktop Connection Bar Failed or not Supported (" + desktop.remoteaddr + ")", desktop);
+        MeshServerLogEx(32, null, "Remote Desktop Connection Bar Failed or not Supported (" + desktop.remoteaddr + "): " + ex, desktop);
+        bar.removeAllListeners('close');
+        bar.close();
+        kvm.connectionBar = null;
+        desktop_audio_endDesktop(desktop);
         return;
     }
-    kvm.connectionBar.audio = listening;
+    MeshServerLogEx(31, null, "Remote Desktop Connection Bar Activated/Updated (" + desktop.remoteaddr + ")", desktop);
+    created.audio = listening;
     // tunnel_kvm_end clears connectionBar.httprequest whenever a desktop tunnel ends, so keep a request in
     // state as well; otherwise the local user's close button would stop working on a prompt-path bar.
-    kvm.connectionBar.state = (bar.state != null) ? bar.state : desktop;
-    kvm.connectionBar.httprequest = (bar.httprequest != null) ? bar.httprequest : desktop;
-    kvm.connectionBar.on('close', desktop_audio_barClosed);
+    created.state = (bar.state != null) ? bar.state : desktop;
+    created.httprequest = (bar.httprequest != null) ? bar.httprequest : desktop;
+    created.on('close', desktop_audio_barClosed);
+    bar.removeAllListeners('close');
+    bar.close();
+    kvm.connectionBar = created;
+}
+function desktop_audio_endDesktop(request)
+{
+    for (var i in request.desktop.kvm._pipedStreams) { request.desktop.kvm._pipedStreams[i].end(); }
+    request.desktop.kvm.end();
 }
 function desktop_audio_barClosed()
 {
@@ -3364,8 +3376,7 @@ function desktop_audio_barClosed()
     var request = (this.httprequest != null) ? this.httprequest : this.state;
     if (request == null) { return; }
     MeshServerLogEx(29, null, "Remote Desktop Connection forcefully closed by local user (" + request.remoteaddr + ")", request);
-    for (var i in request.desktop.kvm._pipedStreams) { request.desktop.kvm._pipedStreams[i].end(); }
-    request.desktop.kvm.end();
+    desktop_audio_endDesktop(request);
 }
 
 function kvm_tunnel_consentpromise_closehandler()
