@@ -2279,13 +2279,15 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
         }
     }
 
+    // Windows agents are the win32 entries of the architecture table; the service agents among them
+    // are the MeshService binaries. The MeshCentral Assistant (platform 'assistant') is neither.
     function isWindowsServiceAgentArchitecture(agentId) {
-        return (agentId == 3) || (agentId == 4) || (agentId == 22) || (agentId == 43);
+        return isWindowsAgentArchitecture(agentId) && /service/i.test(parent.parent.meshAgentsArchitectureNumbers[agentId].localname);
     }
 
     function isWindowsAgentArchitecture(agentId) {
-        return (agentId == 1) || (agentId == 2) || isWindowsServiceAgentArchitecture(agentId) ||
-            (agentId == 21) || (agentId == 34) || (agentId == 42);
+        const architecture = parent.parent.meshAgentsArchitectureNumbers[agentId];
+        return (architecture != null) && (architecture.platform == 'win32');
     }
 
     // An explicit agent update request the server will not act on is answered with the reason, on the
