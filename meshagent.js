@@ -497,7 +497,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                 } else {
                     // Check that the server hash matches our own web certificate hash (SHA384)
                     obj.agentSeenCerthash = msg.substring(2, 50);
-                    if ((getWebCertHash(domain) != obj.agentSeenCerthash) && (getWebCertFullHash(domain) != obj.agentSeenCerthash) && (parent.defaultWebCertificateHash != obj.agentSeenCerthash) && (parent.defaultWebCertificateFullHash != obj.agentSeenCerthash) && !isHistoricalWebCertHash(domain, obj.agentSeenCerthash)) {
+                    if (!isServerWebCertHash(domain, obj.agentSeenCerthash) && !isHistoricalWebCertHash(domain, obj.agentSeenCerthash)) {
                         if (Array.isArray(domain.agentwebcerturls) && domain.agentwebcerturls.length > 0) {
                             require('./agentcertificatehistory').refreshDomain(domain).then(function (changed) {
                                 if (!changed) return;
@@ -1187,6 +1187,12 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
         return parent.webCertificateFullHash;
     }
 
+    // The web certificate hashes stock MeshCentral admits: this domain's key and full-certificate
+    // hashes and the default certificate's.
+    function isServerWebCertHash(domain, hash) {
+        return (getWebCertHash(domain) == hash) || (getWebCertFullHash(domain) == hash) || (parent.defaultWebCertificateHash == hash) || (parent.defaultWebCertificateFullHash == hash);
+    }
+
     // Only operator-configured SHA384 pins extend TLS admission; agent reports
     // never add trust. The normal nonce/signature verification still follows.
     function isHistoricalWebCertHash(domain, hash) {
@@ -1243,8 +1249,9 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
             }
         }
 
-        // Audit compatibility only after proof of the agent's private key.
-        if (isHistoricalWebCertHash(domain, obj.agentSeenCerthash)) {
+        // Audit, after proof of the agent's private key, only the admissions the pin list alone made:
+        // these count the agents that still need it. A stock match is not audited, even when pinned.
+        if (!isServerWebCertHash(domain, obj.agentSeenCerthash) && isHistoricalWebCertHash(domain, obj.agentSeenCerthash)) {
             console.log('[AGENT_CERT_COMPAT] verified=1 domain=' + domain.id + ' node=' + obj.unauth.nodeid + ' webHash=' + Buffer.from(obj.agentSeenCerthash, 'binary').toString('hex'));
         }
 
@@ -1656,10 +1663,11 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                         // Re-enter the authenticated native hash negotiation instead of sending
                         // an HTTP agentupdate command that the Windows core must reject.
                         if (isWindowsAgentArchitecture(obj.agentInfo.agentId)) {
-                            if (isWindowsServiceAgentArchitecture(obj.agentInfo.agentId) &&
-                                (obj.agentUpdateRequestPending !== true) &&
-                                (obj.agentUpdateTransferPending !== true) &&
-                                (obj.agentUpdate == null)) {
+                            if (!isWindowsServiceAgentArchitecture(obj.agentInfo.agentId)) {
+                                refuseAgentUpdateRequest(command, "Windows console agents have no supported self-update; update the installed service agent.");
+                            } else if ((obj.agentUpdateRequestPending === true) || (obj.agentUpdateTransferPending === true) || (obj.agentUpdate != null)) {
+                                refuseAgentUpdateRequest(command, "an agent update is already in progress.");
+                            } else {
                                 obj.agentUpdateRequestPending = true;
                                 delete obj.agentUpdateFailureHash;
                                 obj.send(JSON.stringify({ action: 'agentupdatefailurecapability' }));
@@ -1694,6 +1702,8 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
 
                         // Agent update. The recovery core was loaded in the agent, send a command to update the agent
                         parent.parent.taskLimiter.launch(func, null, 1);
+                    } else {
+                        refuseAgentUpdateRequest(command, "no agent binary is available for this device's architecture.");
                     }
                     break;
                 }
@@ -2269,13 +2279,22 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
         }
     }
 
+    // Windows agents are the win32 entries of the architecture table; the service agents among them
+    // are the MeshService binaries. The MeshCentral Assistant (platform 'assistant') is neither.
     function isWindowsServiceAgentArchitecture(agentId) {
-        return (agentId == 3) || (agentId == 4) || (agentId == 22) || (agentId == 43);
+        return isWindowsAgentArchitecture(agentId) && /service/i.test(parent.parent.meshAgentsArchitectureNumbers[agentId].localname);
     }
 
     function isWindowsAgentArchitecture(agentId) {
-        return (agentId == 1) || (agentId == 2) || isWindowsServiceAgentArchitecture(agentId) ||
-            (agentId == 21) || (agentId == 34) || (agentId == 42);
+        const architecture = parent.parent.meshAgentsArchitectureNumbers[agentId];
+        return (architecture != null) && (architecture.platform == 'win32');
+    }
+
+    // An explicit agent update request the server will not act on is answered with the reason, on the
+    // route the agent's own console replies take, so the requester's console shows it.
+    function refuseAgentUpdateRequest(command, reason) {
+        parent.parent.debug('agentupdate', "Agent update request refused, NodeID=0x" + ((obj.nodeid != null) ? obj.nodeid.substring(0, 16) : 'unknown') + ": " + reason);
+        parent.routeAgentCommand({ action: 'msg', type: 'console', value: "Agent update refused: " + reason, sessionid: command.sessionid }, obj.domain.id, obj.dbNodeKey, obj.dbMeshKey);
     }
 
     function compareAgentBinaryHash(agentExeInfo, agentHash) {
