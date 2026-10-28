@@ -54,6 +54,7 @@ function formatUncaughtException(ex) {
     }
 }
 function sendMeshCoreConsole(text, sessionid) {
+    var reason = 'the agent has no SendCommand';
     try {
         var agent = require('MeshAgent');
         if (agent != null && typeof(agent.SendCommand) == 'function') {
@@ -62,8 +63,9 @@ function sendMeshCoreConsole(text, sessionid) {
             agent.SendCommand(msg);
             return true;
         }
-    } catch (sendEx) { }
-    try { console.error(text); } catch (consoleEx) { }
+    } catch (sendEx) { reason = String(sendEx); }
+    // Without the server console the agent's own console keeps the report, with why it was not sent.
+    console.error(text + ' (not sent to the server: ' + reason + ')');
     return false;
 }
 process.on('uncaughtException', function (ex) {
