@@ -21,10 +21,14 @@ const MAX_FILE_SIZE = 128 * 1024 * 1024;
 // of the npm package (its agents/.npmignore and agents/check-releases.js).
 const AGENT_BINARY_PATTERN = /^(?:meshagent[_-]|MeshService|MeshConsole|MeshAgent-|MeshCmd[^/]*\.exe$)/i;
 
-// The agent file names the id table serves (agenttypes.js localnames, without the "Unknown" placeholder).
+// The agent file names the id table serves (agenttypes.js localnames, without the "Unknown" placeholder and
+// the tools: id 10006 is MeshCentralAssistant.exe).
 function agentNames(types) {
     const names = new Set();
-    for (const id in types) { if ((types[id].localname !== 'Unknown') && SAFE_NAME.test(types[id].localname)) names.add(types[id].localname); }
+    for (const id in types) {
+        const name = types[id].localname;
+        if ((name !== 'Unknown') && !TOOL_NAMES.includes(name) && SAFE_NAME.test(name)) names.add(name);
+    }
     return names;
 }
 

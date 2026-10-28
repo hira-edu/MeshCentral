@@ -238,7 +238,8 @@ test('check-releases.js passes only when every unsigned service build is pinned 
 
 test('check-releases.js --package: the packed agent binaries are exactly the pins', (t) => {
     const root = packageFolder(t, SERVICES, SERVICES);
-    const support = ['agentbuilds.js', 'agenttypes.js', 'agents/agent-defaults.json', 'agents/meshcore.js', 'agents/MeshCentralRouter.exe'];
+    const support = ['agentbuilds.js', 'agenttypes.js', 'agents/agent-defaults.json', 'agents/meshcore.js', 'agents/MeshCentralRouter.exe', 'agents/MeshCentralAssistant.exe',
+        'agents/MeshCentralRouterCmd.exe', 'agents/MeshCentralSatellite.exe', 'agents/MeshAgentOSXPackager.zip', 'agents/meshinstall-linux.sh'];
     const cases = [
         ['exact', support.concat(SERVICES.map(n => 'agents/' + n)), 0, null],
         ['unpinned upstream binary', support.concat(SERVICES.map(n => 'agents/' + n), ['agents/meshagent_x86-64']), 1, /not pinned: agents\/meshagent_x86-64/],
