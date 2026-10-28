@@ -23,6 +23,7 @@ function fixtureRepo(t) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'module-versions-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const files = {
+        'package.json': JSON.stringify({ name: 'meshcentral', version: '0.0.0-test', files: ['agents'] }) + '\n',
         'agents/modules_meshcore/alpha.js': 'module.exports = 1;\n',
         'agents/modules_meshcore/win-beta.js': 'module.exports = 2;\n',
         'agents/modules_meshcore/coretranslations.json': '{}\n',
@@ -60,10 +61,109 @@ test('the manifest dates every tracked core module with the commit date, indepen
     assert.ok(moduleVersions.build(dir).bytes.equals(first.bytes), 'file times and untracked files do not change the manifest');
 });
 
+function commitAll(dir, message, date) {
+    git(dir, ['add', '-A']);
+    git(dir, ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '-m', message],
+        { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date });
+    return git(dir, ['rev-parse', 'HEAD']).trim();
+}
+
+function packageFixture(t) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'module-versions-pkg-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const files = {
+        'package.json': JSON.stringify({ name: 'meshcentral', version: '0.0.0-test', files: ['*.js', 'agents'] }, null, 2) + '\n',
+        'readme.md': 'fixture\n',
+        'meshcentral.js': '// server\n',
+        'agents/meshcore.js': '// core\n',
+        'agents/modules_meshcore/alpha.js': 'module.exports = 1;\n',
+        'agents/modules_meshcore/beta.js': 'module.exports = 2;\n',
+        'agents/extra.txt': 'packaged, not a module\n',
+        'deploy/notes.md': 'not packaged\n',
+        'deploy/.gitignore': 'dist/\n',
+        'deploy/scripts/module-versions.js': fs.readFileSync(path.join(__dirname, '../scripts/module-versions.js')),
+        'deploy/scripts/pack.js': fs.readFileSync(path.join(__dirname, '../scripts/pack.js'))
+    };
+    for (const [file, content] of Object.entries(files)) {
+        fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+        fs.writeFileSync(path.join(dir, file), content);
+    }
+    git(dir, ['init', '-q']);
+    const release = commitAll(dir, 'release', '2026-10-01T10:00:00Z');
+    return { dir, release };
+}
+
+test('commits outside the package leave the manifest unchanged; packaged changes and deletions date it', (t) => {
+    const { dir, release } = packageFixture(t);
+    const first = moduleVersions.build(dir);
+    assert.strictEqual(first.manifest.date, '2026-10-01T10:00:00.000Z');
+    assert.strictEqual(first.manifest.commit, release);
+
+    fs.writeFileSync(path.join(dir, 'deploy/notes.md'), 'lockfile update\n');
+    commitAll(dir, 'deploy only', '2026-10-02T10:00:00Z');
+    fs.writeFileSync(path.join(dir, 'plugins.md'), 'top-level, not packaged\n');
+    commitAll(dir, 'unpackaged top-level file', '2026-10-03T10:00:00Z');
+    assert.ok(moduleVersions.build(dir).bytes.equals(first.bytes), 'deploy-only and unpackaged commits do not change the manifest');
+
+    fs.writeFileSync(path.join(dir, 'agents/modules_meshcore/alpha.js'), 'module.exports = 11;\n');
+    const changed = commitAll(dir, 'packaged change', '2026-10-04T10:00:00Z');
+    const second = moduleVersions.build(dir);
+    assert.strictEqual(second.manifest.date, '2026-10-04T10:00:00.000Z');
+    assert.strictEqual(second.manifest.commit, changed);
+    assert.deepStrictEqual(Object.values(second.manifest.modules), ['2026-10-04T10:00:00.000Z', '2026-10-04T10:00:00.000Z']);
+
+    fs.rmSync(path.join(dir, 'agents/extra.txt'));
+    const deleted = commitAll(dir, 'packaged deletion', '2026-10-05T10:00:00Z');
+    assert.strictEqual(moduleVersions.build(dir).manifest.commit, deleted, 'deleting a packaged file changes the package');
+});
+
+test('a merge that brings packaged changes dates the release at the merge', (t) => {
+    const { dir } = packageFixture(t);
+    const main = git(dir, ['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+    git(dir, ['checkout', '-q', '-b', 'side']);
+    fs.writeFileSync(path.join(dir, 'agents/modules_meshcore/beta.js'), 'module.exports = 22;\n');
+    commitAll(dir, 'side change (old date)', '2026-10-02T10:00:00Z');
+    git(dir, ['checkout', '-q', main]);
+    fs.writeFileSync(path.join(dir, 'deploy/notes.md'), 'mainline deploy-only\n');
+    commitAll(dir, 'mainline deploy only', '2026-10-06T10:00:00Z');
+    git(dir, ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'merge', '-q', '--no-ff', '-m', 'merge side', 'side'],
+        { GIT_AUTHOR_DATE: '2026-10-07T10:00:00Z', GIT_COMMITTER_DATE: '2026-10-07T10:00:00Z' });
+    const built = moduleVersions.build(dir);
+    assert.strictEqual(built.manifest.date, '2026-10-07T10:00:00.000Z');
+    assert.strictEqual(built.manifest.commit, git(dir, ['rev-parse', 'HEAD']).trim());
+});
+
+test('pack.js: a deploy-only commit leaves the tarball unchanged; a packaged commit changes it', (t) => {
+    const { dir } = packageFixture(t);
+    const pack = () => {
+        const result = childProcess.spawnSync(process.execPath, [path.join(dir, 'deploy/scripts/pack.js'), '--json'], { cwd: dir, encoding: 'utf8' });
+        assert.strictEqual(result.status, 0, result.stderr + result.stdout);
+        const record = JSON.parse(result.stdout.slice(result.stdout.indexOf('{')));
+        assert.ok(!fs.existsSync(path.join(dir, moduleVersions.MANIFEST)), 'pack.js removes the generated manifest');
+        return record;
+    };
+    const first = pack();
+    assert.strictEqual(first.files, 8, 'the 7 packaged files plus the generated manifest');
+    fs.writeFileSync(path.join(dir, 'deploy/notes.md'), 'lockfile now pins ' + first.integrity + '\n');
+    commitAll(dir, 'pin the tarball integrity', '2026-10-08T10:00:00Z');
+    const second = pack();
+    assert.notStrictEqual(second.commit, first.commit);
+    assert.strictEqual(second.integrity, first.integrity, 'the lockfile commit does not change the tarball');
+    assert.strictEqual(second.packagedCommit, first.packagedCommit);
+
+    fs.writeFileSync(path.join(dir, 'meshcentral.js'), '// server 2\n');
+    const changed = commitAll(dir, 'server change', '2026-10-09T10:00:00Z');
+    const third = pack();
+    assert.notStrictEqual(third.integrity, first.integrity);
+    assert.strictEqual(third.packagedCommit, changed);
+    assert.strictEqual(third.moduleVersion, '2026-10-09T10:00:00.000Z');
+});
+
 test('a repository without core modules is refused', (t) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'module-versions-empty-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     fs.writeFileSync(path.join(dir, 'readme.md'), 'x\n');
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'meshcentral', version: '0.0.0-test', files: ['agents'] }) + '\n');
     git(dir, ['init', '-q']);
     git(dir, ['add', '-A']);
     git(dir, ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '-m', 'empty']);

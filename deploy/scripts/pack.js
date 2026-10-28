@@ -9,6 +9,8 @@
 // Refused: *.bak* and *.pdb anywhere (T33), and any top-level file not listed below (T34).
 // One file is generated rather than tracked: agents/module-versions.json, the release-dated module
 // versions (module-versions.js), written before packing, checked in the tarball, removed afterwards.
+// The tarball depends only on the packaged files: the manifest is dated by the last commit that
+// changed them, npm writes fixed tar mtimes, and HEAD's own id is printed (commit) but never packed.
 // deploy/package.json depends on dist/meshcentral-<version>.tgz, and its lockfile pins the sha512.
 // Release packs run on Linux (D4); a pack made on Windows serves the local duplicate server.
 const childProcess = require('node:child_process');
@@ -118,13 +120,10 @@ function readTarball(file) {
 const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
 if (pkg.name !== 'meshcentral' || !Array.isArray(pkg.files)) { fail('repository root package.json is not the meshcentral package with a files list'); }
 
-// 0. The generated module version manifest. A leftover copy means an earlier run was killed or someone
-// wrote it by hand; refuse rather than guess which bytes are meant.
+// A leftover module version manifest means an earlier run was killed or someone wrote it by hand;
+// refuse rather than guess which bytes are meant.
 const manifestPath = path.join(repoRoot, moduleVersions.MANIFEST);
 if (fs.existsSync(manifestPath)) { fail(moduleVersions.MANIFEST + ' already exists; remove it (pack.js generates it)'); }
-const versions = moduleVersions.build(repoRoot);
-fs.writeFileSync(manifestPath, versions.bytes);
-process.on('exit', () => { fs.rmSync(manifestPath, { force: true }); });
 
 // 1. What npm would pack, checked before anything is written.
 const dryRun = npmPack(['--dry-run']);
@@ -135,23 +134,31 @@ for (const p of listed) {
     if (!p.includes('/') && !TOP_LEVEL_FILES.has(p)) { problems.push('unlisted top-level file: ' + p); }
 }
 const blobs = headBlobs();
-if (!listed.includes(moduleVersions.MANIFEST)) { problems.push('npm would not pack ' + moduleVersions.MANIFEST); }
-const untracked = listed.filter(p => !blobs.has(p) && p !== moduleVersions.MANIFEST);
+const untracked = listed.filter(p => !blobs.has(p));
 for (const p of untracked) { problems.push('not tracked by git: ' + p); }
 const dirty = git(['status', '--porcelain', '-z', '--untracked-files=no', '--', '.']).toString('utf8').split('\0').filter(Boolean)
     .map(line => line.slice(3)).filter(p => listed.includes(p));
 for (const p of dirty) { problems.push('changed since HEAD: ' + p); }
 if (problems.length) { fail(problems.length + ' problem(s):\n  ' + problems.join('\n  ')); }
 
-// 2. Pack into deploy/dist/.
+// 2. The module version manifest, dated by the last commit that changed packaged content (not HEAD),
+// so commits outside the package leave the tarball unchanged. build() checks that its packaged-path
+// rule selects exactly the dry-run list.
+let versions;
+try { versions = moduleVersions.build(repoRoot, listed); } catch (ex) { fail('module versions: ' + ex.message); }
+fs.writeFileSync(manifestPath, versions.bytes);
+process.on('exit', () => { fs.rmSync(manifestPath, { force: true }); });
+const expected = listed.concat([moduleVersions.MANIFEST]);
+
+// 3. Pack into deploy/dist/.
 fs.mkdirSync(outDir, { recursive: true });
 const packed = npmPack(['--pack-destination', outDir]);
 const tarball = path.join(outDir, packed.filename);
 
-// 3. The tarball holds exactly the dry-run list, byte-equal to HEAD.
+// 4. The tarball holds exactly the dry-run list, byte-equal to HEAD, plus the generated manifest.
 const contents = readTarball(tarball);
 const mismatch = [];
-for (const p of listed) {
+for (const p of expected) {
     if (!contents.has(p)) { mismatch.push('missing from tarball: ' + p); }
     else if (p === moduleVersions.MANIFEST) { if (!contents.get(p).equals(versions.bytes)) { mismatch.push('differs from the generated manifest: ' + p); } }
     else if (blobSha(contents.get(p)) !== blobs.get(p)) { mismatch.push('differs from HEAD: ' + p); }
@@ -164,7 +171,7 @@ if (JSON.stringify(packedModules) !== JSON.stringify(manifestModules)) {
     mismatch.push('module manifest lists ' + manifestModules.length + ' modules, tarball has ' + packedModules.length + ': ' +
         packedModules.filter(m => !manifestModules.includes(m)).concat(manifestModules.filter(m => !packedModules.includes(m))).join(', '));
 }
-for (const p of contents.keys()) { if (!listed.includes(p)) { mismatch.push('not in dry-run list: ' + p); } }
+for (const p of contents.keys()) { if (!expected.includes(p)) { mismatch.push('not in dry-run list: ' + p); } }
 if (mismatch.length) { fs.unlinkSync(tarball); fail(mismatch.length + ' tarball problem(s):\n  ' + mismatch.slice(0, 50).join('\n  ')); }
 
 const bytes = fs.readFileSync(tarball);
@@ -177,6 +184,9 @@ const record = {
     integrity: 'sha512-' + crypto.createHash('sha512').update(bytes).digest('base64'),
     sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
     moduleVersion: versions.manifest.date,
+    // The last commit that changed packaged content: the only commit id inside the tarball.
+    // commit (HEAD) above is printed only.
+    packagedCommit: versions.manifest.commit,
     modules: manifestModules.length,
     node: process.version,
     npm: npm(['--version']).toString('utf8').trim(),
@@ -185,5 +195,5 @@ const record = {
 console.log(record.tarball + ': ' + record.files + ' files, ' + record.size + ' bytes, commit ' + record.commit);
 console.log('integrity ' + record.integrity);
 console.log('sha256    ' + record.sha256);
-console.log('modules   ' + record.modules + ' at ' + record.moduleVersion + ' (' + moduleVersions.MANIFEST + ')');
+console.log('modules   ' + record.modules + ' at ' + record.moduleVersion + ' (' + moduleVersions.MANIFEST + ', last packaged change ' + record.packagedCommit + ')');
 if (process.argv.includes('--json')) { console.log(JSON.stringify(record, null, 2)); }
