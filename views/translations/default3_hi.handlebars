@@ -32,6 +32,7 @@
     <script type="text/javascript" src="scripts/agent-redir-ws-0.1.1{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/agent-redir-rtc-0.1.0{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/agent-desktop-0.0.2{{{min}}}.js"></script>
+    <script type="text/javascript" src="scripts/agent-desktop-audio-control-0.0.1.js"></script>
     <script type="text/javascript" src="scripts/agent-rdp-0.0.1{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/qrcode.min.js"></script>
     <script type="text/javascript" src="scripts/xterm{{{min}}}.js"></script>
@@ -1059,6 +1060,7 @@
                         <div class="d-flex align-items-center ms-auto">
                             <div id="desktopCustomUiButtons" style="float:left"></div>
                             <div id="desktopCustomUpperRight" style="float:left;margin-right:6px"></div>
+                            <span id="deskAudioMount" hidden=""></span>
                             <input type="button" class="btn btn-primary btn-sm" title="रिमोट मशीन की शक्ति स्थिति को बदलें" onkeypress="return false" onkeydown="return false" value="पावर एक्शन ..." onclick="showPowerActionDlg()" style="display:none">
                             <input id="deskActionsBtn" type="button" class="btn btn-primary btn-sm me-1" title="डिवाइस पर पावर क्रियाएं करें" onkeypress="return false" onkeydown="return false" value="क्रिया" onclick="deviceActionFunction()">
                             <input id="deskActionsSettings" type="button" class="btn btn-primary btn-sm me-1" value="समायोजन" title="दूरस्थ डेस्कटॉप सेटिंग्स संपादित करें" onkeypress="return false" onkeydown="return false" onclick="showDesktopSettings()">

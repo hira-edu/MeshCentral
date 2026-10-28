@@ -16,6 +16,7 @@
     <script type="text/javascript" src="scripts/agent-redir-ws-0.1.1{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/agent-redir-rtc-0.1.0{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/agent-desktop-0.0.2{{min}}.js"></script>
+    <script type="text/javascript" src="scripts/agent-desktop-audio-control-0.0.1.js"></script>
     <script type="text/javascript" src="scripts/amt-desktop-0.0.2{{min}}.js"></script>
     <script type="text/javascript" src="scripts/amt-terminal-0.0.2{{min}}.js"></script>
     <script type="text/javascript" src="scripts/zlib{{min}}.js"></script>
@@ -50,6 +51,7 @@
                     <div class="deskareaicon" title="Ansichtsmodus umschalten" onclick="toggleAspectRatio(1)">⇲</div>
                     <div class="deskareaicon" title="Nach links drehen" onclick="drotate(-1)">↺</div>
                     <div class="deskareaicon" title="Nach rechts drehen" onclick="drotate(1)">↻</div>
+                    <span id="deskAudioMount" hidden=""></span>
                     <input id="deskActionsSettings" type="button" value="Einstellungen..." title="Einstellungen für entfernten Desktop bearbeiten" onkeypress="return false" onkeydown="return false" onclick="showDesktopSettings()" class="mR">
                     <div id="desktopCustomUiButtons" style="float:left"></div>
                     <div id="deskRecordIcon" class="deskareaicon" title="Server zeichnet diese Sitzung auf" style="display:none;background-color:red;width:12px;height:12px;border-radius:6px;margin-top:5px"></div>

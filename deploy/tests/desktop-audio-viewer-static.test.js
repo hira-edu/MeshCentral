@@ -1,11 +1,11 @@
 'use strict';
 
-// Static contracts for the viewer-side system-audio wiring. These assert the
-// integration points that put the speaker control in the top toolbar of both
-// desktop viewer pages (main UI and guest share links) without forking a stock
-// view, plus the vendored decoder's presence and integrity. No browser is
-// required; layout and interaction were verified against the stock toolbar
-// markup and style.css in a browser harness.
+// Static contracts for the viewer-side system-audio wiring: the toolbar control
+// (public/scripts/agent-desktop-audio-control-0.0.1.js), the template slot and
+// script tag that load it on the five desktop pages, the player, and the vendored
+// decoder's presence and integrity. desktop-audio-control.test.js drives the
+// control's behaviour. No browser is required; layout and interaction were
+// verified against the stock toolbar markup and style.css in a browser harness.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
@@ -14,67 +14,78 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const scriptsDir = path.join(__dirname, '../../public/scripts');
-const custom = fs.readFileSync(path.join(__dirname, '../meshcentral-web/public/scripts/custom.js'), 'utf8');
+const viewsDir = path.join(__dirname, '../../views');
 const player = fs.readFileSync(path.join(scriptsDir, 'agent-desktop-audio-0.0.1.js'), 'utf8');
+const audioBlock = fs.readFileSync(path.join(scriptsDir, 'agent-desktop-audio-control-0.0.1.js'), 'utf8');
+// Each desktop template and the first toolbar button its audio slot sits in front of.
+const DESKTOP_TEMPLATES = { default: 'id="deskFocusBtn"', default3: 'title="Change the power state of the remote machine"', sharing: 'id="deskActionsSettings"', 'default-mobile': 'id=deskFullScreen', 'sharing-mobile': 'id=deskFullScreen' };
+const escapeRegExp = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// Isolate the audio control block so these checks do not match unrelated code.
-const audioBlockStart = custom.indexOf('__meshDesktopAudioControl');
-assert.ok(audioBlockStart > 0, 'custom.js must contain the desktop-audio control block');
-const audioBlock = custom.slice(audioBlockStart);
-
-test('audio observer survives a redirector assigning its handler after module.parent', () => {
-    const start = custom.indexOf('  function wrapCtrl(');
-    const end = custom.indexOf('  function attachDesktopCtrlObserver(', start);
-    const wrapCtrl = vm.runInNewContext('(' + custom.slice(start, end).trim() + ')', { CTRL_CHANNEL: '102938' });
-    const redir = {}, audioMessages = [], delegated = [];
-    // The canary constructor assigns module.parent before defining xxOnControlCommand.
-    wrapCtrl(redir, message => audioMessages.push(message));
-    redir.xxOnControlCommand = function () { delegated.push({ receiver: this, args: Array.from(arguments) }); return 'handled'; };
-    wrapCtrl(redir, () => assert.fail('observer must only be installed once'));
-    const message = JSON.stringify({ ctrlChannel: '102938', type: 'audio', state: 'available', protocol: 20 });
-    const channel = {};
-    assert.equal(redir.xxOnControlCommand(message, 7, channel), 'handled');
-    assert.equal(audioMessages.length, 1);
-    assert.equal(audioMessages[0].state, 'available');
-    assert.equal(delegated[0].receiver, redir);
-    assert.deepEqual(delegated[0].args, [message, 7, channel]);
-    redir.xxOnControlCommand('not JSON', 8, channel);
-    assert.equal(audioMessages.length, 1);
-    assert.equal(delegated.length, 2, 'malformed and unrelated messages still reach the redirector');
+test('the redirector hands every control message to its control listeners', () => {
+    const logged = [];
+    const sandbox = { console: { log(...args) { logged.push(args); } } };
+    vm.runInNewContext(fs.readFileSync(path.join(scriptsDir, 'agent-redir-ws-0.1.1.js'), 'utf8'), sandbox);
+    const redir = sandbox.CreateAgentRedirect(null, { protocol: 2, ProcessData() {} }, null, null, null, '/');
+    const seen = [];
+    const listener = m => seen.push(m);
+    redir.addControlListener(() => { throw new Error('broken listener'); });
+    redir.addControlListener(listener);
+    redir.addControlListener(listener);
+    redir.xxOnControlCommand(JSON.stringify({ ctrlChannel: '102938', type: 'audio', state: 'available', protocol: 20 }));
+    assert.equal(seen.length, 1, 'parsed message delivered once per listener');
+    assert.equal(seen[0].state, 'available');
+    assert.equal(logged.length, 1, 'a throwing listener is logged and does not stop the others');
+    redir.xxOnControlCommand('not JSON');
+    redir.xxOnControlCommand(JSON.stringify({ ctrlChannel: 'other' }));
+    assert.equal(seen.length, 1, 'malformed and non-control messages are not offered to listeners');
 });
 
-test('custom.js hooks the shared desktop redirector factory', () => {
-    assert.match(audioBlock, /window\.CreateAgentRedirect/, 'wraps the CreateAgentRedirect factory used by both pages');
-    assert.match(audioBlock, /window\.CreateAgentRemoteDesktop/, 'wraps CreateAgentRemoteDesktop so custom Modern UI redirectors are also observed');
-    assert.match(audioBlock, /hookCreateAgentRedirect\(\);\s*if \(document\.readyState === 'loading'\)/, 'hooks synchronously in <head> before Modern UI canary scripts snapshot CreateAgentRedirect');
-    assert.match(audioBlock, /module\.protocol === DESKTOP_PROTOCOL/, 'identifies desktop (protocol 2) tunnels');
+test('the control attaches through the viewer extension points only', () => {
+    assert.match(audioBlock, /\(window\.MeshDesktopModuleObservers = window\.MeshDesktopModuleObservers \|\| \[\]\)\.push\(observeDesktopModule\)/);
+    assert.match(audioBlock, /module\.addStateListener\(onDesktopModuleState\)/);
+    assert.match(audioBlock, /redir\.addControlListener\(/);
+    assert.match(audioBlock, /module\.protocol !== DESKTOP_PROTOCOL/, 'identifies desktop (protocol 2) modules');
     assert.match(audioBlock, /DESKTOP_PROTOCOL = 2/);
+    assert.doesNotMatch(audioBlock, /window\.CreateAgentRedirect\s*=[^=]|window\.CreateAgentRemoteDesktop\s*=[^=]/, 'no factory is wrapped');
+    assert.doesNotMatch(audioBlock, /defineProperty/, 'no property is intercepted');
+    assert.doesNotMatch(audioBlock, /setInterval|setTimeout/, 'no timer');
+    assert.match(audioBlock, /if \(window\.__meshDesktopAudioControl\) return;/, 'installs once per page, so an older custom.js copy stays inert');
 });
 
-test('custom.js binds both desktop pages, including guest share links', () => {
+test('the control binds both desktop pages, including guest share links', () => {
     // sharing.handlebars creates its desktop with CreateAgentRedirect(null, ...); the fork's meshrelay.js
     // admits protocol 20 on share links that grant desktop (tests/desktop-audio-relay.test.js).
-    assert.match(audioBlock, /if \(redir && module && module\.protocol === DESKTOP_PROTOCOL && isSingleDesktopViewer\(module\)\)/);
     assert.doesNotMatch(audioBlock, /meshserver != null && module/, 'no guest-share exclusion remains');
+    assert.match(audioBlock, /var meshserver = desktop\.meshserver != null \? desktop\.meshserver : null;/);
 });
 
-test('custom.js mounts the control as the first button of the right-hand toolbar group', () => {
-    assert.match(audioBlock, /getElementById\('deskActionsSettings'\)/, 'finds the right-hand group through its Settings button');
-    assert.match(audioBlock, /if \(el\.tagName === 'INPUT'\) \{ return el; \}/, 'anchors before the group\'s first button');
-    assert.match(audioBlock, /anchor\.parentNode\.insertBefore\(controlEl, anchor\);\s*anchor\.parentNode\.insertBefore\(spacerEl, anchor\);/,
-        'inline, followed by a space so the gap matches the stock buttons');
+test('the five desktop templates load the control after agent-desktop and give it a toolbar slot', () => {
+    for (const [name, anchor] of Object.entries(DESKTOP_TEMPLATES)) {
+        const page = fs.readFileSync(path.join(viewsDir, name + '.handlebars'), 'utf8');
+        const desktop = page.search(/<script type="text\/javascript" src="scripts\/agent-desktop-0\.0\.2\{\{\{?min\}?\}\}\.js"><\/script>/);
+        const control = page.indexOf('<script type="text/javascript" src="scripts/agent-desktop-audio-control-0.0.1.js"></script>');
+        assert.ok(desktop > 0 && control > desktop, name + ' loads the control after agent-desktop');
+        assert.equal(page.split('agent-desktop-audio-control-0.0.1.js').length, 2, name + ' loads the control once');
+        // The slot sits in front of the first button of the right-hand group (Full Screen on the mobile pages).
+        const mobile = name.endsWith('-mobile');
+        const slot = new RegExp('<span id="deskAudioMount"' + (mobile ? ' data-mobile="true"' : '') + ' hidden></span>\\r?\\n[ \\t]*<input[^>]*' + escapeRegExp(anchor));
+        assert.match(page, slot, name + ' has the toolbar slot before its first toolbar button');
+    }
+    for (const name of ['xterm', 'ssh']) {
+        assert.doesNotMatch(fs.readFileSync(path.join(viewsDir, name + '.handlebars'), 'utf8'), /desktop-audio/, name + ' has no desktop and loads no audio code');
+    }
     assert.match(audioBlock, /#mc-desk-audio\{display:inline-flex;[^']*height:22px;[^']*vertical-align:middle;position:relative;top:-1px/,
         'one 22px row centred on the stock buttons');
 });
 
-test('custom.js keeps the speaker button fixed: slider on its left, glyph facing the slider', () => {
+test('the control keeps the speaker button fixed: slider on its left, glyph facing the slider', () => {
     assert.match(audioBlock, /group\.appendChild\(slider\);\s*group\.appendChild\(button\);/, 'slider before button');
     assert.match(audioBlock, /#mc-desk-audio-btn svg\{[^}]*transform:scaleX\(-1\)\}/, 'speaker mirrored to face the slider');
     assert.match(audioBlock, /slider\.hidden = true;/, 'slider starts hidden');
     assert.match(audioBlock, /sliderEl\.hidden = !\(state === 'playing' \|\| state === 'connecting'\);/, 'slider shows only while connecting or playing');
 });
 
-test('custom.js volume: native range input, remembered per browser, applied to the player', () => {
+test('the control volume: native range input, remembered per browser, applied to the player', () => {
     assert.match(audioBlock, /slider\.type = 'range';/);
     assert.match(audioBlock, /setAttribute\('aria-label', 'Device audio volume'\)/);
     assert.match(audioBlock, /VOLUME_KEY = 'meshDesktopAudioVolume'/);
@@ -83,28 +94,26 @@ test('custom.js volume: native range input, remembered per browser, applied to t
     assert.match(audioBlock, /volume: volumePercent \/ 100/, 'a new player starts at the remembered level');
 });
 
-test('custom.js animates the waves only while audio flows, and honours reduced motion', () => {
+test('the control animates the waves only while audio flows, and honours reduced motion', () => {
     assert.match(audioBlock, /onActivity: function \(flowing\) \{ if \(audioCtx === ctx\) \{ audioFlowing = flowing; renderControl\(\); \} \}/);
     assert.match(audioBlock, /#mc-desk-audio\.mcaudio-flowing \.mcaudio-wave\{animation:mcaudiowave/);
     assert.match(audioBlock, /@media \(prefers-reduced-motion:reduce\)\{#mc-desk-audio \.mcaudio-spin,#mc-desk-audio \.mcaudio-wave\{animation:none\}\}/);
 });
 
-test('custom.js scopes the icon to the single desktop viewer canvas', () => {
+test('the control scopes the icon to the single desktop viewer canvas', () => {
     assert.match(audioBlock, /getElementById\('Desk'\)/, "binds to the 'Desk' canvas used by both viewer pages");
 });
 
-test('custom.js opens a protocol-20 audio tunnel carrying tsid', () => {
+test('the control opens a protocol-20 audio tunnel carrying tsid', () => {
     assert.match(audioBlock, /AUDIO_PROTOCOL = 20/);
     assert.match(audioBlock, /protocol: AUDIO_PROTOCOL/, 'the audio module advertises protocol 20');
-    assert.match(audioBlock, /redir\.__mcAudioTsid = \{ value: m\.tsid \}/, 'remembers the session the agent advertised');
-    assert.match(audioBlock, /var tsid = desktop\.__mcAudioTsid \? desktop\.__mcAudioTsid\.value : \(desktop\.options \? desktop\.options\.tsid : null\);/,
+    assert.match(audioBlock, /redir\.audioTsid = \{ value: m\.tsid \}/, 'remembers the session the agent advertised');
+    assert.match(audioBlock, /var tsid = desktop\.audioTsid \? desktop\.audioTsid\.value : \(desktop\.options \? desktop\.options\.tsid : null\);/,
         'opens audio on the advertised session, falling back to the page selection');
     assert.match(audioBlock, /if \(tsid != null\) \{ redir\.options\.tsid = tsid; \}/, 'passes the session tsid in xoptions');
 });
 
-test('custom.js reveals the icon only after the availability ctrl message', () => {
-    assert.match(audioBlock, /ctrlChannel/);
-    assert.match(audioBlock, /CTRL_CHANNEL = '102938'/);
+test('the control reveals the icon only after the availability ctrl message', () => {
     assert.match(audioBlock, /m\.state === 'available'/, 'control shown on the audio "available" advertisement');
     // The control starts hidden and its visibility follows availability.
     assert.match(audioBlock, /group\.hidden = true;/);
@@ -112,14 +121,14 @@ test('custom.js reveals the icon only after the availability ctrl message', () =
     assert.match(audioBlock, /#mc-desk-audio\[hidden\]\{display:none\}/, 'the display rule does not defeat [hidden]');
 });
 
-test('custom.js renders all required icon states with a reason tooltip', () => {
+test('the control renders all required icon states with a reason tooltip', () => {
     for (const state of ['off', 'connecting', 'playing', 'unavailable', 'error']) {
         assert.ok(audioBlock.indexOf("'" + state + "'") >= 0, 'handles state ' + state);
     }
     assert.match(audioBlock, /tooltipFor/, 'tooltip derives from state + reason');
 });
 
-test('custom.js control is keyboard accessible without leaking keys to the remote desktop', () => {
+test('the control control is keyboard accessible without leaking keys to the remote desktop', () => {
     assert.match(audioBlock, /button\.type = 'button';/, 'a native button: Enter and Space work without custom handlers');
     assert.match(audioBlock, /setAttribute\('aria-pressed'/);
     assert.match(audioBlock, /group\.setAttribute\('role', 'group'\);/);
@@ -129,12 +138,11 @@ test('custom.js control is keyboard accessible without leaking keys to the remot
     assert.match(audioBlock, /if \(e\.detail > 0\) \{ button\.blur\(\); \}/, 'a pointer click hands focus back to the page');
 });
 
-test('custom.js closes audio when the desktop session ends', () => {
-    assert.match(audioBlock, /onDesktopClosed/);
-    assert.match(audioBlock, /chainDesktopStateChanged/, 'observes desktop disconnect without clobbering the page handler');
+test('the control closes audio when the desktop session ends', () => {
+    assert.match(audioBlock, /if \(state === 0\) \{ onDesktopClosed\(module\.parent\); return; \}/, 'the module state listener ends audio with the desktop');
 });
 
-test('custom.js creates the AudioContext inside the click (user gesture)', () => {
+test('the control creates the AudioContext inside the click (user gesture)', () => {
     // player.start() (which creates/resumes the AudioContext) is reached from
     // the icon activation path, not on load.
     assert.match(audioBlock, /onIconActivate/);
@@ -183,7 +191,7 @@ test('vendored opus-decoder is present with its license and matches the pinned n
     assert.ok(!/https?:\/\/[A-Za-z0-9.-]+\//.test(text.replace(/github\.com[^\s"']*/g, '')), 'no external URLs beyond the attribution comment');
 });
 
-test('custom.js shows Playing only after the browser proves output, with the context created in the click', () => {
+test('the control shows Playing only after the browser proves output, with the context created in the click', () => {
     // The AudioContext is created and resumed synchronously in the click, before the player script loads.
     const start = audioBlock.slice(audioBlock.indexOf('function startAudio()'));
     assert(start.indexOf('ctx = createGestureAudioContext();') >= 0 && start.indexOf('ctx = createGestureAudioContext();') < start.indexOf('loadPlayerModule()'),
@@ -208,16 +216,10 @@ test('player verifies the context actually runs instead of assuming resume() suc
     assert.match(player, /if \(audible\) \{ markActivity\(\); \}\s*reportPlayback\(readiness\.markStreamLive\(\)\);/);
 });
 
-test('both redirector assets bundle the current audio control for pages without custom.js', () => {
-    const { execFileSync } = require('node:child_process');
-    execFileSync(process.execPath, [path.join(__dirname, '../scripts/build-desktop-audio-control.js'), '--check']);
+test('the redirectors carry no audio code', () => {
     for (const name of ['agent-redir-ws-0.1.1.js', 'agent-redir-ws-0.1.1-min.js']) {
         const asset = fs.readFileSync(path.join(scriptsDir, name), 'utf8');
-        assert.equal(asset.split('// BEGIN GENERATED DESKTOP AUDIO CONTROL').length, 2);
-        const sandbox = {};
-        vm.runInNewContext(asset, sandbox);
-        assert.equal(typeof sandbox.CreateAgentRedirect, 'function', 'bundle boundary must not invoke the redirector');
-        assert.match(asset, /if \(window\.__meshDesktopAudioControl\) return/);
-        assert.match(asset, /return document\.getElementById\('deskFullScreen'\)/);
+        assert.doesNotMatch(asset, /BEGIN GENERATED DESKTOP AUDIO CONTROL|__meshDesktopAudioControl|mc-desk-audio/, name);
     }
+    assert.equal(fs.existsSync(path.join(__dirname, '../scripts/build-desktop-audio-control.js')), false, 'nothing generates package bytes from custom.js');
 });

@@ -29,6 +29,7 @@
     <script type="text/javascript" src="scripts/agent-redir-ws-0.1.1{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/agent-redir-rtc-0.1.0{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/agent-desktop-0.0.2{{{min}}}.js"></script>
+    <script type="text/javascript" src="scripts/agent-desktop-audio-control-0.0.1.js"></script>
     <script type="text/javascript" src="scripts/agent-rdp-0.0.1{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/qrcode.min.js"></script>
     <script type="text/javascript" src="scripts/xterm{{{min}}}.js"></script>
@@ -771,6 +772,7 @@
                             <div class="deskareaicon" title="Tourne à gauche" onclick="drotate(-1)">↺</div>
                             <div class="deskareaicon" title="Tourner à droite" onclick="drotate(1)">↻</div>
                             <div id="deskRecordIcon" class="deskareaicon" title="Session en cours d'enregistrement" style="display:none;background-color:red;width:12px;height:12px;border-radius:6px;margin-top:5px"></div>
+                            <span id="deskAudioMount" hidden=""></span>
                             <input id="deskFocusBtn" type="button" title="Basculer le mode de mise au point, lorsqu'il est actif, seule la région autour de la souris est mise à jour" onkeypress="return false" onkeydown="return false" value="Tout concentrer" onclick="deskToggleFocus()" style="margin-right:3px;display:none">
                             <input id="deskActionsBtn" type="button" title="Effectuer des actions d'alimentation sur le périphérique" onkeypress="return false" onkeydown="return false" value="Actions" onclick="deviceActionFunction()" class="mR">
                             <input id="deskActionsSettings" type="button" value="Paramètres..." title="Modifier les paramètres du bureau distant" onkeypress="return false" onkeydown="return false" onclick="showDesktopSettings()" class="mR">

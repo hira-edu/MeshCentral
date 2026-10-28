@@ -9,7 +9,7 @@
 //   emails        emails/translations/* (translate.js translateall)
 //   views         views/*-min.handlebars and the public/scripts/*-min.js that translate.js minifyall makes
 //   viewer        public/scripts/agent-desktop-0.0.2-min.js (uglify-js) and agent-redir-ws-0.1.1-min.js
-//                 (translate.js minifyall of the source up to the audio block, then the block; D25)
+//                 (translate.js minifyall; D25)
 //   agents        agents/meshcore.min.js and modules_meshcore_min/ (uglify-js). Proposal only: compared
 //                 and reported, never written to the repository.
 //
@@ -41,12 +41,10 @@ const path = require('node:path');
 
 const repoRoot = path.resolve(__dirname, '../..');
 const deployDir = path.join(repoRoot, 'deploy');
-const audioControl = require('./build-desktop-audio-control.js');
 
 const ALL = ['translations', 'emails', 'views', 'viewer', 'agents'];
 const DEFAULT = ['translations', 'emails', 'views', 'viewer'];
 const VIEWER_FILES = ['public/scripts/agent-desktop-0.0.2-min.js', 'public/scripts/agent-redir-ws-0.1.1-min.js'];
-const REDIR_SOURCE = 'public/scripts/agent-redir-ws-0.1.1.js';
 // The committed viewer -min files carry production's CRLF bytes (Stage 1 import).
 const VIEWER_EOL = '\r\n';
 // translateall also writes minified email variants. Upstream does not ship them and meshmail.js
@@ -210,7 +208,6 @@ function stageInputs(src, tmp, categories, translateJs) {
     if (categories.includes('viewer')) {
         inputs.add('public/scripts/agent-desktop-0.0.2.js');
         inputs.add('public/scripts/agent-redir-ws-0.1.1.js');
-        inputs.add('deploy/meshcentral-web/public/scripts/custom.js');
     }
     if (categories.includes('agents')) {
         inputs.add('agents/meshcore.js');
@@ -218,12 +215,6 @@ function stageInputs(src, tmp, categories, translateJs) {
     }
     for (const rel of inputs) if (!src.exists(rel)) fail('input ' + rel + ' is missing from the ' + src.label);
     for (const [rel, data] of src.readMany([...inputs])) writeFile(path.join(tmp, rel), data);
-    if (categories.includes('viewer')) {
-        // minifyall makes the redirector -min base from the source up to the generated audio block. Only
-        // the temporary copy is cut; in the fork profile views does not own that output.
-        const redir = path.join(tmp, REDIR_SOURCE);
-        writeFile(redir, fs.readFileSync(redir, 'utf8').split(audioControl.marker)[0]);
-    }
     return inputs;
 }
 
@@ -305,19 +296,16 @@ function generate(options, src, committedTree, tmp, tool) {
 }
 
 // agent-desktop-0.0.2-min.js: uglify-js with default compress and mangle, then CRLF.
-// agent-redir-ws-0.1.1-min.js (D25): upstream's own minifyall output of the source up to the generated
-// audio block (what production serves), followed by the block exactly as build-desktop-audio-control.js
-// writes it.
+// agent-redir-ws-0.1.1-min.js (D25): upstream's own minifyall output of the source.
 function buildViewer(tmp, tool) {
     const uglify = require(path.join(tool.nodeModules, 'uglify-js'));
     const desktop = uglify.minify(fs.readFileSync(path.join(tmp, 'public/scripts/agent-desktop-0.0.2.js'), 'utf8'), UGLIFY_OPTIONS);
     if (desktop.error) fail('uglify-js public/scripts/agent-desktop-0.0.2.js: ' + desktop.error.message);
-    const redirBase = path.join(tmp, VIEWER_FILES[1]);
-    if (!fs.existsSync(redirBase)) fail('minifyall did not write ' + VIEWER_FILES[1]);
-    const control = audioControl.audioControlFrom(fs.readFileSync(path.join(tmp, 'deploy/meshcentral-web/public/scripts/custom.js'), 'utf8'));
+    const redir = path.join(tmp, VIEWER_FILES[1]);
+    if (!fs.existsSync(redir)) fail('minifyall did not write ' + VIEWER_FILES[1]);
     const generated = new Map();
     generated.set(VIEWER_FILES[0], Buffer.from(desktop.code + VIEWER_EOL, 'utf8'));
-    generated.set(VIEWER_FILES[1], Buffer.from(audioControl.withAudioControl(fs.readFileSync(redirBase, 'utf8'), VIEWER_EOL, control), 'utf8'));
+    generated.set(VIEWER_FILES[1], fs.readFileSync(redir));
     return generated;
 }
 
