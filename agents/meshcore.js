@@ -7296,6 +7296,13 @@ function agentUpdate_Start(updateurl, updateoptions) {
         sendAgentMessage('Windows JavaScript self-update is disabled; native binary update is handled by the agent control channel.', 3);
         return;
     }
+    // Only Linux and FreeBSD replace the agent from JavaScript; refuse everywhere else before downloading.
+    if (process.platform != 'freebsd' && process.platform != 'linux') {
+        sendConsoleText('Self Update disabled for this platform; native service lifecycle is required.', sessionid);
+        sendAgentMessage('Self Update disabled for this platform; native service lifecycle is required.', 3);
+        agentUpdate_ReportFailure();
+        return;
+    }
     if (updateoptions == null || typeof updateoptions.hash != 'string' || !/^[0-9a-f]{96}$/i.test(updateoptions.hash)) {
         sendConsoleText('Self Update refused because a valid SHA-384 hash was not supplied.', sessionid);
         sendAgentMessage('Self Update refused because a valid SHA-384 hash was not supplied.', 3);
@@ -7440,15 +7447,6 @@ function agentUpdate_Start(updateurl, updateoptions) {
                     // Send an indication to the server that we got the update download correctly.
                     try { require('MeshAgent').SendCommand({ action: 'agentupdatedownloaded' }); } catch (ex) { }
 
-                    if (process.platform != 'freebsd' && process.platform != 'linux') {
-                        sendConsoleText('Self Update disabled for this platform; native service lifecycle is required.', sessionid);
-                        sendAgentMessage('Self Update disabled for this platform; native service lifecycle is required.', 3);
-                        try { require('fs').unlinkSync(stagedUpdatePath); } catch (ex) { }
-                        agentUpdate_Start._selfupdate = null;
-                        agentUpdate_ReportFailure();
-                        return;
-                    }
-
                     if (sessionid != null) { sendConsoleText('Updating and restarting agent...', sessionid); }
                     try {
                         var m = require('fs').statSync(process.execPath).mode;
@@ -7470,17 +7468,6 @@ function agentUpdate_Start(updateurl, updateoptions) {
                             break;
                         case 'linux':
                             linux_execv(name, agentfilename, sessionid);
-                            break;
-                        default:
-                            try {
-                                // restart service
-                                var s = require('service-manager').manager.getService(name);
-                                s.restart();
-                            }
-                            catch (ex) {
-                                sendConsoleText('Self Update encountered an error trying to restart service', sessionid);
-                                sendAgentMessage('Self Update encountered an error trying to restart service', 3);
-                            }
                             break;
                     }
                 });
