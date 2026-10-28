@@ -22,7 +22,6 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.PendingOperations = [];
     obj.tilesReceived = 0;
     obj.TilesDrawn = 0;
-    obj.KillDraw = 0;
     obj.ipad = false;
     obj.tabletKeyboardVisible = false;
     obj.LastX = 0;
@@ -36,7 +35,6 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.rotation = 0;
     obj.protocol = 2; // KVM
     obj.debugmode = 0;
-    obj.firstUpKeys = [];
     obj.stopInput = false;
     obj.localKeyMap = true;
     obj.remoteKeyMap = false; // If false, the remote keyboard mapping is not used.
@@ -89,24 +87,17 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.mouseCursorActive = function (x) { if (xMouseCursorActive == x) return; xMouseCursorActive = x; obj.CanvasId.style.cursor = ((x == true) ? xMouseCursorCurrent : 'default'); }
     var mouseCursors = ['default', 'progress', 'crosshair', 'pointer', 'help', 'text', 'no-drop', 'move', 'nesw-resize', 'ns-resize', 'nwse-resize', 'w-resize', 'alias', 'wait', 'none', 'not-allowed', 'col-resize', 'row-resize', 'copy', 'zoom-in', 'zoom-out'];
 
-    obj.trace = function (msg) {
-        if ((obj.debugmode > 0) || ((typeof urlargs != 'undefined') && (urlargs.kvmtrace != null))) { console.log('KVMTRACE', msg); }
-    }
-
-    obj.resetDrawState = function (reason) {
+    obj.resetDrawState = function () {
         obj.drawGeneration++;
         obj.PendingOperations = [];
         obj.tilesReceived = 0;
         obj.TilesDrawn = 0;
-        obj.KillDraw = 0;
-        if (reason != null) { obj.trace('draw-reset reason=' + reason + ' generation=' + obj.drawGeneration); }
     }
 
-    obj.resetStreamState = function (reason) {
+    obj.resetStreamState = function () {
         obj.cancelPendingAltGr();
         obj.browserPressedKeys = Object.create(null);
-        obj.resetDrawState(reason);
-        obj.firstUpKeys = [];
+        obj.resetDrawState();
         obj.pressedKeys = [];
         obj.RemoteInputLock = null;
         obj.KeyboardState = 0;
@@ -124,8 +115,8 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         if (obj.touchtimer != null) { clearInterval(obj.touchtimer); obj.touchtimer = null; }
     }
 
-    obj.resetSessionState = function (reason) {
-        obj.resetStreamState(reason);
+    obj.resetSessionState = function () {
+        obj.resetStreamState();
         obj.browserPressedButtons = Object.create(null);
         obj.remotePointerLast = null;
         obj.remoteScreenKnown = false;
@@ -135,7 +126,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.Start = function () {
         obj.State = 0;
         obj.accumulator = null;
-        obj.resetSessionState('start');
+        obj.resetSessionState();
     }
 
     obj.Stop = function () {
@@ -145,7 +136,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         obj.touchenabled = 0;
         if (obj.onScreenSizeChange != null) { obj.onScreenSizeChange(obj, obj.ScreenWidth, obj.ScreenHeight, obj.CanvasId); }
         obj.Canvas.clearRect(0, 0, obj.CanvasId.width, obj.CanvasId.height);
-        obj.resetSessionState('stop');
+        obj.resetSessionState();
     }
 
     // Observers of this module's connection state (for example the trackpad controller). They run
@@ -187,7 +178,6 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         var tile = new Image();
         var generation = obj.drawGeneration;
         obj.tilesReceived++;
-        tile.xcount = obj.tilesReceived;
         var r = obj.tilesReceived, tdata = data.slice(4), ptr = 0, strs = [];
         // String.fromCharCode.apply() can't handle very large argument count, so we have to split like this.
         while ((tdata.byteLength - ptr) > 50000) { strs.push(String.fromCharCode.apply(null, tdata.slice(ptr, ptr + 50000))); ptr += 50000; }
@@ -195,7 +185,6 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         tile.src = 'data:image/jpeg;base64,' + btoa(strs.join(''));
         tile.onload = function () {
             if (generation != obj.drawGeneration) { return; }
-            //console.log('DecodeTile #' + this.xcount);
             if ((obj.Canvas != null) && (obj.State != 0)) {
                 obj.PendingOperations.push([r, 2, tile, X, Y]);
                 while (obj.DoPendingOperations()) { }
@@ -208,7 +197,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
 
     obj.DoPendingOperations = function () {
         if (obj.PendingOperations.length == 0) return false;
-        for (var i = 0; i < obj.PendingOperations.length; i++) { // && KillDraw < tilesDrawn
+        for (var i = 0; i < obj.PendingOperations.length; i++) {
             var Msg = obj.PendingOperations[i];
             if (Msg[0] == (obj.TilesDrawn + 1)) {
                 if (obj.onPreDrawImage != null) obj.onPreDrawImage(); // Notify that we are about to draw on the canvas.
@@ -216,7 +205,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
                 else if (Msg[1] == 2) { obj.Canvas.drawImage(Msg[2], obj.rotX(Msg[3], Msg[4]), obj.rotY(Msg[3], Msg[4])); delete Msg[2]; }
                 obj.PendingOperations.splice(i, 1);
                 obj.TilesDrawn++;
-                if ((obj.TilesDrawn == obj.tilesReceived) && (obj.KillDraw < obj.TilesDrawn)) { obj.KillDraw = obj.TilesDrawn = obj.tilesReceived = 0; }
+                if (obj.TilesDrawn == obj.tilesReceived) { obj.TilesDrawn = obj.tilesReceived = 0; }
                 return true;
             }
         }
@@ -259,14 +248,12 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     }
 
     obj.ProcessScreenMsg = function (width, height) {
-        var sameSize = ((obj.ScreenWidth == width) && (obj.ScreenHeight == height));
         if (obj.debugmode > 0) { console.log('ScreenSize: ' + width + ' x ' + height); }
-        obj.trace('screen-reset width=' + width + ' height=' + height + ' sameSize=' + (sameSize ? 1 : 0));
         obj.Canvas.setTransform(1, 0, 0, 1, 0, 0);
         obj.rotation = 0;
         obj.ScreenWidth = obj.width = width;
         obj.ScreenHeight = obj.height = height;
-        obj.resetStreamState('screen:' + width + 'x' + height + ':same=' + (sameSize ? 1 : 0));
+        obj.resetStreamState();
         obj.FirstDraw = true;
         obj.remoteScreenKnown = true;
         if (obj.parent != null && obj.parent.State < 3) { obj.parent.xxStateChange(3); }
