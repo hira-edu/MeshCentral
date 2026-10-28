@@ -177,6 +177,11 @@ test('a repository without core modules is refused', (t) => {
 // The core builder from the repository's meshcentral.js, run against an in-memory package.
 const source = fs.readFileSync(path.join(repoRoot, 'meshcentral.js'), 'utf8');
 const builder = source.slice(source.indexOf('    // Agent core module versions are release dates'), source.indexOf('    // Update the default meshcmd'));
+// A refusal goes through the server's real fatalStartupError, which prints the marker its parent stops on.
+const fatalStart = source.indexOf('    obj.fatalStartupError = function (lines) {');
+const fatalEnd = '\n    };';
+const fatalHelper = source.slice(fatalStart, source.indexOf(fatalEnd, fatalStart) + fatalEnd.length);
+const fatalMarker = /const FATAL_STARTUP_MARKER = '([^']+)';/.exec(source)[1];
 
 function buildCores(manifest, files) {
     const packageDir = path.join(path.sep, 'pkg');
@@ -185,7 +190,7 @@ function buildCores(manifest, files) {
     tree[path.join(agents, 'meshcore.js')] = '// core';
     for (const [rel, content] of Object.entries(files)) { tree[path.join(agents, rel)] = content; }
     if (manifest !== undefined) { tree[path.join(agents, 'module-versions.json')] = JSON.stringify(manifest); }
-    const errors = [];
+    const errors = [], logs = [];
     const obj = {
         args: { minifycore: false }, datapath: path.join(path.sep, 'data'), path, crypto: require('node:crypto'),
         common: { IntToStr: () => '\0\0\0\0' }, debug: () => { },
@@ -208,12 +213,12 @@ function buildCores(manifest, files) {
     const exit = new Error('process.exit');
     const context = {
         obj, Buffer, __dirname: packageDir,
-        console: { error: message => errors.push(message), log: () => { } },
-        process: { exit: code => { exit.code = code; throw exit; } },
+        console: { error: message => errors.push(message), log: message => logs.push(message) },
+        process: { exit: code => { exit.code = code; throw exit; } }, FATAL_STARTUP_MARKER: fatalMarker,
         require: () => ({ constants: { Z_BEST_COMPRESSION: 9 }, deflate: (data, options, callback) => callback(null, data) })
     };
-    vm.runInNewContext(builder, context);
-    try { obj.updateMeshCore(); } catch (ex) { if (ex !== exit) { throw ex; } return { exitCode: exit.code, errors }; }
+    vm.runInNewContext(fatalHelper + '\n' + builder, context);
+    try { obj.updateMeshCore(); } catch (ex) { if (ex !== exit) { throw ex; } return { exitCode: exit.code, errors, logs }; }
     const registrations = [];
     vm.runInNewContext(obj.defaultMeshCores['windows-amt'].slice(4).toString(), { addModule: (...args) => registrations.push(args), addedModules: [] });
     return { registrations, errors };
@@ -233,17 +238,20 @@ test('a module missing from the manifest stops the server and is named', () => {
     const result = buildCores({ date, modules: { 'modules_meshcore/alpha.js': date } },
         { 'modules_meshcore/alpha.js': 'module.exports = 1;', 'modules_meshcore/win-beta.js': 'module.exports = 2;' });
     assert.strictEqual(result.exitCode, 1);
+    assert.deepStrictEqual(result.logs, [fatalMarker]);
     assert.match(result.errors.join('\n'), /module "win-beta" .*has no release version in agents\/module-versions\.json/);
 });
 
 test('an invalid version stops the server', () => {
     const result = buildCores({ modules: { 'modules_meshcore/alpha.js': '1985' } }, { 'modules_meshcore/alpha.js': 'module.exports = 1;' });
     assert.strictEqual(result.exitCode, 1);
+    assert.deepStrictEqual(result.logs, [fatalMarker]);
     assert.match(result.errors.join('\n'), /module "alpha"/);
 });
 
 test('a missing manifest stops the server', () => {
     const result = buildCores(undefined, { 'modules_meshcore/alpha.js': 'module.exports = 1;' });
     assert.strictEqual(result.exitCode, 1);
+    assert.deepStrictEqual(result.logs, [fatalMarker]);
     assert.match(result.errors.join('\n'), /cannot read .*module-versions\.json/);
 });
