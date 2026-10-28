@@ -17,10 +17,15 @@ function nativeFileAction(socket, cmd) {
         }
     }
     result.action = 'fileaction'; result.operation = cmd.action; result.reqid = cmd.reqid;
-    try { socket.write(Buffer.from(JSON.stringify(result))); } catch (ex) { }
-    var message = 'Native file ' + cmd.action + ': ' + cmd.path + ' ' + JSON.stringify(result);
-    try { sendConsoleText(message, request.sessionid); } catch (ex) { }
-    if (typeof MeshServerLogEx == 'function') { MeshServerLogEx(20, [cmd.path], message, request); }
+    // Audit each action as itself: 20 is the server's "Opening: {0}", 45 its "Delete: \"{0}\"".
+    // Execute has no translated server message, so its event carries the text alone.
+    var outcome = ' ' + JSON.stringify(result);
+    if (cmd.action == 'delete') { MeshServerLogEx(45, [cmd.path], 'Delete' + (cmd.rec === true ? ' recursive' : '') + ': "' + cmd.path + '"' + outcome, request); }
+    else if (cmd.action == 'execute') { MeshServerLog('Execute' + (cmd.privileged === true ? ' privileged' : '') + ': "' + cmd.path + '"' + outcome, request); }
+    else { MeshServerLogEx(20, [cmd.path], 'Opening: ' + cmd.path + outcome, request); }
+    try { socket.write(Buffer.from(JSON.stringify(result))); }
+    catch (ex) { sendConsoleText('Native file ' + cmd.action + ' fileaction reply failed: ' + ex, request.sessionid); }
+    sendConsoleText('Native file ' + cmd.action + ': ' + cmd.path + outcome, request.sessionid);
     return result;
 }
 
@@ -913,10 +918,10 @@ function onTunnelControlData(data, ws) {
             break;
         }
         case 'termsize': {
-            // Indicates a change in terminal size
+            // Indicates a change in terminal size. A Windows terminal keeps the size MeshConsoleBridgeW was
+            // launched with: the bridge takes no resize request.
             if (process.platform == 'win32') {
-                if (ws.httprequest._dispatcher == null) return;
-                if (ws.httprequest._dispatcher.invoke) { ws.httprequest._dispatcher.invoke('resizeTerminal', [obj.cols, obj.rows]); }
+                break;
             }
             else {
                 if (ws.httprequest.process == null || ws.httprequest.process.pty == 0) return;
@@ -955,19 +960,10 @@ function closeBasicFileDownload(request, socket) {
     delete request.downloadFile;
 }
 
+// Windows run commands that have not finished within this time are stopped and reported as timed out.
+var RUN_COMMANDS_TIMEOUT_MS = 300000;
 var recoveryRunCommandChild = null;
 function recoveryRunCommands(data) {
-    function terminalIsClosed(term) {
-        if (term == null || term._meshTerminalClosed === true) return true;
-        try { if (term.isBridgeClosed && term.isBridgeClosed()) return true; } catch (e) { }
-        return false;
-    }
-    function terminalClose(term) {
-        if (term == null) return;
-        try { if (term.closeBridge) { term.closeBridge(); return; } } catch (e) { }
-        try { if (term.end) { term.end(); return; } } catch (e2) { }
-        try { if (term.kill) term.kill(); } catch (e3) { }
-    }
     function sendResult(text) {
         if (data.reply) {
             require('MeshAgent').SendCommand({ action: 'msg', type: 'runcommands', result: text, sessionid: data.sessionid, responseid: data.responseid });
@@ -979,98 +975,33 @@ function recoveryRunCommands(data) {
     if (process.platform != 'win32') { sendResult('Recovery run commands are only available on Windows.'); return; }
     if (data.runAsUser == null) data.runAsUser = 0;
     if ((data.runAsUser !== 0) && (data.runAsUser !== 1) && (data.runAsUser !== 2)) { sendResult('Invalid runAsUser value.'); return; }
-    if (recoveryRunCommandChild != null) {
-        if (terminalIsClosed(recoveryRunCommandChild)) {
-            terminalClose(recoveryRunCommandChild);
-            recoveryRunCommandChild = null;
-        } else {
-            sendResult("Run commands can't execute, already busy.");
-            return;
-        }
-    }
+    if (recoveryRunCommandChild != null) { sendResult("Run commands can't execute, already busy."); return; }
 
     var commandText = Array.isArray(data.cmds) ? data.cmds.join('\r\n') : ((data.cmds == null) ? '' : ('' + data.cmds));
     var targetSessionId = null;
+    var sessionError = null;
     if (data.runAsUser > 0) {
-        try { targetSessionId = require('user-sessions').consoleUid(); } catch (e) { }
+        try { targetSessionId = require('user-sessions').consoleUid(); } catch (e) { sessionError = e; }
         if ((typeof targetSessionId != 'number') || (targetSessionId < 0)) targetSessionId = null;
     }
-    if (data.runAsUser == 2 && targetSessionId == null) { sendResult('Run commands user session is unavailable.'); return; }
+    if (data.runAsUser == 2 && targetSessionId == null) { sendResult('Run commands user session is unavailable' + ((sessionError != null) ? (': ' + sessionError) : '.')); return; }
 
-    var replydata = '';
-    var completed = false;
-    var failed = false;
-    var inputSent = false;
-    var timer = null;
-    var marker = '\x1b]MeshConsoleBridgeReady\x07';
-    var markerSeen = false;
-    var markerBuffer = '';
-    function bridgeState() {
-        if (recoveryRunCommandChild == null) return ' bridge=missing';
-        return (' bridgeReady=' + (recoveryRunCommandChild._meshTerminalReady === true) +
-            ' bridgeClosed=' + (recoveryRunCommandChild._meshTerminalClosed === true) +
-            ' markerSeen=' + markerSeen +
-            ' mode=' + recoveryRunCommandChild._meshTerminalMode +
-            ' tokenMode=' + recoveryRunCommandChild._meshTerminalTokenMode);
-    }
-    function complete() {
-        if (completed) return;
-        completed = true;
-        if (timer != null) { try { clearTimeout(timer); } catch (e) { } timer = null; }
-        if (data.reply) { sendResult(replydata); } else { sendConsoleText(failed ? 'Run commands failed.' : 'Run commands completed.', data.sessionid); }
-        recoveryRunCommandChild = null;
-    }
-    function sendInput() {
-        var term = recoveryRunCommandChild;
-        if (inputSent || completed || term == null) return;
-        inputSent = true;
-        try {
-            term.writeBridgeInput(commandText + '\r\n', function () { try { if (term.closeInput) term.closeInput(); } catch (e) { } });
-        } catch (e) {
-            failed = true;
-            replydata += 'Windows run commands failed writing to MeshConsoleBridgeW: ' + e.toString() + bridgeState();
-            if (!data.reply) sendConsoleText(replydata, data.sessionid);
-            terminalClose(term);
-            complete();
-        }
-    }
-    function appendOutput(chunk) {
-        var text = '';
-        try { text = chunk.toString(); } catch (e) { text = '' + chunk; }
-        if (!markerSeen) {
-            markerBuffer += text;
-            var markerIndex = markerBuffer.indexOf(marker);
-            if (markerIndex < 0) return;
-            markerSeen = true;
-            text = markerBuffer.substring(0, markerIndex) + markerBuffer.substring(markerIndex + marker.length);
-            markerBuffer = '';
-            sendInput();
-        }
-        if (text.length == 0) return;
-        replydata += text;
-        if (!data.reply) sendConsoleText(text, data.sessionid);
-    }
-
+    // The same win-terminal helper as the main core; the script runs in PowerShell.
     try {
-        var method = (data.runAsUser > 0 && targetSessionId != null) ? 'RunPowerShellCommandAsUser' : 'RunPowerShellCommand';
-        recoveryRunCommandChild = require('win-terminal')[method](80, 25, targetSessionId);
+        recoveryRunCommandChild = require('win-terminal').RunCommand(commandText, {
+            targetSessionId: targetSessionId,
+            timeoutMs: RUN_COMMANDS_TIMEOUT_MS,
+            onOutput: data.reply ? null : function (text) { sendConsoleText(text, data.sessionid); }
+        }, function (result) {
+            recoveryRunCommandChild = null;
+            var failure = result.ok ? '' : ((result.timedOut ? 'Windows run commands timed out: ' : 'Windows run commands failed: ') + result.error);
+            if (data.reply) { sendResult(result.output + failure); }
+            else { sendConsoleText(result.ok ? 'Run commands completed.' : failure, data.sessionid); }
+        });
         recoveryRunCommandChild.descriptorMetadata = 'RecoveryUserCommandsPowerShell';
-        if (recoveryRunCommandChild.onBridgeData) recoveryRunCommandChild.onBridgeData(appendOutput); else recoveryRunCommandChild.on('data', appendOutput);
-        recoveryRunCommandChild.on('error', function (error) { failed = true; replydata += 'Windows run commands failed through MeshConsoleBridgeW: ' + error.toString() + bridgeState(); if (!data.reply) sendConsoleText(replydata, data.sessionid); complete(); });
-        recoveryRunCommandChild.on('close', complete);
-        timer = setTimeout(function () {
-            failed = true;
-            replydata += 'Windows run commands timed out through MeshConsoleBridgeW.' + bridgeState();
-            if (!data.reply) sendConsoleText(replydata, data.sessionid);
-            terminalClose(recoveryRunCommandChild);
-            complete();
-        }, 300000);
-        if (recoveryRunCommandChild.onBridgeReady) recoveryRunCommandChild.onBridgeReady(sendInput);
-        else if (recoveryRunCommandChild.isBridgeReady && recoveryRunCommandChild.isBridgeReady()) sendInput();
     } catch (e) {
-        replydata += 'Windows run commands failed before MeshConsoleBridgeW launch: ' + e.toString();
-        sendResult(replydata);
         recoveryRunCommandChild = null;
+        sendResult('Windows run commands failed before MeshConsoleBridgeW launch: ' + e.toString());
     }
 }
 
@@ -1209,7 +1140,15 @@ require('MeshAgent').AddCommandHandler(function (data)
 
                                                                 var targetSessionId = null;
                                                                 if ((this.httprequest.protocol == 8) || (this.httprequest.protocol == 9)) {
-                                                                    try { targetSessionId = require('user-sessions').consoleUid(); } catch (ex) { }
+                                                                    // A user terminal runs only in a user session (the viewer's tsid, else the console
+                                                                    // user's); without one it is refused, never started with the agent's own token.
+                                                                    var requestedSessionId = ((this.httprequest.xoptions != null) && (typeof this.httprequest.xoptions.tsid == 'number')) ? this.httprequest.xoptions.tsid : null;
+                                                                    try { targetSessionId = require('win-terminal').SelectUserSession(requestedSessionId); }
+                                                                    catch (ex) {
+                                                                        this.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: 'Failed to start remote terminal session, ' + ex.toString(), msgid: 2 }));
+                                                                        this.end();
+                                                                        return;
+                                                                    }
                                                                 }
                                                                 this.httprequest._term = require('win-terminal')[(this.httprequest.protocol == 6 || this.httprequest.protocol == 9) ? 'StartPowerShell' : 'Start'](cols, rows, targetSessionId);
                                                                 this.httprequest._term.pipe(this, { dataTypeSkip: 1 });
@@ -1272,20 +1211,34 @@ require('MeshAgent').AddCommandHandler(function (data)
                                                                     break;
                                                                 }
                                                             case 'execute': { nativeFileAction(this, cmd); break; }
-                case 'open': { nativeFileAction(this, cmd); break; }
-                case 'rm':
+                                                            case 'open': { nativeFileAction(this, cmd); break; }
+                                                            case 'rm':
                                                                 {
-                                                                    // Delete, possibly recursive delete
-                                                                    if (!Array.isArray(cmd.delfiles)) { break; }
-                    for (var i in cmd.delfiles) {
-                        if (typeof cmd.delfiles[i] != 'string' || !cmd.delfiles[i] || cmd.delfiles[i] == '.' || cmd.delfiles[i] == '..' || /[\\/:\x00]/.test(cmd.delfiles[i])) { continue; }
-                        if (process.platform == 'win32') {
-                            nativeFileAction(this, { action: 'delete', reqid: cmd.reqid, path: path.join(cmd.path, cmd.delfiles[i]), rec: cmd.rec });
-                            continue;
-                        }
-
-                                                                        try { deleteFolderRecursive(path.join(cmd.path, cmd.delfiles[i]), cmd.rec); } catch (e) { }
+                                                                    // Delete, possibly recursive delete. Every rejected or failed entry is answered
+                                                                    // with an error, and the batch ends with one 'rm' reply. Replies carry no path:
+                                                                    // the viewer reads a reply with a path as a folder listing.
+                                                                    var rmFailed = 0;
+                                                                    if (!Array.isArray(cmd.delfiles)) {
+                                                                        this.write(Buffer.from(JSON.stringify({ action: 'fileaction', operation: 'rm', reqid: cmd.reqid, ok: false, done: true, failed: 0, error: 'Invalid delete request.' })));
+                                                                        break;
                                                                     }
+                                                                    for (var i in cmd.delfiles) {
+                                                                        if (typeof cmd.delfiles[i] != 'string' || !cmd.delfiles[i] || cmd.delfiles[i] == '.' || cmd.delfiles[i] == '..' || /[\\/:\x00]/.test(cmd.delfiles[i])) {
+                                                                            rmFailed++;
+                                                                            this.write(Buffer.from(JSON.stringify({ action: 'fileaction', operation: 'delete', reqid: cmd.reqid, ok: false, error: 'Invalid file name.', name: String(cmd.delfiles[i]) })));
+                                                                            continue;
+                                                                        }
+                                                                        if (process.platform == 'win32') {
+                                                                            if (!nativeFileAction(this, { action: 'delete', reqid: cmd.reqid, path: path.join(cmd.path, cmd.delfiles[i]), rec: cmd.rec }).ok) { rmFailed++; }
+                                                                            continue;
+                                                                        }
+                                                                        try { deleteFolderRecursive(path.join(cmd.path, cmd.delfiles[i]), cmd.rec); }
+                                                                        catch (e) {
+                                                                            rmFailed++;
+                                                                            this.write(Buffer.from(JSON.stringify({ action: 'fileaction', operation: 'delete', reqid: cmd.reqid, ok: false, error: String(e), name: cmd.delfiles[i] })));
+                                                                        }
+                                                                    }
+                                                                    this.write(Buffer.from(JSON.stringify({ action: 'fileaction', operation: 'rm', reqid: cmd.reqid, ok: rmFailed == 0, done: true, failed: rmFailed })));
                                                                     break;
                                                                 }
                                                             case 'rename':
@@ -1458,10 +1411,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 }
                 break;
             case 'help':
-                response = "Available commands are: agentupdate, agentupdateex, dbkeys, dbget, dbset, dbcompact, eval, netinfo, osinfo, setdebug, umhctl, versions.";
-                break;
-            case 'umhctl':
-                response = require('umhctl').consoleaction(args, rights, sessionid, null);
+                response = "Available commands are: agentupdate, agentupdateex, dbkeys, dbget, dbset, dbcompact, eval, netinfo, osinfo, setdebug, versions.";
                 break;
             case '_descriptors':
                 response = 'Open Descriptors: ' + JSON.stringify(getOpenDescriptors());
@@ -1503,7 +1453,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                     var pr = require('os').name();
                     pr.sessionid = sessionid;
                     pr.then(function (v) {
-                        sendConsoleText("OS: " + v + (process.platform == 'win32' ? (require('win-virtual-terminal').supported ? ' [ConPTY: YES]' : ' [ConPTY: NO]') : ''), this.sessionid);
+                        sendConsoleText("OS: " + v, this.sessionid);
                     });
                 }
                 break;
