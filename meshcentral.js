@@ -3026,8 +3026,6 @@ function CreateMeshCentralServer(config, args) {
                         // We are adding a JS file to the meshcores
                         var moduleName = modulesDir[i].substring(0, modulesDir[i].length - 3);
                         if (moduleName.endsWith('.min')) { moduleName = moduleName.substring(0, moduleName.length - 4); } // Remove the ".min" for ".min.js" files.
-                        const preferredModule = moduleName + (obj.args.minifycore === false ? '.js' : '.min.js');
-                        if (modulesDir[i] !== preferredModule && modulesDir.indexOf(preferredModule) >= 0) { continue; }
                         const modulePath = obj.path.join(moduleDirPath, modulesDir[i]);
                         const moduleVersion = moduleVersionOf(moduleVersions, moduleName, modulePath);
                         const moduleData = ['try { addModule("', moduleName, '", "', obj.escapeCodeString(obj.fs.readFileSync(modulePath).toString('binary')), '", "', moduleVersion, '"); addedModules.push("', moduleName, '"); } catch (ex) { }\r\n'];
