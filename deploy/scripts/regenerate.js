@@ -8,7 +8,8 @@
 //   translations  views/translations/* and the two agent translation JSON files (translate.js translateall)
 //   emails        emails/translations/* (translate.js translateall)
 //   views         views/*-min.handlebars and the public/scripts/*-min.js that translate.js minifyall makes
-//   viewer        public/scripts/agent-desktop-0.0.2-min.js and agent-redir-ws-0.1.1-min.js (uglify-js)
+//   viewer        public/scripts/agent-desktop-0.0.2-min.js (uglify-js) and agent-redir-ws-0.1.1-min.js
+//                 (translate.js minifyall of the source up to the audio block, then the block; D25)
 //   agents        agents/meshcore.min.js and modules_meshcore_min/ (uglify-js). Proposal only: compared
 //                 and reported, never written to the repository.
 //
@@ -24,6 +25,8 @@
 //   --toolchain <dir>  use <dir>/node_modules instead of deploy/node_modules (experiments; not a pinned run)
 //   --no-delete        write mode: keep committed files the generators no longer produce (for example
 //                      upstream's stale ja-jp translations) instead of deleting them
+//   --allow-pending <id>  skip a known pending difference (only ja-jp today: the stale upstream ja-jp
+//                      translations Stage 2 deletes). Opt-in; the skipped files are always printed.
 //   --keep-temp        keep the temporary tree and print its path
 //
 // Upstream's translate/translate.js does the translations, emails and views work. It is run
@@ -47,6 +50,7 @@ const audioControl = require('./build-desktop-audio-control.js');
 const ALL = ['translations', 'emails', 'views', 'viewer', 'agents'];
 const DEFAULT = ['translations', 'emails', 'views', 'viewer'];
 const VIEWER_FILES = ['public/scripts/agent-desktop-0.0.2-min.js', 'public/scripts/agent-redir-ws-0.1.1-min.js'];
+const REDIR_SOURCE = 'public/scripts/agent-redir-ws-0.1.1.js';
 // The committed viewer -min files carry production's CRLF bytes (Stage 1 import).
 const VIEWER_EOL = '\r\n';
 // translateall also writes minified email variants. Upstream does not ship them and meshmail.js
@@ -58,13 +62,21 @@ const UNSHIPPED = [/^emails\/translations\/[^/]+-min_[^/]+\.html$/];
 const UGLIFY_OPTIONS = Object.freeze({ module: false, compress: {}, mangle: {} });
 // Outputs translate.js rewrites in place.
 const TRANSLATED_JSON = ['agents/agent-translations.json', 'agents/modules_meshcore/coretranslations.json'];
+// Known differences a later stage resolves. They always fail --check and are always listed; only an
+// explicit --allow-pending <id> skips them (and keeps them in write mode), and the skip is printed.
+const PENDING = {
+    'ja-jp': {
+        description: 'upstream 1.2.5 ships stale ja-jp translations that translate.json no longer produces; Stage 2 deletes them (D23)',
+        matches: (rel, state) => state === 'missing' && /^(views|emails)\/translations\/[^/]+_ja-jp\.(handlebars|html|txt)$/.test(rel)
+    }
+};
 
 class RegenerateError extends Error { }
 function fail(message) { throw new RegenerateError(message); }
 
 function parseArgs(argv) {
-    const options = { check: false, only: null, source: null, against: null, profile: 'fork', out: null, report: null, duktape: null, toolchain: null, keepTemp: false, noDelete: false };
-    const valued = { '--only': 'only', '--source': 'source', '--against': 'against', '--profile': 'profile', '--out': 'out', '--report': 'report', '--duktape': 'duktape', '--toolchain': 'toolchain' };
+    const options = { check: false, only: null, source: null, against: null, profile: 'fork', out: null, report: null, duktape: null, toolchain: null, keepTemp: false, noDelete: false, allowPending: [] };
+    const valued = { '--only': 'only', '--source': 'source', '--against': 'against', '--profile': 'profile', '--out': 'out', '--report': 'report', '--duktape': 'duktape', '--toolchain': 'toolchain', '--allow-pending': 'allowPending' };
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
         const eq = arg.indexOf('=');
@@ -77,6 +89,11 @@ function parseArgs(argv) {
             if (value === undefined || value === '') fail(name + ' needs a value');
             if (name === '--only') {
                 options.only = (options.only || []).concat(value.split(',').map(s => s.trim()).filter(Boolean));
+            } else if (name === '--allow-pending') {
+                for (const id of value.split(',').map(s => s.trim()).filter(Boolean)) {
+                    if (!PENDING[id]) fail('unknown pending item ' + id + ' (known: ' + Object.keys(PENDING).join(', ') + ')');
+                    options.allowPending.push(id);
+                }
             } else {
                 options[valued[name]] = value;
             }
@@ -202,7 +219,8 @@ function listFiles(abs) {
 // Copy the generator inputs (never their outputs) into the temporary tree.
 function stageInputs(src, tmp, categories, translateJs) {
     const inputs = new Set(['translate/translate.js', 'translate/translate.json']);
-    const upstreamWork = categories.some(c => ['translations', 'emails', 'views'].includes(c));
+    // viewer needs minifyall too (the redirector -min base), and minifyall reads every file in its list.
+    const upstreamWork = categories.some(c => ['translations', 'emails', 'views', 'viewer'].includes(c));
     if (upstreamWork) {
         for (const rel of translationSources(translateJs)) inputs.add(rel);
         for (const rel of minifyList(translateJs)) inputs.add(rel);
@@ -218,6 +236,12 @@ function stageInputs(src, tmp, categories, translateJs) {
     }
     for (const rel of inputs) if (!src.exists(rel)) fail('input ' + rel + ' is missing from the ' + src.label);
     for (const [rel, data] of src.readMany([...inputs])) writeFile(path.join(tmp, rel), data);
+    if (categories.includes('viewer')) {
+        // minifyall makes the redirector -min base from the source up to the generated audio block. Only
+        // the temporary copy is cut; in the fork profile views does not own that output.
+        const redir = path.join(tmp, REDIR_SOURCE);
+        writeFile(redir, fs.readFileSync(redir, 'utf8').split(audioControl.marker)[0]);
+    }
     return inputs;
 }
 
@@ -260,7 +284,7 @@ function generate(options, src, committedTree, tmp, tool) {
     const viewerOwned = options.profile === 'fork';
 
     if (has('translations') || has('emails')) translate(tmp, tool, ['translateall'], log);
-    if (has('views')) translate(tmp, tool, ['minifyall'], log);
+    if (has('views') || has('viewer')) translate(tmp, tool, ['minifyall'], log);
 
     const collect = (dir, keep) => {
         const map = new Map();
@@ -298,19 +322,20 @@ function generate(options, src, committedTree, tmp, tool) {
     return { results, log };
 }
 
-// uglify-js with default compress and mangle. The redirector -min is uglify output of the source up to
-// the generated audio block, followed by the block exactly as build-desktop-audio-control.js writes it.
+// agent-desktop-0.0.2-min.js: uglify-js with default compress and mangle, then CRLF.
+// agent-redir-ws-0.1.1-min.js (D25): upstream's own minifyall output of the source up to the generated
+// audio block (what production serves), followed by the block exactly as build-desktop-audio-control.js
+// writes it.
 function buildViewer(tmp, tool) {
     const uglify = require(path.join(tool.nodeModules, 'uglify-js'));
-    const minify = rel => {
-        const result = uglify.minify(fs.readFileSync(path.join(tmp, rel), 'utf8').split(audioControl.marker)[0], UGLIFY_OPTIONS);
-        if (result.error) fail('uglify-js ' + rel + ': ' + result.error.message);
-        return result.code;
-    };
+    const desktop = uglify.minify(fs.readFileSync(path.join(tmp, 'public/scripts/agent-desktop-0.0.2.js'), 'utf8'), UGLIFY_OPTIONS);
+    if (desktop.error) fail('uglify-js public/scripts/agent-desktop-0.0.2.js: ' + desktop.error.message);
+    const redirBase = path.join(tmp, VIEWER_FILES[1]);
+    if (!fs.existsSync(redirBase)) fail('minifyall did not write ' + VIEWER_FILES[1]);
     const control = audioControl.audioControlFrom(fs.readFileSync(path.join(tmp, 'deploy/meshcentral-web/public/scripts/custom.js'), 'utf8'));
     const generated = new Map();
-    generated.set(VIEWER_FILES[0], Buffer.from(minify('public/scripts/agent-desktop-0.0.2.js') + VIEWER_EOL, 'utf8'));
-    generated.set(VIEWER_FILES[1], Buffer.from(audioControl.withAudioControl(minify('public/scripts/agent-redir-ws-0.1.1.js'), VIEWER_EOL, control), 'utf8'));
+    generated.set(VIEWER_FILES[0], Buffer.from(desktop.code + VIEWER_EOL, 'utf8'));
+    generated.set(VIEWER_FILES[1], Buffer.from(audioControl.withAudioControl(fs.readFileSync(redirBase, 'utf8'), VIEWER_EOL, control), 'utf8'));
     return generated;
 }
 
@@ -409,13 +434,13 @@ function compare(results, committedTree) {
 }
 
 // Apply every write and delete, or none: originals are kept until all succeeded.
-function apply(results, report, root, keepMissing) {
+function apply(results, report, root, keepMissing, skip) {
     const backup = fs.mkdtempSync(path.join(os.tmpdir(), 'meshcentral-regen-backup-'));
     const done = [];
     try {
         for (const [category, r] of Object.entries(results)) {
             for (const [rel, state] of Object.entries(report[category].files)) {
-                if (state === 'match' || (state === 'missing' && keepMissing)) continue;
+                if (state === 'match' || (state === 'missing' && keepMissing) || skip(rel, state)) continue;
                 const abs = path.join(root, rel);
                 const saved = path.join(backup, String(done.length));
                 const existed = fs.existsSync(abs);
@@ -452,14 +477,25 @@ async function main() {
 
         console.log('regenerate: profile ' + options.profile + ', sources from ' + src.label + ', compared with ' + committedTree.label + (tool.pinned ? '' : ' (experimental toolchain ' + tool.nodeModules + ')'));
         console.log('toolchain: node ' + process.version + ', ' + Object.entries(tool.versions).map(([n, v]) => n + ' ' + v).join(', '));
+        const pendingOf = (rel, state) => Object.keys(PENDING).find(id => PENDING[id].matches(rel, state));
+        const allowed = (rel, state) => options.allowPending.includes(pendingOf(rel, state));
         let differences = 0;
+        const pendingFound = {};
         for (const [category, entry] of Object.entries(report)) {
             const c = entry.counts;
             console.log(category.padEnd(13) + ' match ' + String(c.match).padStart(5) + '  differ ' + String(c.differ).padStart(4) + '  missing ' + String(c.missing).padStart(4) + '  extra ' + String(c.extra).padStart(4) + (entry.proposal ? '  (proposal)' : ''));
-            const bad = Object.entries(entry.files).filter(([, s]) => s !== 'match');
+            const bad = Object.entries(entry.files).filter(([rel, s]) => s !== 'match' && (entry.proposal || !pendingOf(rel, s)));
+            const pending = entry.proposal ? [] : Object.entries(entry.files).filter(([rel, s]) => s !== 'match' && pendingOf(rel, s));
             if (!entry.proposal) differences += bad.length;
             for (const [rel, state] of bad.slice(0, 40)) console.log('  ' + state.padEnd(8) + rel);
             if (bad.length > 40) console.log('  ... ' + (bad.length - 40) + ' more (see --report)');
+            // Pending items are listed in full, whether or not they are allowed.
+            for (const [rel, state] of pending) {
+                const id = pendingOf(rel, state);
+                (pendingFound[id] = pendingFound[id] || []).push(rel);
+                console.log('  ' + state.padEnd(8) + rel + '  [pending ' + id + (allowed(rel, state) ? ', skipped by --allow-pending' : '') + ']');
+                if (!allowed(rel, state)) differences++;
+            }
             if (entry.checks) {
                 const failed = Object.entries(entry.checks).filter(([, k]) => k.esprima !== 'ok' || (k.duktape && k.duktape !== 'ok') || (k.duktapeSource && k.duktapeSource !== 'ok'));
                 const sum = (key) => Object.values(entry.checks).reduce((a, k) => a + k[key], 0);
@@ -476,9 +512,15 @@ async function main() {
             console.log('temp tree kept: ' + tmp);
         }
 
+        for (const [id, files] of Object.entries(pendingFound)) {
+            const skipped = options.allowPending.includes(id);
+            console.log('pending ' + id + ': ' + files.length + ' file(s), ' + (skipped ? 'SKIPPED by --allow-pending ' + id : 'not allowed (pass --allow-pending ' + id + ' to skip)') + ': ' + PENDING[id].description);
+        }
+        for (const id of options.allowPending) if (!pendingFound[id]) console.log('pending ' + id + ': allowed, but nothing matched (remove --allow-pending ' + id + ')');
+
         if (options.check) {
             if (differences) { console.log('regenerate --check: ' + differences + ' file(s) differ from the generators'); exitCode = 1; }
-            else if (!exitCode) console.log('regenerate --check: all generated files match');
+            else if (!exitCode) console.log('regenerate --check: all generated files match' + (Object.keys(pendingFound).length ? ', apart from the skipped pending files above' : ''));
         } else {
             const writable = {};
             for (const [category, r] of Object.entries(results)) if (!r.proposal) writable[category] = r;
@@ -489,7 +531,7 @@ async function main() {
                 console.log('wrote ' + count + ' file(s) under ' + out);
             } else {
                 if (results.agents) console.log('agents: proposal only, not written (C1/S6a decision pending)');
-                const count = apply(writable, report, repoRoot, options.noDelete);
+                const count = apply(writable, report, repoRoot, options.noDelete, allowed);
                 console.log(count ? 'updated ' + count + ' file(s); review with git status' : 'nothing to update');
             }
         }
