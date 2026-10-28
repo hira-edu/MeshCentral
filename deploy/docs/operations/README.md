@@ -6,7 +6,6 @@ Files:
 - `Cloudflare-Change-Ledger.md`: tracked ledger of live Cloudflare control-path and zone-setting changes.
 - `Server-Operations-Plan.md`: remediation plan and remaining operational blockers.
 - `Server-Setup-SSOT.md`: verified live topology, runtime settings, edge stack, Cloudflare control path, and database model.
-- `Backup-and-Restore-Runbook.md`: backup scope, restore order, and recovery rules.
 - `Desktop-Audio.md`: desktop audio (relay protocol 20) behavior, disable switches, audit msgids, and the session-recording requirement.
 
 Current verified state, reconciled July 26, 2026:

@@ -34,7 +34,6 @@ function Read-JsonMap {
 $repoFiles = @(
     '.gitignore',
     'package.json',
-    'readme.md',
     'docker-compose.yml',
     'infra\caddy\README.md',
     'infra\caddy\Caddyfile.live',
@@ -49,8 +48,7 @@ $repoFiles = @(
     'docs\operations\README.md',
     'docs\operations\Cloudflare-Change-Ledger.md',
     'docs\operations\Server-Operations-Plan.md',
-    'docs\operations\Server-Setup-SSOT.md',
-    'docs\operations\Backup-and-Restore-Runbook.md'
+    'docs\operations\Server-Setup-SSOT.md'
 )
 
 $runtimeFiles = @(
