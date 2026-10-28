@@ -30,8 +30,10 @@ test('the local backup names only deployment files that exist', () => {
 });
 
 test('the wrapper carries none of the retired pre-fork deployment files', () => {
-    // docker-compose.yml ran upstream 1.2.1 with mounts production never used (T31).
-    const retired = ['docker-compose.yml'];
+    // docker-compose.yml ran upstream 1.2.1 with mounts production never used (T31). The remote
+    // scripts and the nginx config targeted /opt/meshcentral-app, Node 18 and an nginx edge; the
+    // live host is /opt/meshcentral behind Caddy and cloudflared (T28, T29).
+    const retired = ['docker-compose.yml', 'scripts/remote', 'infra/nginx'];
     assert.deepEqual(retired.filter((entry) => fs.existsSync(path.join(deployRoot, entry))), []);
 });
 
