@@ -3053,15 +3053,16 @@ function CreateMeshCentralServer(config, args) {
                         }
 
                         // Merge this module to recovery modules if needed
+                        // win-terminal requires win-system-paths, which agents built before 2026-10-18 do not embed.
                         if (modulesAdd['windows-recovery'] != null) {
-                            if ((moduleName == 'win-console') || (moduleName == 'win-message-pump') || (moduleName == 'win-terminal') || (moduleName == 'win-virtual-terminal')) {
+                            if ((moduleName == 'win-console') || (moduleName == 'win-message-pump') || (moduleName == 'win-system-paths') || (moduleName == 'win-terminal') || (moduleName == 'win-virtual-terminal')) {
                                 modulesAdd['windows-recovery'].push(...moduleData);
                             }
                         }
 
                         // Merge this module to agent recovery modules if needed
                         if (modulesAdd['windows-agentrecovery'] != null) {
-                            if ((moduleName == 'win-console') || (moduleName == 'win-message-pump') || (moduleName == 'win-terminal') || (moduleName == 'win-virtual-terminal')) {
+                            if ((moduleName == 'win-console') || (moduleName == 'win-message-pump') || (moduleName == 'win-system-paths') || (moduleName == 'win-terminal') || (moduleName == 'win-virtual-terminal')) {
                                 modulesAdd['windows-agentrecovery'].push(...moduleData);
                             }
                         }
