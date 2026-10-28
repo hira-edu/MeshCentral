@@ -1140,7 +1140,15 @@ require('MeshAgent').AddCommandHandler(function (data)
 
                                                                 var targetSessionId = null;
                                                                 if ((this.httprequest.protocol == 8) || (this.httprequest.protocol == 9)) {
-                                                                    try { targetSessionId = require('user-sessions').consoleUid(); } catch (ex) { }
+                                                                    // A user terminal runs only in a user session (the viewer's tsid, else the console
+                                                                    // user's); without one it is refused, never started with the agent's own token.
+                                                                    var requestedSessionId = ((this.httprequest.xoptions != null) && (typeof this.httprequest.xoptions.tsid == 'number')) ? this.httprequest.xoptions.tsid : null;
+                                                                    try { targetSessionId = require('win-terminal').SelectUserSession(requestedSessionId); }
+                                                                    catch (ex) {
+                                                                        this.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: 'Failed to start remote terminal session, ' + ex.toString(), msgid: 2 }));
+                                                                        this.end();
+                                                                        return;
+                                                                    }
                                                                 }
                                                                 this.httprequest._term = require('win-terminal')[(this.httprequest.protocol == 6 || this.httprequest.protocol == 9) ? 'StartPowerShell' : 'Start'](cols, rows, targetSessionId);
                                                                 this.httprequest._term.pipe(this, { dataTypeSkip: 1 });

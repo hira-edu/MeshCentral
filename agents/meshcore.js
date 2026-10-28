@@ -2915,62 +2915,11 @@ function terminal_windows_prepare_modules()
     windows_add_js_module('win-terminal');
     windows_add_js_module('win-virtual-terminal');
 }
-function terminal_windows_active_user_session_id(users)
-{
-    var targetSessionId = terminal_windows_console_uid();
-    if (targetSessionId != null) { return targetSessionId; }
-    if ((users == null) || (users.Active == null) || (users.Active.length == 0)) { return null; }
-    if (users.Active[0].SessionId != null)
-    {
-        targetSessionId = parseInt(users.Active[0].SessionId);
-        if (!isNaN(targetSessionId) && targetSessionId >= 0) { return targetSessionId; }
-    }
-    return null;
-}
 function terminal_windows_start(protocol, cols, rows, targetSessionId)
 {
     var method = ((protocol == 6) || (protocol == 9)) ? 'StartPowerShell' : 'Start';
     terminal_windows_prepare_modules();
     return require('win-terminal')[method](cols, rows, targetSessionId);
-}
-function terminal_windows_console_uid()
-{
-    try
-    {
-        var targetSessionId = require('user-sessions').consoleUid();
-        if ((typeof targetSessionId == 'number') && targetSessionId >= 0) { return targetSessionId; }
-    }
-    catch (ex) { }
-    return null;
-}
-function terminal_userpromise_resolved(u)
-{
-    var that = this.that;
-    try
-    {
-        if (u.Active.length > 0)
-        {
-            var targetSessionId = terminal_windows_active_user_session_id(u);
-            if (targetSessionId == null)
-            {
-                that.httprequest.connectionPromise._rej('Failed to start remote terminal session, no active user session ID found');
-            }
-            else
-            {
-                that.httprequest.connectionPromise._res(terminal_windows_start(that.httprequest.protocol, this.cols, this.rows, targetSessionId));
-            }
-        }
-        else
-        {
-            that.httprequest.connectionPromise._rej('Failed to start remote terminal session, no active user session found');
-        }
-    }
-    catch (ex)
-    {
-        that.httprequest.connectionPromise._rej('Failed to start remote terminal session, ' + ex.toString());
-    }
-    this.that = null;
-    that = null;
 }
 
 function terminal_promise_consent_resolved()
@@ -2997,12 +2946,10 @@ function terminal_promise_consent_resolved()
             }
             else
             {
-                // Logged in user
-                var userPromise = require('user-sessions').enumerateUsers();
-                userPromise.that = this;
-                userPromise.cols = cols;
-                userPromise.rows = rows;
-                userPromise.then(terminal_userpromise_resolved);
+                // Logged in user: the session the viewer selected (the tunnel's tsid option), else the console
+                // user's session. Without an unambiguous user session the terminal is refused, never started
+                // in another user's session or with the agent's token.
+                this.httprequest.connectionPromise._res(terminal_windows_start(this.httprequest.protocol, cols, rows, require('win-terminal').SelectUserSession(this.that.tsid)));
             }
         } catch (ex)
         {
