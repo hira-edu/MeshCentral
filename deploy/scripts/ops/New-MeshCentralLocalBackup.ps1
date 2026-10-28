@@ -34,23 +34,16 @@ function Read-JsonMap {
 $repoFiles = @(
     '.gitignore',
     'package.json',
-    'readme.md',
-    'docker-compose.yml',
     'infra\caddy\README.md',
     'infra\caddy\Caddyfile.live',
-    'infra\nginx\meshcentral.conf',
     'scripts\setup-local.ps1',
     'scripts\setup-local.sh',
-    'scripts\remote\bootstrap.sh',
-    'scripts\remote\diagnose.sh',
     'scripts\ops\New-MeshCentralLocalBackup.ps1',
     'scripts\ops\Collect-MeshCentralRemoteSnapshot.sh',
     'meshcentral-web\public\scripts\custom.js',
     'docs\operations\README.md',
-    'docs\operations\Cloudflare-Change-Ledger.md',
-    'docs\operations\Server-Operations-Plan.md',
-    'docs\operations\Server-Setup-SSOT.md',
-    'docs\operations\Backup-and-Restore-Runbook.md'
+    'docs\operations\Production-Server.md',
+    'docs\operations\Desktop-Audio.md'
 )
 
 $runtimeFiles = @(

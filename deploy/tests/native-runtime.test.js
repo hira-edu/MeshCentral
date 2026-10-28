@@ -678,7 +678,6 @@ test('deployment wiring loads the local plugin from the pinned MeshCentral data 
     assert.deepEqual(config.settings.plugins.list, ['nativeruntime']);
     assert.equal(Object.hasOwn(config.settings.plugins, 'nativeruntime'), false);
     assert.equal(Object.hasOwn(config.settings.plugins, 'stfdeploy'), false, 'stfdeploy is retired (D16)');
-    assert.equal(config.domains[''].WebPublicPath, './meshcentral-data/public');
 
     const custom = fs.readFileSync(path.join(root, 'meshcentral-web', 'public', 'scripts', 'custom.js'), 'utf8');
     assert.match(custom, /plugin\/nativeruntime\/client\.js\?v=binary-lifecycle-v1/);
@@ -688,32 +687,17 @@ test('deployment wiring loads the local plugin from the pinned MeshCentral data 
     const agentServer = fs.readFileSync(path.join(repoRoot, 'meshagent.js'), 'utf8');
     assert.match(agentServer, /case 'nativeRuntimeResult':/);
     assert.match(agentServer, /callHook\('hook_processAgentData', command, obj, parent\)/);
-
-    const compose = fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
-    assert.match(compose, /image:\s*ghcr\.io\/ylianst\/meshcentral:1\.2\.1/);
-    assert.doesNotMatch(compose, /:latest(?:\s|$)/);
-    assert.match(compose, / \.\.\/plugins:\/opt\/meshcentral\/meshcentral-data\/plugins:ro/);
-    assert.match(compose, / \.\/meshcentral-web\/public:\/opt\/meshcentral\/meshcentral-data\/public:ro/);
-
-    const shell = fs.readFileSync(path.join(root, 'scripts', 'setup-local.sh'), 'utf8');
-    assert.match(shell, /for plugin in nativeruntime; do/);
-    assert.match(shell, /cp -R "\.\.\/plugins\/\$plugin\/\." "meshcentral-data\/plugins\/\$plugin\/"/);
-    assert.match(shell, /cp -R "meshcentral-web\/public\/\." "meshcentral-data\/public\/"/);
-    const powershell = fs.readFileSync(path.join(root, 'scripts', 'setup-local.ps1'), 'utf8');
-    assert.match(powershell, /@\('nativeruntime'\)/);
-    assert.match(powershell, /Join-Path '\.\.\/plugins' \$plugin/);
-    assert.match(powershell, /Join-Path 'meshcentral-web\/public' '\*'\) 'meshcentral-data\/public'/);
+    // The setup scripts' plugin staging and web layout are covered by deploy-layout.test.js.
 });
 
-test('optional pinned-template contract: all five source anchors and shared scripts', { skip: !process.env.MESHCENTRAL_SOURCE }, () => {
-    const source = process.env.MESHCENTRAL_SOURCE;
-    assert.equal(JSON.parse(fs.readFileSync(path.join(source, 'package.json'))).version, '1.2.5');
+test('the fork views carry the five anchors the plugin client attaches to', () => {
+    assert.equal(JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version, '1.2.5');
     for (const [file, tag, id] of [
         ['default', 'span', 'connectbutton1span'], ['default3', 'div', 'connectbutton1span'],
         ['default-mobile', 'input', 'connectbutton1'], ['sharing', 'span', 'connectbutton1span'],
         ['sharing-mobile', 'input', 'connectbutton1']
     ]) {
-        const html = fs.readFileSync(path.join(source, 'views', file + '.handlebars'), 'utf8');
+        const html = fs.readFileSync(path.join(repoRoot, 'views', file + '.handlebars'), 'utf8');
         assert.match(html, new RegExp('<' + tag + '\\b[^>]*\\bid=["\\\']?' + id + '(?:["\\\']|[ >])'));
         assert.match(html, /\{\{\{customJSTags\}\}\}/);
     }

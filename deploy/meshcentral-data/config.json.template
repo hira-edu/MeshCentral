@@ -1,14 +1,13 @@
 {
   "settings": {
+    "__comment__": "Starting config for a local development server (scripts/setup-local). Replace the mesh.example.com placeholders. Settings marked local development only must not reach a production config.",
     "Cert": "mesh.example.com",
     "Port": 3000,
     "RedirPort": 0,
     "TlsOffload": true,
     "TrustedProxy": ["127.0.0.1", "::1"],
-    "CookieRootDomain": "mesh.example.com",
     "CookieIpCheck": false,
     "AliasPort": 443,
-    "AllowNewAccounts": true,
     "AllowLoginToken": true,
     "AllowFraming": false,
     "MongoDb": null,
@@ -18,8 +17,8 @@
     "agentAliasDNS": "agents.mesh.example.com",
     "agentPortTls": true,
     "relayPort": 4450,
-    "relayPortBind": "127.0.0.1",
     "relayAliasPort": 4446,
+    "agentUpdateSystem": 1,
     "plugins": {
       "enabled": true,
       "list": ["nativeruntime"]
@@ -27,8 +26,8 @@
   },
   "domains": {
     "": {
+      "__comment__": "NewAccounts: true lets anyone create an account from the login page. It is local development only.",
       "Title": "MeshCentral",
-      "WebPublicPath": "./meshcentral-data/public",
       "NewAccounts": true,
       "Auth": "default",
       "UserNameIsEmail": false

@@ -3,21 +3,27 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# The installed server reads meshcentral-web/public in place. A copy in the data folder is
+# left over from the old layout and would shadow it.
+if [ -e meshcentral-data/public ]; then
+  echo "ERROR: meshcentral-data/public is a stale copy of the web overrides. Delete it, and remove" >&2
+  echo "       WebPublicPath from meshcentral-data/config.json if it is set, then re-run." >&2
+  exit 1
+fi
+
 if [ ! -f meshcentral-data/config.json ]; then
   echo "Creating meshcentral-data/config.json from template..."
   mkdir -p meshcentral-data
   cp meshcentral-data/config.json.template meshcentral-data/config.json
 fi
 
+# pluginHandler.js loads plugins only from <datapath>/plugins until the Stage 4 built-in loader.
 echo "Staging local plugins..."
 for plugin in nativeruntime; do
-  mkdir -p "meshcentral-data/plugins/$plugin"
-  cp -R "../plugins/$plugin/." "meshcentral-data/plugins/$plugin/"
+  rm -rf "meshcentral-data/plugins/$plugin"
+  mkdir -p "meshcentral-data/plugins"
+  cp -R "../plugins/$plugin" "meshcentral-data/plugins/$plugin"
 done
-
-echo "Staging web overrides..."
-mkdir -p "meshcentral-data/public"
-cp -R "meshcentral-web/public/." "meshcentral-data/public/"
 
 if ! command -v node >/dev/null 2>&1; then
   echo "ERROR: Node.js 20+ required. Please install and re-run." >&2
