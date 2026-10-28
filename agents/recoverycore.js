@@ -1411,10 +1411,7 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 }
                 break;
             case 'help':
-                response = "Available commands are: agentupdate, agentupdateex, dbkeys, dbget, dbset, dbcompact, eval, netinfo, osinfo, setdebug, umhctl, versions.";
-                break;
-            case 'umhctl':
-                response = require('umhctl').consoleaction(args, rights, sessionid, null);
+                response = "Available commands are: agentupdate, agentupdateex, dbkeys, dbget, dbset, dbcompact, eval, netinfo, osinfo, setdebug, versions.";
                 break;
             case '_descriptors':
                 response = 'Open Descriptors: ' + JSON.stringify(getOpenDescriptors());
