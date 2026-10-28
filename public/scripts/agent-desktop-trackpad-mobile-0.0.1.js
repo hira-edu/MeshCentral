@@ -8,12 +8,11 @@ MeshTrackpadAdapters.defaultMobile = (function () {
 
     function el(id) { return document.getElementById(id); }
 
-    // The page closes its top menu (dialog mode 999) on a document click, which the controller
-    // suppresses while trackpad mode is on. Close it on the next tick instead: the touch that does
-    // it still sees the menu open, so like the page's own tap it closes the menu and sends nothing.
-    function closeTopMenu() {
-        if (window.xxdialogMode !== 999 || typeof window.QV !== 'function') return;
-        setTimeout(function () { if (window.xxdialogMode === 999) { window.QV('topMenu', false); window.xxdialogMode = 0; } }, 0);
+    // The page closes its top menu (dialog mode 999) in its own document click handler, which the
+    // touch's compatibility click no longer reaches while trackpad mode is on: hand it the touch.
+    // The controller has already counted the menu as open for this touch, so it sends nothing.
+    function closeTopMenu(e) {
+        if (e && (window.xxdialogMode === 999) && (typeof document.onclick === 'function')) document.onclick(e);
     }
 
     return {
@@ -31,7 +30,7 @@ MeshTrackpadAdapters.defaultMobile = (function () {
         dialogOpen: function () { return !!window.xxdialogMode; },
         onUserActivity: function () { if (typeof window.setSessionActivity === 'function') window.setSessionActivity(); },
         // The page's trackpad edge-scroll interval only runs in its own trackpad mode; stop it in case.
-        prepare: function () { if (typeof window.trackpadStopEdgeScroll === 'function') window.trackpadStopEdgeScroll(); closeTopMenu(); },
+        prepare: function (e) { if (typeof window.trackpadStopEdgeScroll === 'function') window.trackpadStopEdgeScroll(); closeTopMenu(e); },
         scrollContainer: function () { return el('p10desktop'); },
         zoom: function () { return { pinchSupported: function () { return false; }, apply: function () { } }; }
     };
