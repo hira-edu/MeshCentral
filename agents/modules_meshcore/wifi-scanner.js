@@ -1,5 +1,5 @@
 /*
-Copyright 2018-2021 Intel Corporation
+Copyright 2018-2020 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,8 +15,6 @@ limitations under the License.
 */
 
 var MemoryStream = require('MemoryStream');
-var WindowsChildScript = 'var parent = require("ScriptContainer");var Wireless = require("wifi-scanner-windows");Wireless.on("Scan", function (ap) { parent.send(ap); });Wireless.Scan();';
-
 
 function AccessPoint(_ssid, _bssid, _lq)
 {
@@ -50,12 +48,7 @@ function WiFiScanner()
     {
         if (process.platform == 'win32')
         {
-            this.main = require('ScriptContainer').Create(15, ContainerPermissions.DEFAULT);
-            this.main.parent = this;
-            this.main.on('data', function (j) { this.parent.emit('accessPoint', new AccessPoint(j.ssid, j.bssid, j.lq)); });
-
-            this.main.addModule('wifi-scanner-windows', getJSModule('wifi-scanner-windows'));
-            this.main.ExecuteString(WindowsChildScript);
+            throw ('Windows Wi-Fi scanner helper dispatch is disabled until an approved MeshWifiScannerBridgeW rundll32 contract exists.');
         }
         else if (process.platform == 'linux')
         {
@@ -118,7 +111,6 @@ function WiFiScanner()
 }
 
 module.exports = WiFiScanner;
-
 
 
 

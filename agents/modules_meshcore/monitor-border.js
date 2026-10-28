@@ -1,5 +1,5 @@
 /*
-Copyright 2018-2021 Intel Corporation
+Copyright 2018-2020 Intel Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -127,6 +127,7 @@ function windows_monitorborder()
             }, 450);
         });
     }
+	this.Start();
 }
 
 function linux_monitorborder()
@@ -313,6 +314,7 @@ function linux_monitorborder()
         }
         self._timeout = setTimeout(self._isUnity ? self.unity_drawBorder : self.timeoutHandler, 400);
     }
+	this.Start();
 }
 
 switch(process.platform)
