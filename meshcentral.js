@@ -2301,7 +2301,13 @@ function CreateMeshCentralServer(config, args) {
                 obj.pendingProxyCertificatesRequests++;
                 var dnsname = obj.config.domains[i].dns;
                 if ((dnsname == null) && (obj.config.settings.cert != null)) { dnsname = obj.config.settings.cert; }
-                obj.certificateOperations.loadCertificate(obj.config.domains[i].certurl, (obj.config.domains[i].certurl.startsWith('https:') ? new URL(obj.config.domains[i].certurl).hostname : dnsname), obj.config.domains[i], function (url, cert, xhostname, xdomain) {
+                // An SNI-strict front presents its certificate only for its own name, so an https certurl is
+                // asked for its URL host. SNI cannot carry an IP address (RFC 6066): an IP certurl keeps dnsname.
+                if (obj.config.domains[i].certurl.startsWith('https:')) {
+                    const certUrlHost = new URL(obj.config.domains[i].certurl).hostname.replace(/^\[(.*)\]$/, '$1');
+                    if (require('net').isIP(certUrlHost) == 0) { dnsname = certUrlHost; }
+                }
+                obj.certificateOperations.loadCertificate(obj.config.domains[i].certurl, dnsname, obj.config.domains[i], function (url, cert, xhostname, xdomain) {
                     obj.pendingProxyCertificatesRequests--;
                     if (cert != null) {
                         // Hash the entire cert
