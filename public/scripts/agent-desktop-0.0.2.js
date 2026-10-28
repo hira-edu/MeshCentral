@@ -34,6 +34,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
     obj.connectioncount = 0;
     obj.rotation = 0;
     obj.protocol = 2; // KVM
+    obj.deferConnectedState = true; // Connected (state 3) once the agent's first SCREEN starts the stream
     obj.debugmode = 0;
     obj.stopInput = false;
     obj.localKeyMap = true;
@@ -256,7 +257,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
         obj.resetStreamState();
         obj.FirstDraw = true;
         obj.remoteScreenKnown = true;
-        if (obj.parent != null && obj.parent.State < 3) { obj.parent.xxStateChange(3); }
+        if ((obj.parent != null) && (typeof obj.parent.connected == 'function')) { obj.parent.connected(); }
         obj.SendCompressionLevel(obj.ImageType);
         obj.SendUnPause();
         obj.SendRemoteInputLock(2); // Query input lock state

@@ -31,6 +31,8 @@ var CreateAgentRedirect = function (meshserver, module, serverPublicNamePort, au
     obj.serverIsRecording = false;
     obj.urlname = 'meshrelay.ashx';
     obj.latency = { lastSend: null, current: -1, callback: null };
+    obj.connectTimeout = 60000; // Last resort: how long a deferring module may wait, with no reply from the agent, for its stream to start
+    var connectTimer = null;
     if (domainUrl == null) { domainUrl = '/'; }
 
     // Console Message
@@ -111,6 +113,9 @@ var CreateAgentRedirect = function (meshserver, module, serverPublicNamePort, au
         for (var i = 0; i < listeners.length; i++) { try { listeners[i](controlMsg); } catch (ex) { console.log('Control listener error', ex); } }
         if (controlMsg.type == 'console') {
             obj.setConsoleMessage(controlMsg.msg, controlMsg.msgid, controlMsg.msgargs, controlMsg.timeout);
+            // Before a deferring module has connected, the agent's reply decides: an error (msgid 2) ends the session,
+            // a consent prompt (msgid 1) leaves the wait to the agent's consent timeout, and any other reply restarts it.
+            if ((obj.State == 2) && (obj.m.deferConnectedState === true)) { if (controlMsg.msgid == 2) { obj.Stop(); } else { setConnectTimer(controlMsg.msgid != 1); } }
         } else if (controlMsg.type == 'metadata') {
             obj.metadata = controlMsg;
             if (obj.onMetadataChange) obj.onMetadataChange(obj.metadata);
@@ -143,6 +148,14 @@ var CreateAgentRedirect = function (meshserver, module, serverPublicNamePort, au
         if (obj.onConsoleMessageChange) { obj.onConsoleMessageChange(obj, obj.consoleMessage, obj.consoleMessageId); }
     }
 
+    // A module that sets deferConnectedState (the remote desktop) declares the end-to-end connection itself, once its
+    // stream has started, instead of the relay accepting the tunnel.
+    obj.connected = function () { setConnectTimer(false); if (obj.State == 2) { obj.xxStateChange(3); } }
+    function setConnectTimer(on) {
+        if (connectTimer != null) { clearTimeout(connectTimer); connectTimer = null; }
+        if (on) { connectTimer = setTimeout(function () { connectTimer = null; obj.setConsoleMessage('Timeout', 4); obj.Stop(); }, obj.connectTimeout); }
+    }
+
     obj.sendCtrlMsg = function (x) { if (obj.ctrlMsgAllowed == true) { if ((typeof args != 'undefined') && args.redirtrace) { console.log('RedirSend', typeof x, x); } try { obj.socket.send(x); } catch (ex) { } } }
 
     function performWebRtcSwitch() {
@@ -162,7 +175,7 @@ var CreateAgentRedirect = function (meshserver, module, serverPublicNamePort, au
                 if (e.data == 'cr') { obj.serverIsRecording = true; }
                 if (obj.options != null) { delete obj.options.action; obj.options.type = 'options'; try { obj.sendCtrlMsg(JSON.stringify(obj.options)); } catch (ex) { } }
                 try { obj.socket.send(obj.protocol); } catch (ex) { }
-                if (obj.protocol != 2) { obj.xxStateChange(3); }
+                if (obj.m.deferConnectedState === true) { setConnectTimer(true); } else { obj.xxStateChange(3); }
 
                 if (obj.attemptWebRTC == true) {
                     // Try to get WebRTC setup
@@ -311,6 +324,7 @@ var CreateAgentRedirect = function (meshserver, module, serverPublicNamePort, au
 
         // Clean up WebRTC
         obj.xxCloseWebRTC();
+        setConnectTimer(false);
         
         // clear RTT timer
         obj.latency.current = -1;
