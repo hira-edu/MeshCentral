@@ -5,6 +5,8 @@
   "description": "Deployment wrapper: installs the fork package built from the repository root (npm run pack) with the production dependency pins",
   "scripts": {
     "pack": "node scripts/pack.js",
+    "regenerate": "node scripts/regenerate.js",
+    "check:generated": "node scripts/regenerate.js --check",
     "test": "node --test",
     "start": "node node_modules/meshcentral/meshcentral.js",
     "start:dev": "NODE_ENV=development node node_modules/meshcentral/meshcentral.js",
