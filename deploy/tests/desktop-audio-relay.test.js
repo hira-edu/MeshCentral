@@ -1,6 +1,6 @@
 'use strict';
 
-// Guards the fork's meshrelay.js. It must stay meshcentral@1.2.5's meshrelay.js (the npm bytes) with
+// Guards the fork's meshrelay.js. It must stay meshcentral@1.3.1's meshrelay.js (the npm bytes) with
 // only the reviewed fork changes below. If the package is upgraded, take the new release's
 // meshrelay.js, re-apply each reviewed change, and update the pinned version and hash together.
 const test = require('node:test');
@@ -10,8 +10,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const UPSTREAM_VERSION = '1.2.5';
-const UPSTREAM_SHA256 = '21cae91e1ccb74f29b408d3b78778e3377b22c8496b00bd402ed9470e095206c';
+const UPSTREAM_VERSION = '1.3.1';
+const UPSTREAM_SHA256 = '42b0988007e0ce1178a1e17e8123902d6bfc16a5444dbdac007ad1eee8f094d1';
 // Each reviewed fork change as [upstream text, fork text]; each fork text must appear exactly once.
 const REVIEWED_CHANGES = [
     // Guest share links that grant desktop also admit desktop audio (relay protocol 20), 2747ad90d.
@@ -86,7 +86,7 @@ test('the relay denies protocol 20 exactly when it denies desktop', () => {
 });
 
 test('every relay entry point checks the requested protocol against the rights', () => {
-    // Upstream 1.2.5 checks the rights at five relay entry points; losing one would let a protocol,
+    // Upstream 1.3.1 checks the rights at five relay entry points; losing one would let a protocol,
     // including 20, through that entry point whatever the deny rights say.
     const text = relay.toString('utf8');
     assert.equal(text.split('isProtocolAllowedByRights(rights, parseInt(obj.req.query.p)) == false').length - 1, 5);
