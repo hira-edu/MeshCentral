@@ -16,7 +16,8 @@ assert(args.length === 0 || (args.length === 2 && args[0] === '--source'),
     'Usage: node desktop-audio-core.test.js [--source <core.js>]');
 const sourcePath = args.length === 2 ? path.resolve(args[1]) : path.join(__dirname, '../../agents/meshcore.js');
 const source = fs.readFileSync(sourcePath, 'utf8').replace(/\r\n?/g, '\n');
-const minSource = fs.readFileSync(path.join(__dirname, '../../agents/meshcore.min.js'), 'utf8').replace(/\r\n?/g, '\n');
+// D24: the package ships no agents/meshcore.min.js, so agents/meshcore.js is the only core source.
+const minCorePath = path.join(__dirname, '../../agents/meshcore.min.js');
 
 const MESHRIGHT_REMOTECONTROL = 8, MESHRIGHT_REMOTEVIEW = 256, MESHRIGHT_NODESKTOP = 65536;
 const AUDIO_STARTED = 2001, AUDIO_STOPPED = 2002, AUDIO_FAILED = 2003;
@@ -451,7 +452,7 @@ test('multiplexed desktop: one agent-side desktop tunnel admits audio for other 
     assert.equal(sandbox.desktop_audio_listeners(1), 1);
 });
 
-test('static contract: consent paths advertise, tunnel_kvm_end closes, and meshcore.min.js carries the same code', () => {
+test('static contract: consent paths advertise, tunnel_kvm_end closes, and no meshcore.min.js copy exists (D24)', () => {
     const consentOk = slice(source, 'function kvm_consent_ok(ws) {', '\nfunction kvm_consent_ask(ws){', 'kvm_consent_ok');
     assert(consentOk.indexOf('desktop.kvm.pipe(ws, { dataTypeSkip: 1 });') < consentOk.indexOf('desktop_audio_desktopReady(ws);'), 'advertise after the stream is piped');
     const resolved = slice(source, 'function kvm_consentpromise_resolved(always)', '\nfunction files_consent_ok(ws){', 'kvm_consentpromise_resolved');
@@ -464,11 +465,9 @@ test('static contract: consent paths advertise, tunnel_kvm_end closes, and meshc
     assert.equal(source.split('desktop_audio_desktopReady(').length, 4, 'exactly two call sites plus the definition');
     assert.match(source, /protocol == 0\) \{ \/\/ 1 = Terminal \(admin\).*20 = Desktop Audio/);
 
-    for (const marker of [helpersMarker, branchMarker, '\nvar DESKTOP_AUDIO_ENABLED = true;\n', 'desktop_audio_desktopReady(this.ws);', 'desktop_audio_desktopClosed(this);', "setDefaultCoreTranslation(ret, 'privacyBarAudio', 'audio on');"]) {
-        assert(minSource.indexOf(marker) >= 0, 'meshcore.min.js must carry: ' + marker.trim().slice(0, 40));
-    }
-    assert.equal(slice(minSource, helpersMarker, 'function kvm_tunnel_consentpromise_closehandler()', 'min helpers'), helpers, 'helper block identical in meshcore.min.js');
-    assert.equal(slice(minSource, branchMarker, '} else if (this.httprequest.protocol == 1) {', 'min branch').slice(branchMarker.length), branchBody, 'protocol branch identical in meshcore.min.js');
+    // A minified copy would have to be kept in step with meshcore.js by hand and is served only with
+    // minifycore on; D24 removed it, and it must not come back unnoticed.
+    assert(!fs.existsSync(minCorePath), 'agents/meshcore.min.js must not exist (D24)');
 });
 
 test('backpressure retains the latest CONFIG and resumes at a discontinuity without retaining audio', () => {
