@@ -12,9 +12,12 @@
 //    (amt-wsman-0.2.0-min.js has flipped between two variants across upstream releases). Each minify()
 //    call therefore runs with Math.random replaced by a generator seeded from SEED_SALT and the call's
 //    input. uniqueId() runs in minify()'s synchronous prefix, before its first await, so restoring
-//    Math.random when the call returns covers it. SEED_SALT is the first salt (counting from 0) with
-//    which every committed 1.2.5 file is reproduced (salts 0-2 give amt-wsman-0.2.0-min.js its other
-//    variant); changing it can flip such files to their other variant (same code, swapped local names).
+//    Math.random when the call returns covers it. SEED_SALT was chosen as the first salt (counting
+//    from 0) that reproduces every published 1.2.5 file (salts 0-2 give amt-wsman-0.2.0-min.js its
+//    other variant). It also reproduces the published 1.3.1 package: --profile upstream --source 1.3.1
+//    gives all 1,383 generated translation and view files and all 435 email files byte for byte. From the 1.3.1 merge on, the
+//    fork's own regenerated files are the baseline, so the salt only has to stay fixed; changing it can
+//    flip such files to their other variant (same code, swapped local names).
 //    The seed ignores line endings, so CRLF and LF checkouts give the same output.
 const crypto = require('node:crypto');
 const Module = require('node:module');
