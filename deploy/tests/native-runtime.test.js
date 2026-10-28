@@ -673,7 +673,9 @@ test('deployment wiring loads the local plugin from the pinned MeshCentral data 
     assert.equal(pkg.dependencies.meshcentral, tarball);
     assert.equal(lock.packages[''].dependencies.meshcentral, tarball);
     assert.equal(lock.packages['node_modules/meshcentral'].version, fork.version);
-    assert.equal(pkg.engines.node, '>=20.0.0');
+    // Production runs Node 24 (D1: 1.3.1's autobackup needs fs.promises.glob; the release image is node:24.22.1).
+    assert.equal(pkg.engines.node, '>=24.0.0');
+    assert.equal(lock.packages[''].engines.node, pkg.engines.node);
     assert.equal(config.settings.plugins.enabled, true);
     assert.deepEqual(config.settings.plugins.list, ['nativeruntime']);
     assert.equal(Object.hasOwn(config.settings.plugins, 'nativeruntime'), false);
