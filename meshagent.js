@@ -1663,10 +1663,11 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                         // Re-enter the authenticated native hash negotiation instead of sending
                         // an HTTP agentupdate command that the Windows core must reject.
                         if (isWindowsAgentArchitecture(obj.agentInfo.agentId)) {
-                            if (isWindowsServiceAgentArchitecture(obj.agentInfo.agentId) &&
-                                (obj.agentUpdateRequestPending !== true) &&
-                                (obj.agentUpdateTransferPending !== true) &&
-                                (obj.agentUpdate == null)) {
+                            if (!isWindowsServiceAgentArchitecture(obj.agentInfo.agentId)) {
+                                refuseAgentUpdateRequest(command, "Windows console agents have no supported self-update; update the installed service agent.");
+                            } else if ((obj.agentUpdateRequestPending === true) || (obj.agentUpdateTransferPending === true) || (obj.agentUpdate != null)) {
+                                refuseAgentUpdateRequest(command, "an agent update is already in progress.");
+                            } else {
                                 obj.agentUpdateRequestPending = true;
                                 delete obj.agentUpdateFailureHash;
                                 obj.send(JSON.stringify({ action: 'agentupdatefailurecapability' }));
@@ -1701,6 +1702,8 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
 
                         // Agent update. The recovery core was loaded in the agent, send a command to update the agent
                         parent.parent.taskLimiter.launch(func, null, 1);
+                    } else {
+                        refuseAgentUpdateRequest(command, "no agent binary is available for this device's architecture.");
                     }
                     break;
                 }
@@ -2283,6 +2286,13 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
     function isWindowsAgentArchitecture(agentId) {
         return (agentId == 1) || (agentId == 2) || isWindowsServiceAgentArchitecture(agentId) ||
             (agentId == 21) || (agentId == 34) || (agentId == 42);
+    }
+
+    // An explicit agent update request the server will not act on is answered with the reason, on the
+    // route the agent's own console replies take, so the requester's console shows it.
+    function refuseAgentUpdateRequest(command, reason) {
+        parent.parent.debug('agentupdate', "Agent update request refused, NodeID=0x" + ((obj.nodeid != null) ? obj.nodeid.substring(0, 16) : 'unknown') + ": " + reason);
+        parent.routeAgentCommand({ action: 'msg', type: 'console', value: "Agent update refused: " + reason, sessionid: command.sessionid }, obj.domain.id, obj.dbNodeKey, obj.dbMeshKey);
     }
 
     function compareAgentBinaryHash(agentExeInfo, agentHash) {
