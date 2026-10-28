@@ -13,7 +13,7 @@ const path = require('node:path');
 
 const DESKTOP_AUDIO_PROTOCOL = 20;
 
-// Mirrors meshrelay.js (meshcentral 1.2.1, performRelay): the predicate that decides whether a
+// Mirrors meshrelay.js (meshcentral 1.2.5, performRelay): the predicate that decides whether a
 // relay session of protocol p is written to a .mcrec file. The per-user / per-group filters that
 // follow it only narrow the set of sessions, so they cannot be relied on to exclude a protocol.
 function relayRecordsProtocol(domain, protocol) {
