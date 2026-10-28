@@ -964,7 +964,7 @@ var CreateAgentRemoteDesktop = function (canvasid, scrolldiv) {
                 var id = e.originalEvent.changedTouches[i].identifier % 256;
                 if (!obj.TouchArray[id]) { obj.TouchArray[id] = { x: (e.originalEvent.touches[i].pageX - Offsets[0]) * (Canvas.canvas.width / obj.CanvasId.clientWidth), y: (e.originalEvent.touches[i].pageY - Offsets[1]) * (Canvas.canvas.height / obj.CanvasId.clientHeight), f: 1 }; }
             }
-            if (Object.keys(obj.TouchArray).length > 0 && touchtimer == null) { obj.touchtimer = setInterval(function () { obj.SendTouchMsg2(256, 0); }, 50); }
+            if (Object.keys(obj.TouchArray).length > 0 && obj.touchtimer == null) { obj.touchtimer = setInterval(function () { obj.SendTouchMsg2(256, 0); }, 50); }
         }
     }
 
