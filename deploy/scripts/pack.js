@@ -7,6 +7,8 @@
 // The tarball must be a function of the commit: every packed file must be tracked by git and
 // unchanged from HEAD, and the packed bytes are compared with HEAD's blobs after packing.
 // Refused: *.bak* and *.pdb anywhere (T33), and any top-level file not listed below (T34).
+// One file is generated rather than tracked: agents/module-versions.json, the release-dated module
+// versions (module-versions.js), written before packing, checked in the tarball, removed afterwards.
 // deploy/package.json depends on dist/meshcentral-<version>.tgz, and its lockfile pins the sha512.
 // Release packs run on Linux (D4); a pack made on Windows serves the local duplicate server.
 const childProcess = require('node:child_process');
@@ -14,6 +16,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
+const moduleVersions = require('./module-versions.js');
 
 const repoRoot = path.resolve(__dirname, '../..');
 const outDir = path.join(repoRoot, 'deploy', 'dist');
@@ -115,6 +118,14 @@ function readTarball(file) {
 const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
 if (pkg.name !== 'meshcentral' || !Array.isArray(pkg.files)) { fail('repository root package.json is not the meshcentral package with a files list'); }
 
+// 0. The generated module version manifest. A leftover copy means an earlier run was killed or someone
+// wrote it by hand; refuse rather than guess which bytes are meant.
+const manifestPath = path.join(repoRoot, moduleVersions.MANIFEST);
+if (fs.existsSync(manifestPath)) { fail(moduleVersions.MANIFEST + ' already exists; remove it (pack.js generates it)'); }
+const versions = moduleVersions.build(repoRoot);
+fs.writeFileSync(manifestPath, versions.bytes);
+process.on('exit', () => { fs.rmSync(manifestPath, { force: true }); });
+
 // 1. What npm would pack, checked before anything is written.
 const dryRun = npmPack(['--dry-run']);
 const listed = dryRun.files.map(f => f.path);
@@ -124,7 +135,8 @@ for (const p of listed) {
     if (!p.includes('/') && !TOP_LEVEL_FILES.has(p)) { problems.push('unlisted top-level file: ' + p); }
 }
 const blobs = headBlobs();
-const untracked = listed.filter(p => !blobs.has(p));
+if (!listed.includes(moduleVersions.MANIFEST)) { problems.push('npm would not pack ' + moduleVersions.MANIFEST); }
+const untracked = listed.filter(p => !blobs.has(p) && p !== moduleVersions.MANIFEST);
 for (const p of untracked) { problems.push('not tracked by git: ' + p); }
 const dirty = git(['status', '--porcelain', '-z', '--untracked-files=no', '--', '.']).toString('utf8').split('\0').filter(Boolean)
     .map(line => line.slice(3)).filter(p => listed.includes(p));
@@ -141,7 +153,16 @@ const contents = readTarball(tarball);
 const mismatch = [];
 for (const p of listed) {
     if (!contents.has(p)) { mismatch.push('missing from tarball: ' + p); }
+    else if (p === moduleVersions.MANIFEST) { if (!contents.get(p).equals(versions.bytes)) { mismatch.push('differs from the generated manifest: ' + p); } }
     else if (blobSha(contents.get(p)) !== blobs.get(p)) { mismatch.push('differs from HEAD: ' + p); }
+}
+// Every packed agent core module has exactly one manifest entry, and every entry is packed.
+const packedModules = [...contents.keys()].filter(p => moduleVersions.MODULE_DIRS.some(d => p.startsWith(d + '/')) && p.toLowerCase().endsWith('.js'))
+    .map(p => p.slice('agents/'.length)).sort();
+const manifestModules = Object.keys(versions.manifest.modules).sort();
+if (JSON.stringify(packedModules) !== JSON.stringify(manifestModules)) {
+    mismatch.push('module manifest lists ' + manifestModules.length + ' modules, tarball has ' + packedModules.length + ': ' +
+        packedModules.filter(m => !manifestModules.includes(m)).concat(manifestModules.filter(m => !packedModules.includes(m))).join(', '));
 }
 for (const p of contents.keys()) { if (!listed.includes(p)) { mismatch.push('not in dry-run list: ' + p); } }
 if (mismatch.length) { fs.unlinkSync(tarball); fail(mismatch.length + ' tarball problem(s):\n  ' + mismatch.slice(0, 50).join('\n  ')); }
@@ -155,6 +176,8 @@ const record = {
     size: bytes.length,
     integrity: 'sha512-' + crypto.createHash('sha512').update(bytes).digest('base64'),
     sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+    moduleVersion: versions.manifest.date,
+    modules: manifestModules.length,
     node: process.version,
     npm: npm(['--version']).toString('utf8').trim(),
     platform: process.platform
@@ -162,4 +185,5 @@ const record = {
 console.log(record.tarball + ': ' + record.files + ' files, ' + record.size + ' bytes, commit ' + record.commit);
 console.log('integrity ' + record.integrity);
 console.log('sha256    ' + record.sha256);
+console.log('modules   ' + record.modules + ' at ' + record.moduleVersion + ' (' + moduleVersions.MANIFEST + ')');
 if (process.argv.includes('--json')) { console.log(JSON.stringify(record, null, 2)); }
