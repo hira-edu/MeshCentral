@@ -113,6 +113,30 @@ test('setup-local stages the nativeruntime plugin as an exact copy of the reposi
     assert.ok(fs.existsSync(path.join(deployRoot, '..', 'plugins', 'nativeruntime', 'nativeruntime.js')));
 });
 
+test('the config template uses only MeshCentral settings, each once, and marks its dev-only ones', () => {
+    const template = JSON.parse(read('meshcentral-data/config.json.template'));
+    const schema = JSON.parse(fs.readFileSync(path.join(deployRoot, '..', 'meshcentral-config-schema.json'), 'utf8'));
+    const sections = [
+        ['settings', template.settings, schema.properties.settings.properties],
+        ['domains[""]', template.domains[''], schema.properties.domains.additionalProperties.properties]
+    ];
+    for (const [label, section, known] of sections) {
+        const knownLower = new Set(Object.keys(known).map((key) => key.toLowerCase()));
+        const keys = Object.keys(section).filter((key) => !key.startsWith('_')); // _ keys are ignored comments
+        // A key MeshCentral does not read does nothing and misleads whoever copies the template.
+        assert.deepEqual(keys.filter((key) => !knownLower.has(key.toLowerCase())), [], label + ' keys MeshCentral does not read');
+        // Keys are case-insensitive, so two spellings of one key conflict (PRD-8).
+        const lower = keys.map((key) => key.toLowerCase());
+        assert.deepEqual(lower.filter((key, i) => lower.indexOf(key) !== i), [], label + ' keys set twice');
+    }
+    assert.deepEqual(Object.keys(template.settings).filter((key) => key.toLowerCase() === 'agentupdatesystem'), ['agentUpdateSystem']);
+    assert.equal(template.settings.agentUpdateSystem, 1);
+    // NewAccounts lets anyone register from the login page: a local-development convenience.
+    assert.equal(template.domains[''].NewAccounts, true);
+    assert.match(template.domains[''].__comment__, /NewAccounts[^"]*local development only/);
+    assert.match(template.settings.__comment__, /local development/);
+});
+
 test('the wrapper carries none of the retired pre-fork deployment files', () => {
     // docker-compose.yml ran upstream 1.2.1 with mounts production never used (T31). The remote
     // scripts and the nginx config targeted /opt/meshcentral-app, Node 18 and an nginx edge; the
