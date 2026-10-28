@@ -98,10 +98,8 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
     obj.recordingFileWriting = false;   // Set to true when the recording write queue is backed up and the agent must be paused.
     obj.recordingQueue = [];            // FIFO of recording blocks waiting to be written, written one at a time.
     obj.recordingEntryWriting = false;  // Set to true while the recording block at the head of the queue is being written.
-    obj.agentLastRx = 0;                // Time we last received data from the agent.
-    obj.agentLastPing = null;           // Time we last sent a liveness ping to the agent.
-    obj.aloneSince = null;              // Time since the agent or viewers have been waiting without the other side.
-    obj.watchdogTimer = null;           // Agent liveness and session watchdog timer.
+    obj.agentPingTimer = null;          // Sends the agent a WebSocket ping every --agentidletimeout.
+    obj.agentAwaitingPong = false;      // Set when a ping was sent to the agent and its pong was not read yet.
     obj.startTime = null;               // Starting time of the multiplex session.
     obj.userIds = [];                   // List of userid's that have intertracted with this session.
     //obj.autoLock = false;               // Automatically lock the remote device once disconnected
@@ -212,22 +210,8 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             });
         } else {
             //console.log('addPeer-agent', obj.nodeid);
-            var replacingAgent = false;
-            if (obj.agent != null) {
-                // A hung or half-open agent tunnel can't recover by itself. If the current agent has gone silent
-                // or has a write that is not completing, replace it with this new agent connection.
-                const now = Date.now();
-                const agentSilent = ((obj.agent.paused == false) && ((now - obj.agentLastRx) > 20000));
-                const agentStalled = ((obj.agent.sending == true) && ((now - obj.agent.sendStart) > 15000));
-                if ((agentSilent == false) && (agentStalled == false)) { parent.parent.debug('relay', 'DesktopRelay: Error, duplicate agent connection'); return false; }
-                parent.parent.debug('relay', 'DesktopRelay: Replacing unresponsive agent, silent=' + (now - obj.agentLastRx) + 'ms, stalled=' + agentStalled + ' node=' + obj.nodeid);
-                const oldAgent = obj.agent;
-                obj.agent = null;
-                delete oldAgent.deskMultiplexor; // Closing the old agent must not tear down this session.
-                hardClosePeer(oldAgent);
-                resetDisplayState();
-                replacingAgent = true;
-            }
+            // A session has one agent for its whole life. An agent that stops answering is closed, which ends the session.
+            if (obj.agent != null) { parent.parent.debug('relay', 'DesktopRelay: Error, duplicate agent connection'); return false; }
 
             // Setup the agent
             obj.agent = peer;
@@ -235,20 +219,13 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             peer.overflow = false;
             peer.sendQueue = [];
             peer.paused = false;
-            obj.agentLastRx = Date.now();
-            obj.agentLastPing = null;
+            startAgentLiveness(peer);
 
             // Indicated we are connected and send connection options and protocol if needed
             obj.sendToAgent(obj.recordingFile?'cr':'c');
             if (obj.viewerConnected == true) {
                 if (obj.protocolOptions != null) { obj.sendToAgent(JSON.stringify(obj.protocolOptions)); } // Send connection options
                 obj.sendToAgent('2'); // Send remote desktop connect
-            }
-
-            // A replacement agent starts fresh, send it the current aggregate viewer settings.
-            if (replacingAgent == true) {
-                sendAgentCompression();
-                sendAgentPause();
             }
         }
 
@@ -420,7 +397,7 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
     function dispose() {
         if (obj.viewers == null) return;
         //console.log('dispose', obj.nodeid);
-        if (obj.watchdogTimer != null) { clearInterval(obj.watchdogTimer); obj.watchdogTimer = null; }
+        if (obj.agentPingTimer != null) { clearInterval(obj.agentPingTimer); obj.agentPingTimer = null; }
         delete obj.viewers;
         delete obj.imagesCounters;
         delete obj.images;
@@ -477,68 +454,35 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
     // close can't complete on a half-open connection with a full send buffer.
     function hardClosePeer(peer) {
         const ws = peer.ws;
-        try { peer.close(); } catch (ex) { }
-        try { if ((ws != null) && (ws._socket != null)) { ws._socket.destroy(); } } catch (ex) { }
+        try { peer.close(); } catch (ex) { parent.parent.debug('relay', 'DesktopRelay: Error closing peer: ' + ex); }
+        try { if ((ws != null) && (ws._socket != null)) { ws._socket.destroy(); } } catch (ex) { parent.parent.debug('relay', 'DesktopRelay: Error destroying socket: ' + ex); }
     }
 
-    // Clear all display state so a replacement agent can start a new display stream.
-    function resetDisplayState() {
-        obj.width = 0;
-        obj.height = 0;
-        obj.swidth = 0;
-        obj.sheight = 0;
-        obj.screen = null;
-        obj.imagesCount = 0;
-        obj.imagesCounters = {};
-        obj.images = {};
-        obj.lastScreenSizeCmd = null;
-        obj.lastScreenSizeCounter = 0;
-        obj.firstData = null;
-        obj.lastData = null;
-        obj.lastAudioMessage = null; // A replacement agent tunnel advertises audio again once it is consented
-        obj.viewersOverflowCount = 0;
-        for (var i in obj.viewers) {
-            const v = obj.viewers[i];
-            v.overflow = false;
-            v.dataPtr = null;
-            if (v.paused == true) { v.paused = false; try { v.ws._socket.resume(); } catch (ex) { } }
-        }
+    // Agent liveness, at the WebSocket transport. The agent's WebSocket layer answers every ping with a pong as it
+    // reads it (microscript/ILibDuktape_HttpStream.c), so an agent that has not answered one ping by the time the
+    // next is due is half-open, hung, or no longer reading its tunnel. It is closed, which ends the session as any
+    // agent close does, and viewers reconnect to a new one. The period is --agentidletimeout, the server's existing
+    // agent idle limit (2.5 minutes by default; 0 turns it off). Reading from the agent is paused by flow control at
+    // times; a pong cannot be read then, so a pause withdraws the pending ping and no ping is sent while paused.
+    function startAgentLiveness(agent) {
+        const period = parent.parent.args.agentidletimeout;
+        if ((typeof period != 'number') || (period <= 0)) return;
+        agent.ws.on('pong', function () { if (obj.agent === agent) { obj.agentAwaitingPong = false; } });
+        obj.agentAwaitingPong = false;
+        obj.agentPingTimer = setInterval(checkAgentLiveness, period);
+        if (typeof obj.agentPingTimer.unref == 'function') { obj.agentPingTimer.unref(); } // Liveness checks alone must not keep the process alive
     }
 
-    // Watchdog: hard close a hung agent, keep idle agents answering and close sessions where one side never arrived.
-    function sessionWatchdog() {
-        if (obj.viewers == null) return;
-        const now = Date.now();
+    function checkAgentLiveness() {
         const agent = obj.agent;
-
-        // An agent write that has not completed in 15 seconds means the tunnel is hung or half-open.
-        if ((agent != null) && (agent.sending == true) && ((now - agent.sendStart) > 15000)) {
-            parent.parent.debug('relay', 'DesktopRelay: Agent write stalled for ' + (now - agent.sendStart) + 'ms, hard closing agent node=' + obj.nodeid);
+        if ((obj.viewers == null) || (agent == null) || (agent.paused == true)) return;
+        if (obj.agentAwaitingPong == true) {
+            parent.parent.debug('relay', 'DesktopRelay: Agent did not answer a ping, closing the session node=' + obj.nodeid);
             hardClosePeer(agent);
             return;
         }
-
-        // Ping a quiet agent so a healthy idle agent keeps answering and only a dead agent goes silent.
-        if ((agent != null) && (agent.sending == false) && (agent.paused == false) && ((now - obj.agentLastRx) > 10000) && ((obj.agentLastPing == null) || ((now - obj.agentLastPing) > 10000))) {
-            obj.agentLastPing = now;
-            obj.sendToAgent('{"ctrlChannel":"102938","type":"ping"}');
-        }
-
-        // Close the session if the agent or the viewers have been waiting alone for 60 seconds.
-        const alone = (((agent == null) && (obj.viewers.length > 0)) || ((agent != null) && (obj.viewers.length == 0)));
-        if (alone == false) { obj.aloneSince = null; }
-        else if (obj.aloneSince == null) { obj.aloneSince = now; }
-        else if ((now - obj.aloneSince) > 60000) {
-            parent.parent.debug('relay', 'DesktopRelay: ' + ((agent == null) ? 'Agent never connected' : 'No viewers') + ', closing session node=' + obj.nodeid);
-            if (agent != null) { agent.close(); } else { for (const viewer of obj.viewers.slice()) { viewer.close(); } }
-            return;
-        }
-
-        // A multiplexor with no peers at all is no longer needed.
-        if ((agent == null) && (obj.viewers.length == 0)) {
-            if (parent.desktoprelays[obj.nodeid] === obj) { delete parent.desktoprelays[obj.nodeid]; }
-            dispose();
-        }
+        obj.agentAwaitingPong = true;
+        try { agent.ws.ping(); } catch (ex) { parent.parent.debug('relay', 'DesktopRelay: Unable to ping agent node=' + obj.nodeid + ': ' + ex); }
     }
 
     // Send data to the agent or queue it up for sending
@@ -560,7 +504,6 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         } else {
             const agent = obj.agent;
             agent.sending = true;
-            agent.sendStart = Date.now();
             agent.ws.send(data, function () { sendAgentNext(agent); });
         }
     }
@@ -627,7 +570,6 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         if ((obj.viewers == null) || (obj.agent == null) || (obj.agent !== agent)) return; // Ignore write completions from a replaced agent
         if (obj.agent.sendQueue.length > 0) {
             // Send from the pending send queue
-            obj.agent.sendStart = Date.now();
             obj.agent.ws.send(obj.agent.sendQueue.shift(), function () { sendAgentNext(agent); });
         } else {
             // Nothing to send
@@ -718,11 +660,10 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
     function updateAgentFlowControl() {
         if ((obj.viewers == null) || (obj.viewers.length == 0) || (obj.agent == null)) return;
         if ((obj.viewersOverflowCount >= obj.viewers.length) || (obj.recordingFileWriting == true)) {
-            if (obj.agent.paused == false) { obj.agent.paused = true; obj.agent.ws._socket.pause(); }
+            if (obj.agent.paused == false) { obj.agent.paused = true; obj.agent.ws._socket.pause(); obj.agentAwaitingPong = false; } // A pong can't be read while paused
         } else if (obj.agent.paused == true) {
             obj.agent.paused = false;
             obj.agent.ws._socket.resume();
-            obj.agentLastRx = Date.now(); // The agent could not be heard while paused, restart the silence timer.
         }
     }
 
@@ -790,7 +731,6 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
     obj.processData = function (peer, data) {
         if (obj.viewers == null) return;
         if (peer == obj.agent) {
-            obj.agentLastRx = Date.now();
             recordData(true, data); // Queued in order, the agent is paused if the recording queue backs up
             obj.processAgentData(data);
         } else {
@@ -1254,11 +1194,17 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
         obj.meshid = nodes[0].meshid;
         obj.icon = nodes[0].icon;
         obj.name = nodes[0].name;
-        obj.watchdogTimer = setInterval(sessionWatchdog, 5000);
-        if (typeof obj.watchdogTimer.unref == 'function') { obj.watchdogTimer.unref(); } // The watchdog alone must not keep the process alive
         recordingSetup(domain, function () { func(obj); });
     });
     return obj;
+}
+
+// Peers waiting for a desktop multiplexor that is being created: web server -> { nodeid: [relay peers] }.
+const pendingMultiplexors = new WeakMap();
+function pendingMultiplexorPeers(parent) {
+    var pending = pendingMultiplexors.get(parent);
+    if (pending == null) { pending = {}; pendingMultiplexors.set(parent, pending); }
+    return pending;
 }
 
 function checkDeviceSharePublicIdentifier(parent, domain, nodeid, pid, extraKey, func) {
@@ -1476,13 +1422,9 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
         try { if (obj.peer != null) { obj.peer.ws.send('{"ctrlChannel":"102938","type":"pong"}'); } } catch (ex) { }
     }
 
-    function performRelay(retryCount) {
-        if ((obj.id == null) || (retryCount > 200)) { // Attempt to connect without id, or the multiplexor was not created within 10 seconds, drop this.
-            // A creation that never completed must not block this node forever, let the next connection try again.
-            if ((retryCount > 200) && (parent.desktoprelays[obj.nodeid] === 1)) { parent.parent.debug('relay', 'DesktopRelay: Releasing stale pending multiplexor for node ' + obj.nodeid); delete parent.desktoprelays[obj.nodeid]; }
-            try { obj.close(); } catch (e) { } return null;
-        }
-        if (retryCount == 0) { ws._socket.setKeepAlive(true, 240000); } // Set TCP keep alive
+    function performRelay() {
+        if (obj.id == null) { try { obj.close(); } catch (e) { } return null; } // Attempt to connect without id, drop this.
+        ws._socket.setKeepAlive(true, 240000); // Set TCP keep alive
 
         /*
         // Validate that the id is valid, we only need to do this on non-authenticated sessions.
@@ -1497,56 +1439,45 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
         }
         */
 
-        if (retryCount == 0) {
-            // Setup the agent PING/PONG timers
-            if ((typeof parent.parent.args.agentping == 'number') && (obj.pingtimer == null)) { obj.pingtimer = setInterval(sendPing, parent.parent.args.agentping * 1000); }
-            else if ((typeof parent.parent.args.agentpong == 'number') && (obj.pongtimer == null)) { obj.pongtimer = setInterval(sendPong, parent.parent.args.agentpong * 1000); }
+        // Setup the agent PING/PONG timers
+        if ((typeof parent.parent.args.agentping == 'number') && (obj.pingtimer == null)) { obj.pingtimer = setInterval(sendPing, parent.parent.args.agentping * 1000); }
+        else if ((typeof parent.parent.args.agentpong == 'number') && (obj.pongtimer == null)) { obj.pongtimer = setInterval(sendPong, parent.parent.args.agentpong * 1000); }
 
-            parent.parent.debug('relay', 'DesktopRelay: Connection (' + obj.req.clientIp + ')');
-        }
+        parent.parent.debug('relay', 'DesktopRelay: Connection (' + obj.req.clientIp + ')');
 
-        // Create if needed and add this peer to the desktop multiplexor
-        obj.deskMultiplexor = parent.desktoprelays[obj.nodeid];
-        if (obj.deskMultiplexor == null) {
-            const relayNodeId = obj.nodeid;
-            parent.desktoprelays[relayNodeId] = 1; // Indicate that the creating of the desktop multiplexor is pending.
-            parent.parent.debug('relay', 'DesktopRelay: Creating new desktop multiplexor');
-            CreateDesktopMultiplexor(parent, domain, relayNodeId, obj.id, function (deskMultiplexor) {
-                if (deskMultiplexor != null) {
-                    if (parent.desktoprelays[relayNodeId] !== 1) {
-                        // Creation took so long that the pending marker was released, this node may already have a newer multiplexor. Don't replace it.
-                        parent.parent.debug('relay', 'DesktopRelay: Discarding late desktop multiplexor for node ' + relayNodeId);
-                        deskMultiplexor.disposeIfEmpty();
-                        obj.close();
-                        return;
-                    }
-
-                    // Desktop multiplexor was created, use it.
-                    obj.deskMultiplexor = deskMultiplexor;
-                    parent.desktoprelays[relayNodeId] = deskMultiplexor;
-                    const added = deskMultiplexor.addPeer(obj);
-
-                    // If this peer closed while the multiplexor was being created, don't leave an empty multiplexor behind.
-                    if (deskMultiplexor.disposeIfEmpty() == true) { if (parent.desktoprelays[relayNodeId] === deskMultiplexor) { delete parent.desktoprelays[relayNodeId]; } }
-                    if (added === false) { obj.close(); return; }
-                    if (obj.ws == null) return; // This peer was closed
-                    ws._socket.resume(); // Release the traffic
-                } else {
-                    // An error has occured, close this connection
-                    delete parent.desktoprelays[relayNodeId];
-                    ws.close();
-                }
-            });
-        } else {
-            if (obj.deskMultiplexor == 1) {
-                // The multiplexor is being created, hold a little and try again. This is to prevent a possible race condition.
-                setTimeout(function () { performRelay(++retryCount); }, 50);
-            } else {
-                // Hook up this peer to the multiplexor and release the traffic
-                if (obj.deskMultiplexor.addPeer(obj) === false) { obj.close(); return; }
-                ws._socket.resume();
+        // Add this peer to the node's desktop multiplexor. While the multiplexor is being created, the table holds 1
+        // (meshuser.js reads it too) and peers wait in a list that the creation result resolves, however long it takes.
+        const relayNodeId = obj.nodeid;
+        const deskMultiplexor = parent.desktoprelays[relayNodeId];
+        if (deskMultiplexor === 1) { pendingMultiplexorPeers(parent)[relayNodeId].push(obj); return; }
+        if (deskMultiplexor != null) { obj.joinMultiplexor(deskMultiplexor); return; }
+        const waiting = pendingMultiplexorPeers(parent)[relayNodeId] = [obj];
+        parent.desktoprelays[relayNodeId] = 1; // Indicate that the creating of the desktop multiplexor is pending.
+        parent.parent.debug('relay', 'DesktopRelay: Creating new desktop multiplexor');
+        CreateDesktopMultiplexor(parent, domain, relayNodeId, obj.id, function (deskMultiplexor) {
+            delete pendingMultiplexorPeers(parent)[relayNodeId];
+            if (deskMultiplexor == null) {
+                // An error has occured, close every connection that was waiting for this multiplexor
+                delete parent.desktoprelays[relayNodeId];
+                for (const peer of waiting) { peer.close(); }
+                return;
             }
-        }
+
+            // Desktop multiplexor was created, use it.
+            parent.desktoprelays[relayNodeId] = deskMultiplexor;
+            for (const peer of waiting) { peer.joinMultiplexor(deskMultiplexor); }
+
+            // If every waiting peer closed while the multiplexor was being created, don't leave an empty multiplexor behind.
+            if ((deskMultiplexor.disposeIfEmpty() == true) && (parent.desktoprelays[relayNodeId] === deskMultiplexor)) { delete parent.desktoprelays[relayNodeId]; }
+        });
+    }
+
+    // Hook up this peer to the multiplexor and release the traffic
+    obj.joinMultiplexor = function (deskMultiplexor) {
+        if (obj.ws == null) return; // This peer closed while it was waiting
+        obj.deskMultiplexor = deskMultiplexor;
+        if (deskMultiplexor.addPeer(obj) === false) { obj.close(); return; }
+        ws._socket.resume();
     }
 
     // When data is received from the mesh relay web socket
@@ -1557,8 +1488,8 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
         this._socket.bytesReadEx = this._socket.bytesRead;
         this._socket.bytesWrittenEx = this._socket.bytesWritten;
 
-        // If this data was received by the agent, decode it. While creation is pending, deskMultiplexor is the number 1, not a multiplexor.
-        if ((this.me.deskMultiplexor != null) && (typeof this.me.deskMultiplexor == 'object')) { this.me.deskMultiplexor.processData(this.me, data); }
+        // If this data was received by the agent, decode it.
+        if (this.me.deskMultiplexor != null) { this.me.deskMultiplexor.processData(this.me, data); }
     });
 
     // If error, close both sides of the relay.
@@ -1607,7 +1538,7 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
                 const command = { nodeid: node._id, action: 'msg', type: 'tunnel', value: '*/meshrelay.ashx?id=' + obj.id + '&rauth=' + rcookie, tcpport: cookie.tcpport, tcpaddr: cookie.tcpaddr };
                 parent.parent.debug('relay', 'Relay: Sending agent tunnel command: ' + JSON.stringify(command));
                 if (obj.sendAgentMessage(command, user ? user._id : null, cookie.domainid) == false) { delete obj.id; parent.parent.debug('relay', 'Relay: Unable to contact this agent (' + obj.req.clientIp + ')'); }
-                performRelay(0);
+                performRelay();
             });
             return obj;
         } else if ((obj.req.query.nodeid != null) && ((obj.req.query.tcpport != null) || (obj.req.query.udpport != null))) {
@@ -1635,7 +1566,7 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
                     parent.parent.debug('relay', 'Relay: Sending agent UDP tunnel command: ' + JSON.stringify(command));
                     if (obj.sendAgentMessage(command, user ? user._id : null, domain.id) == false) { delete obj.id; parent.parent.debug('relay', 'Relay: Unable to contact this agent (' + obj.req.clientIp + ')'); }
                 }
-                performRelay(0);
+                performRelay();
             });
             return obj;
         } else if ((cookie != null) && (cookie.nid != null) && (typeof cookie.r == 'number') && (typeof cookie.cf == 'number') && (typeof cookie.gn == 'string')) {
@@ -1681,7 +1612,7 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
                 parent.parent.debug('relay', 'Relay: Sending agent tunnel command: ' + JSON.stringify(command));
                 if (obj.sendAgentMessage(command, user ? user._id : null, domain.id) == false) { delete obj.id; parent.parent.debug('relay', 'Relay: Unable to contact this agent (' + obj.req.clientIp + ')'); }
 
-                performRelay(0);
+                performRelay();
             });
             return obj;
         }
@@ -1716,11 +1647,11 @@ function CreateMeshRelayEx2(parent, ws, req, domain, user, cookie) {
             if ((rights & 0x00000008) == 0) { try { obj.close(); } catch (e) { } return; } // Check MESHRIGHT_ADMIN or MESHRIGHT_REMOTECONTROL
             if ((rights != 0xFFFFFFFF) && ((rights & 0x00010000) != 0)) { try { obj.close(); } catch (e) { } return; } // Check MESHRIGHT_NODESKTOP
             if ((rights == 0xFFFFFFFF) || ((rights & 0x00000100) == 0)) { obj.viewOnly = false; } // Check MESHRIGHT_REMOTEVIEWONLY
-            performRelay(0);
+            performRelay();
         });
     } else {
         // If this is not an authenticated session, or the session does not have routing instructions, just go ahead an connect to existing session.
-        performRelay(0);
+        performRelay();
     }
     return obj;
 };
