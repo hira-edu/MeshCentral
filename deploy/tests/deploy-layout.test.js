@@ -145,6 +145,17 @@ test('the wrapper carries none of the retired pre-fork deployment files', () => 
     assert.deepEqual(retired.filter((entry) => fs.existsSync(path.join(deployRoot, entry))), []);
 });
 
+test('the operations docs describe the current stack, not snapshots or retired files', () => {
+    const dir = path.join(deployRoot, 'docs', 'operations');
+    for (const name of fs.readdirSync(dir).filter((n) => n.endsWith('.md'))) {
+        const text = fs.readFileSync(path.join(dir, name), 'utf8');
+        // Production snapshots hold secrets and are not tracked; the docs must not depend on them.
+        assert.doesNotMatch(text, /server-backups\//, name + ' points into server-backups/');
+        assert.doesNotMatch(text, /infra\/nginx|scripts\/remote\/|docker-compose/, name + ' names a retired file');
+        assert.doesNotMatch(text, /^#+ .*\b20\d\d\b/m, name + ' has a dated section heading');
+    }
+});
+
 test('the operations index lists exactly the documents in its folder', () => {
     const dir = path.join(deployRoot, 'docs', 'operations');
     const onDisk = fs.readdirSync(dir).filter((n) => n.endsWith('.md') && n !== 'README.md').sort();

@@ -42,9 +42,8 @@ $repoFiles = @(
     'scripts\ops\Collect-MeshCentralRemoteSnapshot.sh',
     'meshcentral-web\public\scripts\custom.js',
     'docs\operations\README.md',
-    'docs\operations\Cloudflare-Change-Ledger.md',
-    'docs\operations\Server-Operations-Plan.md',
-    'docs\operations\Server-Setup-SSOT.md'
+    'docs\operations\Production-Server.md',
+    'docs\operations\Desktop-Audio.md'
 )
 
 $runtimeFiles = @(
