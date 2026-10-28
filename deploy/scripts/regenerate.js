@@ -423,9 +423,18 @@ function apply(results, report, root) {
             }
         }
     } catch (e) {
+        // Undo every change. A restore that fails too is named, and the backup that still holds its
+        // original is kept for the operator.
+        const unrestored = [];
         for (const { abs, saved, existed } of done.reverse()) {
-            try { if (existed) fs.copyFileSync(saved, abs); else fs.rmSync(abs, { force: true }); fs.rmSync(abs + '.regen-tmp', { force: true }); } catch (ignored) { }
+            try {
+                if (existed) fs.copyFileSync(saved, abs); else fs.rmSync(abs, { force: true });
+                fs.rmSync(abs + '.regen-tmp', { force: true });
+            } catch (restoreError) {
+                unrestored.push(abs + (existed ? ' (original kept as ' + saved + ')' : '') + ': ' + restoreError.message);
+            }
         }
+        if (unrestored.length) fail('write failed (' + e.message + ') and ' + unrestored.length + ' file(s) could not be restored; the backup ' + backup + ' is kept:\n  ' + unrestored.join('\n  '));
         fs.rmSync(backup, { recursive: true, force: true });
         fail('write failed, every file restored: ' + e.message);
     }
