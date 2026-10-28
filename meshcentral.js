@@ -20,6 +20,9 @@ const { zipExtract, moveExtractedFolders } = require('./backup.js');
 // If app metrics is available
 if (process.argv[2] == '--launch') { try { require('appmetrics-dash').monitor({ url: '/', title: 'MeshCentral', port: 88, host: '127.0.0.1' }); } catch (ex) { } }
 
+// Fork: printed by a child that refused to start (obj.fatalStartupError); its parent then exits with 1.
+const FATAL_STARTUP_MARKER = 'Server fatal startup error, not restarting...';
+
 function CreateMeshCentralServer(config, args) {
     const obj = {};
     obj.db = null;
@@ -611,6 +614,14 @@ function CreateMeshCentralServer(config, args) {
         }
     };
 
+    // Fork: a startup refusal that a restart cannot fix. The errors go to stderr; the marker on stdout tells a
+    // parent started without --launch to stop rather than restart this child every 5 seconds.
+    obj.fatalStartupError = function (lines) {
+        for (const line of lines) { console.error('ERROR: ' + line); }
+        console.log(FATAL_STARTUP_MARKER);
+        process.exit(1);
+    };
+
     // Launch MeshCentral as a child server and monitor it.
     obj.launchChildServer = function (startArgs) {
         const child_process = require('child_process');
@@ -623,6 +634,11 @@ function CreateMeshCentralServer(config, args) {
             } else if (childProcess.xrestart == 2) {
                 console.log('Expected exit...');
                 process.exit(); // User CTRL-C exit.
+            } else if (childProcess.xrestart == 4) {
+                // Fork: the child refused to start (agent binary pins or module version manifest). Restarting cannot
+                // fix that, so stop with a failure the service manager and the release controller can see.
+                console.log('ERROR: MeshCentral refused to start; not restarting.');
+                process.exit(1);
             } else if (childProcess.xrestart == 3) {
                 // Server self-update exit
                 var version = '';
@@ -683,6 +699,7 @@ function CreateMeshCentralServer(config, args) {
             if (data.indexOf('Updating settings folder...') >= 0) { childProcess.xrestart = 1; }
             else if (data.indexOf('Updating server certificates...') >= 0) { childProcess.xrestart = 1; }
             else if (data.indexOf('Server Ctrl-C exit...') >= 0) { childProcess.xrestart = 2; }
+            else if (data.indexOf(FATAL_STARTUP_MARKER) >= 0) { childProcess.xrestart = 4; }
             else if (data.indexOf('Starting self upgrade...') >= 0) { childProcess.xrestart = 3; }
             else if (data.indexOf('Server restart...') >= 0) { childProcess.xrestart = 1; }
             else if (data.indexOf('Starting self upgrade to: ') >= 0) {
@@ -1924,9 +1941,9 @@ function CreateMeshCentralServer(config, args) {
         // The fork serves only the agent binaries pinned in agents/agent-defaults.json and never downloads any.
         // prepare() only hashes local files, so wait for it; a missing or mismatched pin stops the server, like
         // the module-version manifest does.
-        try { await obj.agentDefaults.prepare(); } catch (ex) { console.error('ERROR: fork agent binaries: ' + ((ex && ex.message) || ex)); process.exit(1); return; }
+        try { await obj.agentDefaults.prepare(); } catch (ex) { obj.fatalStartupError(['fork agent binaries: ' + ((ex && ex.message) || ex)]); return; }
         const agentDefaultsErrors = obj.agentDefaults.status().errors;
-        if (agentDefaultsErrors.length > 0) { for (const error of agentDefaultsErrors) { console.error('ERROR: fork agent binaries: ' + error); } process.exit(1); return; }
+        if (agentDefaultsErrors.length > 0) { obj.fatalStartupError(agentDefaultsErrors.map(function (error) { return 'fork agent binaries: ' + error; })); return; }
         obj.agentDefaults.start();
 
         // Load the list of MeshCentral tools
@@ -2978,7 +2995,7 @@ function CreateMeshCentralServer(config, args) {
     // the version is newer than its own copy, so a version must never come from file or install times.
     // A missing manifest, or a served module it does not list, stops the server and names the module.
     const moduleVersionPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-    function moduleVersionFailure(message) { console.error('ERROR: agent core module versions: ' + message); process.exit(1); }
+    function moduleVersionFailure(message) { obj.fatalStartupError(['agent core module versions: ' + message]); }
     function readModuleVersions() {
         const manifestPath = obj.path.join(__dirname, 'agents', 'module-versions.json');
         var manifest = null;
