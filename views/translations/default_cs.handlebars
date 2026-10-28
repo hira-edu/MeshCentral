@@ -29,6 +29,7 @@
     <script type="text/javascript" src="scripts/agent-redir-ws-0.1.1{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/agent-redir-rtc-0.1.0{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/agent-desktop-0.0.2{{{min}}}.js"></script>
+    <script type="text/javascript" src="scripts/agent-desktop-audio-control-0.0.1.js"></script>
     <script type="text/javascript" src="scripts/agent-rdp-0.0.1{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/qrcode.min.js"></script>
     <script type="text/javascript" src="scripts/xterm{{{min}}}.js"></script>
@@ -771,6 +772,7 @@
                             <div class="deskareaicon" title="Otočit doleva" onclick="drotate(-1)">↺</div>
                             <div class="deskareaicon" title="Otočit doprava" onclick="drotate(1)">↻</div>
                             <div id="deskRecordIcon" class="deskareaicon" title="Server tuto relaci nahrává" style="display:none;background-color:red;width:12px;height:12px;border-radius:6px;margin-top:5px"></div>
+                            <span id="deskAudioMount" hidden=""></span>
                             <input id="deskFocusBtn" type="button" title="Vyp/zap. režim zaměření, kdy je aktualizována pouze oblast kolem myši" onkeypress="return false" onkeydown="return false" value="Zaměřit vše" onclick="deskToggleFocus()" style="margin-right:3px;display:none">
                             <input id="deskActionsBtn" type="button" title="Provést na zařízení akci napájení" onkeypress="return false" onkeydown="return false" value="Akce" onclick="deviceActionFunction()" class="mR">
                             <input id="deskActionsSettings" type="button" value="Nastavení…" title="Upravit nastavení vzdálené plochy" onkeypress="return false" onkeydown="return false" onclick="showDesktopSettings()" class="mR">

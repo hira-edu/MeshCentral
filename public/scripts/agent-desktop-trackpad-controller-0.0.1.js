@@ -317,14 +317,17 @@ var MeshTrackpadController = (function () {
             if (e.type !== 'touchcancel' && e.cancelable !== false) e.preventDefault();
             e.stopPropagation();
             call(adapter.onUserActivity);
+            // Taken before prepare: a touch that closes a page menu (which blocks input) sends nothing.
+            var blocked = inputBlocked(m);
             if (e.type === 'touchstart') {
-                // What the page's own dtouchstart would have done for a new touch (stop its timers,
-                // close its menus), and the pinch anchor for a two-finger start.
-                call(adapter.prepare);
+                // What the page's own dtouchstart, or the click this touch no longer makes, would have
+                // done for a new touch (stop its timers, close its menus), and the pinch anchor for a
+                // two-finger start.
+                call(function () { adapter.prepare(e); });
                 var t = e.touches;
                 zoomAnchor = (t && t.length === 2) ? { x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 } : null;
             }
-            if (inputBlocked(m)) { if (engine.isActive()) teardown(); return; }
+            if (blocked) { if (engine.isActive()) teardown(); return; }
             var g = geometry();
             if (!g) return;
             var key = g.width + 'x' + g.height + 'r' + (g.rotation || 0);

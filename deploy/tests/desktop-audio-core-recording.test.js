@@ -10,10 +10,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const DESKTOP_AUDIO_PROTOCOL = 20;
 
-// Mirrors meshrelay.js (meshcentral 1.2.5, performRelay): the predicate that decides whether a
+// Mirrors meshrelay.js (performRelay): the predicate that decides whether a
 // relay session of protocol p is written to a .mcrec file. The per-user / per-group filters that
 // follow it only narrow the set of sessions, so they cannot be relied on to exclude a protocol.
 function relayRecordsProtocol(domain, protocol) {
@@ -79,7 +80,27 @@ test('the committed config template never records desktop audio', () => {
     assert.deepEqual(domainsRecordingAudio(template), []);
 });
 
-test('the installed relay still decides recording the way this check models it', { skip: !fs.existsSync(path.join(__dirname, '../node_modules/meshcentral/meshrelay.js')) }, () => {
-    const relay = fs.readFileSync(path.join(__dirname, '../node_modules/meshcentral/meshrelay.js'), 'utf8');
-    assert.match(relay, /domain\.sessionrecording == true \|\| \(\(typeof domain\.sessionrecording == 'object'\) && \(\(domain\.sessionrecording\.protocols == null\) \|\| \(domain\.sessionrecording\.protocols\.indexOf\(parseInt\(obj\.req\.query\.p\)\) >= 0\)\)\)/);
+// The relay this repository ships (meshrelay.js at its root, which the deployment installs) decides
+// recording with one condition in performRelay. It is taken out of the source and executed for every
+// case below, so a change to the relay's rule fails here instead of drifting from the model.
+function relayRecordingDecision() {
+    const relay = fs.readFileSync(path.join(__dirname, '../../meshrelay.js'), 'utf8');
+    const matches = [...relay.matchAll(/if \((\(obj\.req\.query\.p != null\)[^\r\n]*?)\) \{ recordSession = true; \}/g)];
+    assert.equal(matches.length, 1, 'meshrelay.js decides relay recording in exactly one place');
+    const decision = new vm.Script('(' + matches[0][1] + ')', { filename: 'meshrelay.js recording decision' });
+    return (domain, protocol) => decision.runInNewContext({ domain, sessionUser: { _id: 'user//test' }, obj: { req: { query: { p: String(protocol), nodeid: 'node//test' } } } });
+}
+
+test('the shipped relay decides recording exactly as this check models it', () => {
+    const relayRecords = relayRecordingDecision();
+    const domains = [
+        { sessionrecording: true }, { sessionrecording: {} }, { sessionrecording: { onlyselectedusers: true } },
+        { sessionrecording: { protocols: [1, 2, 5, 6, 8, 9, 10, 100, 101, 200] } }, { sessionrecording: { protocols: [2, 20] } },
+        { sessionrecording: { protocols: [2] } }, { sessionrecording: { protocols: [] } }, { sessionrecording: false }, {}
+    ];
+    for (const domain of domains) {
+        for (const protocol of [1, 2, 5, DESKTOP_AUDIO_PROTOCOL, 200]) {
+            assert.equal(!!relayRecords(domain, protocol), relayRecordsProtocol(domain, protocol), JSON.stringify(domain) + ' protocol ' + protocol);
+        }
+    }
 });

@@ -29,6 +29,7 @@
     <script type="text/javascript" src="scripts/agent-redir-ws-0.1.1{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/agent-redir-rtc-0.1.0{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/agent-desktop-0.0.2{{{min}}}.js"></script>
+    <script type="text/javascript" src="scripts/agent-desktop-audio-control-0.0.1.js"></script>
     <script type="text/javascript" src="scripts/agent-rdp-0.0.1{{{min}}}.js"></script>
     <script type="text/javascript" src="scripts/qrcode.min.js"></script>
     <script type="text/javascript" src="scripts/xterm{{{min}}}.js"></script>
@@ -771,6 +772,7 @@
                             <div class="deskareaicon" title="बायीं ओर घुमाओ" onclick="drotate(-1)">↺</div>
                             <div class="deskareaicon" title="दाएं घुमाएं" onclick="drotate(1)">↻</div>
                             <div id="deskRecordIcon" class="deskareaicon" title="सर्वर इस सत्र की रिकॉर्डिंग कर रहा है" style="display:none;background-color:red;width:12px;height:12px;border-radius:6px;margin-top:5px"></div>
+                            <span id="deskAudioMount" hidden=""></span>
                             <input id="deskFocusBtn" type="button" title="फोकस मोड को टॉगल करें, जब सक्रिय केवल माउस के आसपास के क्षेत्र को अपडेट किया जाता है" onkeypress="return false" onkeydown="return false" value="सभी पर ध्यान दें" onclick="deskToggleFocus()" style="margin-right:3px;display:none">
                             <input id="deskActionsBtn" type="button" title="डिवाइस पर पावर क्रियाएं करें" onkeypress="return false" onkeydown="return false" value="क्रिया" onclick="deviceActionFunction()" class="mR">
                             <input id="deskActionsSettings" type="button" value="समायोजन..." title="दूरस्थ डेस्कटॉप सेटिंग्स संपादित करें" onkeypress="return false" onkeydown="return false" onclick="showDesktopSettings()" class="mR">
