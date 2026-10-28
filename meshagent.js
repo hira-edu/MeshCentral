@@ -497,7 +497,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                 } else {
                     // Check that the server hash matches our own web certificate hash (SHA384)
                     obj.agentSeenCerthash = msg.substring(2, 50);
-                    if ((getWebCertHash(domain) != obj.agentSeenCerthash) && (getWebCertFullHash(domain) != obj.agentSeenCerthash) && (parent.defaultWebCertificateHash != obj.agentSeenCerthash) && (parent.defaultWebCertificateFullHash != obj.agentSeenCerthash) && !isHistoricalWebCertHash(domain, obj.agentSeenCerthash)) {
+                    if (!isServerWebCertHash(domain, obj.agentSeenCerthash) && !isHistoricalWebCertHash(domain, obj.agentSeenCerthash)) {
                         if (Array.isArray(domain.agentwebcerturls) && domain.agentwebcerturls.length > 0) {
                             require('./agentcertificatehistory').refreshDomain(domain).then(function (changed) {
                                 if (!changed) return;
@@ -1187,6 +1187,12 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
         return parent.webCertificateFullHash;
     }
 
+    // The web certificate hashes stock MeshCentral admits: this domain's key and full-certificate
+    // hashes and the default certificate's.
+    function isServerWebCertHash(domain, hash) {
+        return (getWebCertHash(domain) == hash) || (getWebCertFullHash(domain) == hash) || (parent.defaultWebCertificateHash == hash) || (parent.defaultWebCertificateFullHash == hash);
+    }
+
     // Only operator-configured SHA384 pins extend TLS admission; agent reports
     // never add trust. The normal nonce/signature verification still follows.
     function isHistoricalWebCertHash(domain, hash) {
@@ -1243,8 +1249,9 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
             }
         }
 
-        // Audit compatibility only after proof of the agent's private key.
-        if (isHistoricalWebCertHash(domain, obj.agentSeenCerthash)) {
+        // Audit, after proof of the agent's private key, only the admissions the pin list alone made:
+        // these count the agents that still need it. A stock match is not audited, even when pinned.
+        if (!isServerWebCertHash(domain, obj.agentSeenCerthash) && isHistoricalWebCertHash(domain, obj.agentSeenCerthash)) {
             console.log('[AGENT_CERT_COMPAT] verified=1 domain=' + domain.id + ' node=' + obj.unauth.nodeid + ' webHash=' + Buffer.from(obj.agentSeenCerthash, 'binary').toString('hex'));
         }
 
