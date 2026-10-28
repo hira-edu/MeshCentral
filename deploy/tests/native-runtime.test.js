@@ -678,7 +678,6 @@ test('deployment wiring loads the local plugin from the pinned MeshCentral data 
     assert.deepEqual(config.settings.plugins.list, ['nativeruntime']);
     assert.equal(Object.hasOwn(config.settings.plugins, 'nativeruntime'), false);
     assert.equal(Object.hasOwn(config.settings.plugins, 'stfdeploy'), false, 'stfdeploy is retired (D16)');
-    assert.equal(config.domains[''].WebPublicPath, './meshcentral-data/public');
 
     const custom = fs.readFileSync(path.join(root, 'meshcentral-web', 'public', 'scripts', 'custom.js'), 'utf8');
     assert.match(custom, /plugin\/nativeruntime\/client\.js\?v=binary-lifecycle-v1/);
@@ -688,15 +687,7 @@ test('deployment wiring loads the local plugin from the pinned MeshCentral data 
     const agentServer = fs.readFileSync(path.join(repoRoot, 'meshagent.js'), 'utf8');
     assert.match(agentServer, /case 'nativeRuntimeResult':/);
     assert.match(agentServer, /callHook\('hook_processAgentData', command, obj, parent\)/);
-
-    const shell = fs.readFileSync(path.join(root, 'scripts', 'setup-local.sh'), 'utf8');
-    assert.match(shell, /for plugin in nativeruntime; do/);
-    assert.match(shell, /cp -R "\.\.\/plugins\/\$plugin\/\." "meshcentral-data\/plugins\/\$plugin\/"/);
-    assert.match(shell, /cp -R "meshcentral-web\/public\/\." "meshcentral-data\/public\/"/);
-    const powershell = fs.readFileSync(path.join(root, 'scripts', 'setup-local.ps1'), 'utf8');
-    assert.match(powershell, /@\('nativeruntime'\)/);
-    assert.match(powershell, /Join-Path '\.\.\/plugins' \$plugin/);
-    assert.match(powershell, /Join-Path 'meshcentral-web\/public' '\*'\) 'meshcentral-data\/public'/);
+    // The setup scripts' plugin staging and web layout are covered by deploy-layout.test.js.
 });
 
 test('the fork views carry the five anchors the plugin client attaches to', () => {

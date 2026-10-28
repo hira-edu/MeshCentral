@@ -28,7 +28,6 @@
   "domains": {
     "": {
       "Title": "MeshCentral",
-      "WebPublicPath": "./meshcentral-data/public",
       "NewAccounts": true,
       "Auth": "default",
       "UserNameIsEmail": false

@@ -64,6 +64,55 @@ test('postinstall fails when the data folder cannot be created', () => {
     }
 });
 
+function listFiles(dir, base = dir) {
+    return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = path.join(dir, entry.name);
+        return entry.isDirectory() ? listFiles(full, base) : [path.relative(base, full).replace(/\\/g, '/')];
+    });
+}
+
+test('custom.js is the only web override and the installed server reads it in place', () => {
+    // D11 and G4: custom.js is the only meshcentral-web/public file.
+    assert.deepEqual(listFiles(path.join(deployRoot, 'meshcentral-web')), ['public/scripts/custom.js']);
+    // The package installs into deploy/node_modules/meshcentral, and the server picks up
+    // ../../meshcentral-web/public from there, as production does. No WebPublicPath is needed.
+    const repoRoot = path.join(deployRoot, '..');
+    const server = fs.readFileSync(path.join(repoRoot, 'meshcentral.js'), 'utf8');
+    assert.match(server, /obj\.webPublicOverridePath = obj\.path\.join\(__dirname, '\.\.\/\.\.\/meshcentral-web\/public'\)/);
+    assert.equal(path.resolve(deployRoot, 'node_modules', 'meshcentral', '../../meshcentral-web/public'),
+        path.join(deployRoot, 'meshcentral-web', 'public'));
+    const template = JSON.parse(read('meshcentral-data/config.json.template'));
+    for (const [name, domain] of Object.entries(template.domains)) {
+        const keys = Object.keys(domain).map((key) => key.toLowerCase());
+        assert.equal(keys.includes('webpublicpath'), false, 'domain "' + name + '" must not redirect the web override');
+    }
+});
+
+test('setup-local stages no web overrides and refuses a stale data-dir copy', () => {
+    const shell = read('scripts/setup-local.sh');
+    const powershell = read('scripts/setup-local.ps1');
+    for (const [name, text] of [['setup-local.sh', shell], ['setup-local.ps1', powershell]]) {
+        assert.doesNotMatch(text, /\b(?:cp|Copy-Item)\b[^\n]*meshcentral-web/, name + ' must not copy the web override');
+        assert.doesNotMatch(text, /\b(?:cp|Copy-Item)\b[^\n]*meshcentral-data\/public/, name + ' must not write a data-dir web copy');
+    }
+    assert.match(shell, /if \[ -e meshcentral-data\/public \]; then[\s\S]*?exit 1\nfi/);
+    assert.match(powershell, /if \(Test-Path -LiteralPath 'meshcentral-data\/public'\) \{\s*throw /);
+});
+
+test('setup-local stages the nativeruntime plugin as an exact copy of the repository source', () => {
+    // pluginHandler.js loads plugins only from <datapath>/plugins, and the package does not ship
+    // plugins/ yet. Data-dir staging stays until the Stage 4 built-in loader (PRD-12).
+    const shell = read('scripts/setup-local.sh');
+    assert.match(shell, /rm -rf "meshcentral-data\/plugins\/\$plugin"\n\s*mkdir -p "meshcentral-data\/plugins"\n\s*cp -R "\.\.\/plugins\/\$plugin" "meshcentral-data\/plugins\/\$plugin"/);
+    const powershell = read('scripts/setup-local.ps1');
+    assert.match(powershell, /Remove-Item -LiteralPath \$destination -Recurse -Force/);
+    assert.match(powershell, /Copy-Item -LiteralPath \$source -Destination \$destination -Recurse/);
+    for (const text of [shell, powershell]) {
+        assert.match(text, /nativeruntime/);
+    }
+    assert.ok(fs.existsSync(path.join(deployRoot, '..', 'plugins', 'nativeruntime', 'nativeruntime.js')));
+});
+
 test('the wrapper carries none of the retired pre-fork deployment files', () => {
     // docker-compose.yml ran upstream 1.2.1 with mounts production never used (T31). The remote
     // scripts and the nginx config targeted /opt/meshcentral-app, Node 18 and an nginx edge; the
