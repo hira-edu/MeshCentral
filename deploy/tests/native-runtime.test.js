@@ -705,15 +705,14 @@ test('deployment wiring loads the local plugin from the pinned MeshCentral data 
     assert.match(powershell, /Join-Path 'meshcentral-web\/public' '\*'\) 'meshcentral-data\/public'/);
 });
 
-test('optional pinned-template contract: all five source anchors and shared scripts', { skip: !process.env.MESHCENTRAL_SOURCE }, () => {
-    const source = process.env.MESHCENTRAL_SOURCE;
-    assert.equal(JSON.parse(fs.readFileSync(path.join(source, 'package.json'))).version, '1.2.5');
+test('the fork views carry the five anchors the plugin client attaches to', () => {
+    assert.equal(JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version, '1.2.5');
     for (const [file, tag, id] of [
         ['default', 'span', 'connectbutton1span'], ['default3', 'div', 'connectbutton1span'],
         ['default-mobile', 'input', 'connectbutton1'], ['sharing', 'span', 'connectbutton1span'],
         ['sharing-mobile', 'input', 'connectbutton1']
     ]) {
-        const html = fs.readFileSync(path.join(source, 'views', file + '.handlebars'), 'utf8');
+        const html = fs.readFileSync(path.join(repoRoot, 'views', file + '.handlebars'), 'utf8');
         assert.match(html, new RegExp('<' + tag + '\\b[^>]*\\bid=["\\\']?' + id + '(?:["\\\']|[ >])'));
         assert.match(html, /\{\{\{customJSTags\}\}\}/);
     }
