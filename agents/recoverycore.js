@@ -960,19 +960,10 @@ function closeBasicFileDownload(request, socket) {
     delete request.downloadFile;
 }
 
+// Windows run commands that have not finished within this time are stopped and reported as timed out.
+var RUN_COMMANDS_TIMEOUT_MS = 300000;
 var recoveryRunCommandChild = null;
 function recoveryRunCommands(data) {
-    function terminalIsClosed(term) {
-        if (term == null || term._meshTerminalClosed === true) return true;
-        try { if (term.isBridgeClosed && term.isBridgeClosed()) return true; } catch (e) { }
-        return false;
-    }
-    function terminalClose(term) {
-        if (term == null) return;
-        try { if (term.closeBridge) { term.closeBridge(); return; } } catch (e) { }
-        try { if (term.end) { term.end(); return; } } catch (e2) { }
-        try { if (term.kill) term.kill(); } catch (e3) { }
-    }
     function sendResult(text) {
         if (data.reply) {
             require('MeshAgent').SendCommand({ action: 'msg', type: 'runcommands', result: text, sessionid: data.sessionid, responseid: data.responseid });
@@ -984,98 +975,33 @@ function recoveryRunCommands(data) {
     if (process.platform != 'win32') { sendResult('Recovery run commands are only available on Windows.'); return; }
     if (data.runAsUser == null) data.runAsUser = 0;
     if ((data.runAsUser !== 0) && (data.runAsUser !== 1) && (data.runAsUser !== 2)) { sendResult('Invalid runAsUser value.'); return; }
-    if (recoveryRunCommandChild != null) {
-        if (terminalIsClosed(recoveryRunCommandChild)) {
-            terminalClose(recoveryRunCommandChild);
-            recoveryRunCommandChild = null;
-        } else {
-            sendResult("Run commands can't execute, already busy.");
-            return;
-        }
-    }
+    if (recoveryRunCommandChild != null) { sendResult("Run commands can't execute, already busy."); return; }
 
     var commandText = Array.isArray(data.cmds) ? data.cmds.join('\r\n') : ((data.cmds == null) ? '' : ('' + data.cmds));
     var targetSessionId = null;
+    var sessionError = null;
     if (data.runAsUser > 0) {
-        try { targetSessionId = require('user-sessions').consoleUid(); } catch (e) { }
+        try { targetSessionId = require('user-sessions').consoleUid(); } catch (e) { sessionError = e; }
         if ((typeof targetSessionId != 'number') || (targetSessionId < 0)) targetSessionId = null;
     }
-    if (data.runAsUser == 2 && targetSessionId == null) { sendResult('Run commands user session is unavailable.'); return; }
+    if (data.runAsUser == 2 && targetSessionId == null) { sendResult('Run commands user session is unavailable' + ((sessionError != null) ? (': ' + sessionError) : '.')); return; }
 
-    var replydata = '';
-    var completed = false;
-    var failed = false;
-    var inputSent = false;
-    var timer = null;
-    var marker = '\x1b]MeshConsoleBridgeReady\x07';
-    var markerSeen = false;
-    var markerBuffer = '';
-    function bridgeState() {
-        if (recoveryRunCommandChild == null) return ' bridge=missing';
-        return (' bridgeReady=' + (recoveryRunCommandChild._meshTerminalReady === true) +
-            ' bridgeClosed=' + (recoveryRunCommandChild._meshTerminalClosed === true) +
-            ' markerSeen=' + markerSeen +
-            ' mode=' + recoveryRunCommandChild._meshTerminalMode +
-            ' tokenMode=' + recoveryRunCommandChild._meshTerminalTokenMode);
-    }
-    function complete() {
-        if (completed) return;
-        completed = true;
-        if (timer != null) { try { clearTimeout(timer); } catch (e) { } timer = null; }
-        if (data.reply) { sendResult(replydata); } else { sendConsoleText(failed ? 'Run commands failed.' : 'Run commands completed.', data.sessionid); }
-        recoveryRunCommandChild = null;
-    }
-    function sendInput() {
-        var term = recoveryRunCommandChild;
-        if (inputSent || completed || term == null) return;
-        inputSent = true;
-        try {
-            term.writeBridgeInput(commandText + '\r\n', function () { try { if (term.closeInput) term.closeInput(); } catch (e) { } });
-        } catch (e) {
-            failed = true;
-            replydata += 'Windows run commands failed writing to MeshConsoleBridgeW: ' + e.toString() + bridgeState();
-            if (!data.reply) sendConsoleText(replydata, data.sessionid);
-            terminalClose(term);
-            complete();
-        }
-    }
-    function appendOutput(chunk) {
-        var text = '';
-        try { text = chunk.toString(); } catch (e) { text = '' + chunk; }
-        if (!markerSeen) {
-            markerBuffer += text;
-            var markerIndex = markerBuffer.indexOf(marker);
-            if (markerIndex < 0) return;
-            markerSeen = true;
-            text = markerBuffer.substring(0, markerIndex) + markerBuffer.substring(markerIndex + marker.length);
-            markerBuffer = '';
-            sendInput();
-        }
-        if (text.length == 0) return;
-        replydata += text;
-        if (!data.reply) sendConsoleText(text, data.sessionid);
-    }
-
+    // The same win-terminal helper as the main core; the script runs in PowerShell.
     try {
-        var method = (data.runAsUser > 0 && targetSessionId != null) ? 'RunPowerShellCommandAsUser' : 'RunPowerShellCommand';
-        recoveryRunCommandChild = require('win-terminal')[method](80, 25, targetSessionId);
+        recoveryRunCommandChild = require('win-terminal').RunCommand(commandText, {
+            targetSessionId: targetSessionId,
+            timeoutMs: RUN_COMMANDS_TIMEOUT_MS,
+            onOutput: data.reply ? null : function (text) { sendConsoleText(text, data.sessionid); }
+        }, function (result) {
+            recoveryRunCommandChild = null;
+            var failure = result.ok ? '' : ((result.timedOut ? 'Windows run commands timed out: ' : 'Windows run commands failed: ') + result.error);
+            if (data.reply) { sendResult(result.output + failure); }
+            else { sendConsoleText(result.ok ? 'Run commands completed.' : failure, data.sessionid); }
+        });
         recoveryRunCommandChild.descriptorMetadata = 'RecoveryUserCommandsPowerShell';
-        if (recoveryRunCommandChild.onBridgeData) recoveryRunCommandChild.onBridgeData(appendOutput); else recoveryRunCommandChild.on('data', appendOutput);
-        recoveryRunCommandChild.on('error', function (error) { failed = true; replydata += 'Windows run commands failed through MeshConsoleBridgeW: ' + error.toString() + bridgeState(); if (!data.reply) sendConsoleText(replydata, data.sessionid); complete(); });
-        recoveryRunCommandChild.on('close', complete);
-        timer = setTimeout(function () {
-            failed = true;
-            replydata += 'Windows run commands timed out through MeshConsoleBridgeW.' + bridgeState();
-            if (!data.reply) sendConsoleText(replydata, data.sessionid);
-            terminalClose(recoveryRunCommandChild);
-            complete();
-        }, 300000);
-        if (recoveryRunCommandChild.onBridgeReady) recoveryRunCommandChild.onBridgeReady(sendInput);
-        else if (recoveryRunCommandChild.isBridgeReady && recoveryRunCommandChild.isBridgeReady()) sendInput();
     } catch (e) {
-        replydata += 'Windows run commands failed before MeshConsoleBridgeW launch: ' + e.toString();
-        sendResult(replydata);
         recoveryRunCommandChild = null;
+        sendResult('Windows run commands failed before MeshConsoleBridgeW launch: ' + e.toString());
     }
 }
 
