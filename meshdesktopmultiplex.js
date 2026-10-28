@@ -986,8 +986,6 @@ function CreateDesktopMultiplexor(parent, domain, nodeid, id, func) {
             case 7: // Screen Size, clear the screen state and compute the tile count
                 if (data.length < 8) break;
                 var width = data.readUInt16BE(4), height = data.readUInt16BE(6);
-                var sameSize = ((obj.width === width) && (obj.height === height));
-                parent.parent.debug('relay', 'DesktopRelay: Reanchoring screen packet ' + width + 'x' + height + ' sameSize=' + sameSize + ' viewers=' + obj.viewers.length + ' node=' + obj.nodeid);
                 obj.counter++;
                 obj.lastScreenSizeCmd = data;
                 obj.lastScreenSizeCounter = obj.counter;
