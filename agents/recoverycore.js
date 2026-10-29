@@ -1160,7 +1160,8 @@ require('MeshAgent').AddCommandHandler(function (data)
                                                                     var requestedSessionId = ((this.httprequest.xoptions != null) && (typeof this.httprequest.xoptions.tsid == 'number')) ? this.httprequest.xoptions.tsid : null;
                                                                     try { targetSessionId = require('win-terminal').SelectUserSession(requestedSessionId); }
                                                                     catch (ex) {
-                                                                        this.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: 'Failed to start remote terminal session, ' + ex.toString(), msgid: 2 }));
+                                                                        // Shown as this text, not "Denied" (msgid 2 is only for a consent refusal).
+                                                                        this.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: 'Failed to start remote terminal session, ' + ex.toString() }));
                                                                         this.end();
                                                                         return;
                                                                     }

@@ -143,7 +143,8 @@ test('recoverycore.js: a user terminal without a user session is refused, not st
     const run = runRecovery(9, null, { active: [], console: new Error('Nobody logged in') });
     assert.deepEqual(run.started, []);
     assert.equal(run.ended, 1);
-    assert.deepEqual(JSON.parse(JSON.stringify(run.written)), [{ ctrlChannel: '102938', type: 'console', msg: 'Failed to start remote terminal session, Error: no active user session found', msgid: 2 }]);
+    // No msgid: the viewer shows this reason (msgid 2 would render it as "Denied", which is only for a consent refusal).
+    assert.deepEqual(JSON.parse(JSON.stringify(run.written)), [{ ctrlChannel: '102938', type: 'console', msg: 'Failed to start remote terminal session, Error: no active user session found' }]);
 });
 
 test('recoverycore.js: the user terminal starts in the selected or console session', () => {

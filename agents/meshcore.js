@@ -2879,8 +2879,9 @@ function terminal_consent_ask(ws) {
 
 function terminal_promise_connection_rejected(e)
 {
-    // FAILED to connect terminal
-    this.ws.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: e.toString(), msgid: 2 }));
+    // FAILED to connect terminal. Sent without a msgid so the viewer shows this text: msgid 2 renders as
+    // "Denied", which is only for a local user refusing consent.
+    this.ws.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: e.toString() }));
     this.ws.end();
 }
 
@@ -2899,7 +2900,8 @@ function terminal_promise_connection_resolved(term)
         term.on('error', function (error) {
             var tunnel = this.tunnel;
             if (tunnel != null) {
-                tunnel.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: error.toString(), msgid: 2 }));
+                // The bridge failed: show its error, not "Denied" (msgid 2 is only for a consent refusal).
+                tunnel.write(JSON.stringify({ ctrlChannel: '102938', type: 'console', msg: 'Remote terminal session failed, ' + error.toString() }));
                 tunnel.end();
             }
         });
