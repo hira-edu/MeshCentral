@@ -399,6 +399,12 @@ function compare(results, committedTree) {
     return report;
 }
 
+// Removes abs if it exists. A path through a component that is not a directory (ENOTDIR, which Linux
+// reports where Windows reports ENOENT) cannot exist either, so both mean there is nothing to remove.
+function removeIfPresent(abs) {
+    try { fs.rmSync(abs); } catch (e) { if ((e.code !== 'ENOENT') && (e.code !== 'ENOTDIR')) throw e; }
+}
+
 // Apply every write and delete, or none: originals are kept until all succeeded.
 function apply(results, report, root) {
     const backup = fs.mkdtempSync(path.join(os.tmpdir(), 'meshcentral-regen-backup-'));
@@ -424,8 +430,8 @@ function apply(results, report, root) {
         const unrestored = [];
         for (const { abs, saved, existed } of done.reverse()) {
             try {
-                if (existed) fs.copyFileSync(saved, abs); else fs.rmSync(abs, { force: true });
-                fs.rmSync(abs + '.regen-tmp', { force: true });
+                if (existed) fs.copyFileSync(saved, abs); else removeIfPresent(abs);
+                removeIfPresent(abs + '.regen-tmp');
             } catch (restoreError) {
                 unrestored.push(abs + (existed ? ' (original kept as ' + saved + ')' : '') + ': ' + restoreError.message);
             }
