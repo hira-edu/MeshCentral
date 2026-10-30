@@ -1764,6 +1764,9 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                                 refuseAgentUpdateRequest(command, "Windows console agents have no supported self-update; update the installed service agent.");
                             } else if ((obj.agentUpdateRequestPending === true) || (obj.agentUpdateTransferPending === true) || (obj.agentUpdate != null)) {
                                 refuseAgentUpdateRequest(command, "an agent update is already in progress.");
+                            } else if ((obj.agentInfo.capabilities & 0x400) == 0) {
+                                // compareAgentBinaryHash would withhold the package; say so instead of negotiating silently.
+                                refuseAgentUpdateRequest(command, "this agent cannot run the lifecycle update host (capability 0x400 missing); reinstall it with a current agent package.");
                             } else {
                                 obj.agentUpdateRequestPending = true;
                                 delete obj.agentUpdateFailureHash;
@@ -1815,6 +1818,7 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
                 case 'agentupdatefailed': {
                     // Native activation/hash/unpack failed after command 10 cleared the
                     // running core. Restore the normal core without requiring reconnect.
+                    if (obj.nodeid != null) { parent.parent.debug('agentupdate', "Agent reported a failed native update; restoring its core, NodeID=0x" + obj.nodeid.substring(0, 16)); }
                     delete obj.agentUpdateRequestPending;
                     delete obj.agentUpdateTransferPending;
                     if (obj.agentCoreUpdateTaskId != null) {
@@ -2432,7 +2436,10 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
         // If this is a temporary agent and the server is set to not update temporary agents, don't update the agent.
         if ((obj.agentInfo) && (obj.agentInfo.capabilities & 0x20) && (args.temporaryagentupdate === false)) return 0;
         // An all-zero hash means the agent will ignore any transfer, so never start one, not even in test mode.
-        if (agentHash == '\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0') return 0;
+        if (agentHash == '\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0') {
+            if (obj.nodeid != null) { parent.parent.debug('agentupdate', "Native update not offered, agent reported an all-zero hash (updates disabled, not ready, or a package still staged), NodeID=0x" + obj.nodeid.substring(0, 16)); }
+            return 0;
+        }
         // The Windows package installs only through the lifecycle host. A Windows service agent
         // that cannot run it hands the package to its legacy updater, which overwrites the
         // service EXE with a binary that is not an SCM host and leaves the device offline.
@@ -2457,7 +2464,10 @@ module.exports.CreateMeshAgent = function (parent, db, ws, req, args, domain) {
             (obj.agentUpdateRequestPending !== true) &&
             ((agentExeInfo.hash == obj.agentUpdateFailureHash) ||
              (agentExeInfo.fileHash != null && agentExeInfo.fileHash == obj.agentUpdateFailureHash) ||
-             (agentExeInfo.zhash != null && agentExeInfo.zhash == obj.agentUpdateFailureHash))) return 0;
+             (agentExeInfo.zhash != null && agentExeInfo.zhash == obj.agentUpdateFailureHash))) {
+            if (obj.nodeid != null) { parent.parent.debug('agentupdate', "Native update skipped, agent reported this package failed and its retry is not due, NodeID=0x" + obj.nodeid.substring(0, 16)); }
+            return 0;
+        }
         // If the hash matches or is null, no update required.
         if ((agentExeInfo.hash == agentHash) ||
             (agentExeInfo.fileHash != null && agentExeInfo.fileHash == agentHash)) return 0;

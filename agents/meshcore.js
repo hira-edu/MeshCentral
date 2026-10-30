@@ -2071,6 +2071,12 @@ function handleServerCommand(data) {
             }
             case 'uninstallagent':
                 // Uninstall this agent
+                if (process.platform == 'win32') {
+                    // The Windows agent refuses the -b64exec/service-manager uninstall below; only its native lifecycle host uninstalls. Report it instead of failing silently.
+                    MeshServerLog('Remote uninstall is not supported on Windows agents. Uninstall locally as administrator with the agent installer or "<agent exe> -uninstall".');
+                    sendAgentMessage('Remote uninstall is not supported on Windows agents. Uninstall locally as administrator with the agent installer or "<agent exe> -uninstall".', 3);
+                    break;
+                }
                 var agentName = process.platform == 'win32' ? 'Mesh Agent' : 'meshagent';
                 try {
                     agentName = require('MeshAgent').serviceName;
@@ -6230,6 +6236,10 @@ function processConsoleCommand(cmd, args, rights, sessionid) {
                 break;
             }
             case 'uninstallagent': // Uninstall this agent
+                if (process.platform == 'win32') {
+                    response = 'Remote uninstall is not supported on Windows agents. Uninstall locally as administrator with the agent installer or "<agent exe> -uninstall".';
+                    break;
+                }
                 var agentName = process.platform == 'win32' ? 'Mesh Agent' : 'meshagent';
                 try {
                     agentName = require('MeshAgent').serviceName;
