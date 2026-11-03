@@ -2,23 +2,23 @@
   "schema": "meshcentral-fork-agents/1",
   "build": {
     "repository": "hira-edu/MeshAgent",
-    "commit": "83c10135363754232fb973ae2f646b1143db98c4"
+    "commit": "7c277691a090ec7a5a15e1fc079b45f5172872f2"
   },
   "files": [
     {
       "filename": "MeshService.exe",
-      "size": 14883328,
-      "sha384": "2000d14d4ecd840ef87de84d55159132acd48679c1f1206259ef3f7f499246e812fb995c1efc49aaeca52058affcb92a"
+      "size": 14884864,
+      "sha384": "616d32a2fae4b4dd38df8a89b9a8eddb3be9fcbe4b6625072dad97fd8babae98a65c50e2ecf135c36ad3eb452440d95d"
     },
     {
       "filename": "MeshService64.exe",
-      "size": 15713792,
-      "sha384": "74f283f9b85802c8aff6d76c1a43bba38f1a99a62ba78b64b7fd0b5006fe8b420d51e5a1fcc11ee41470125612366220"
+      "size": 15715328,
+      "sha384": "b34e3c16baac065cbbbcc235bc8a630d60c2d236011cb12de5573fd26aad8f2337763aab9b0b6007d388414b28092839"
     },
     {
       "filename": "MeshServiceARM64.exe",
-      "size": 17574400,
-      "sha384": "b112f1ac0e2f3704c5cc1d3e98f34364b0604ec580eb61fdf9ef8fe3d7767b90f7b34192388bcaed56ca3ce263d4cf6e"
+      "size": 17575424,
+      "sha384": "6a158c4a3a8504a4fef246d10afb6f86bea1aa8ac990f02467fb7cf063877d44e250c24ee4dc00091fd7cd75de50be62"
     }
   ]
 }
